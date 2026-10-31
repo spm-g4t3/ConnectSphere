@@ -1,6 +1,7 @@
 // The venue screens on the shared UI standard: one h1 per page, the shared
-// Button for every button, and StatusBadge with one tone per meaning. The
-// venue service is mocked; the components are real.
+// Button for every button, StatusBadge with one tone per meaning, and the
+// shared loading, empty, error and date formats. The venue service is
+// mocked; the components are real.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
@@ -16,6 +17,7 @@ import BlockConflictList from "../../src/components/BlockConflictList.jsx";
 import VenueHoldsPanel from "../../src/components/VenueHoldsPanel.jsx";
 import VenueHoldForm from "../../src/components/VenueHoldForm.jsx";
 import VenueCalendar from "../../src/components/VenueCalendar.jsx";
+import BlockHistory from "../../src/components/BlockHistory.jsx";
 import {
   getHoldCandidates,
   getVenueBlockHistory,
@@ -26,6 +28,8 @@ import {
   getVenueHistory,
   listVenueBlocks,
   listVenueHolds,
+  removeVenueBlock,
+  retireVenue,
 } from "../../src/services/venueService";
 
 vi.mock("../../src/services/venueService", () => ({
@@ -238,7 +242,7 @@ const SCREENS = [
       const { container } = render(<VenueCalendar venueId={RETIRED.id} initialDate={WED_7_OCT} />);
       await screen.findByText("Retired");
       await user.click(screen.getByRole("button", { name: "Month" }));
-      await waitFor(() => expect(screen.queryByText("Loading calendar...")).not.toBeInTheDocument());
+      await waitFor(() => expect(screen.queryByText("Loading...")).not.toBeInTheDocument());
       return container;
     },
   ],
@@ -335,5 +339,374 @@ describe("SCRUM587 venue screens on the UI standard", () => {
       const scope = await renderScreen();
       expect(within(scope).getByText(label, { selector: `.ui-status-badge--${tone}` })).toBeInTheDocument();
     });
+  });
+});
+
+describe("SCRUM587_AC4 venue screens use the shared loading, empty, error and date formats", () => {
+  const never = () => new Promise(() => {});
+  const serverError = { response: { status: 500 } };
+  const sessionExpired = { response: { status: 401 } };
+
+  function renderCatalogueNow() {
+    return render(
+      <MemoryRouter>
+        <VenueCatalogue />
+      </MemoryRouter>,
+    );
+  }
+
+  function renderBlockHistory() {
+    return render(<BlockHistory venueId={VENUE.id} blockId={BLOCKS[0].id} refreshKey="r1" currentUserId="d1" />);
+  }
+
+  async function openHoldForm() {
+    const user = userEvent.setup();
+    render(<VenueHoldsPanel venue={VENUE} currentUserId="d1" />);
+    await user.click(await screen.findByRole("button", { name: "+ Place a hold" }));
+  }
+
+  it.each([
+    ["catalogue", () => vi.mocked(getVenueCatalogue).mockImplementation(never), renderCatalogueNow],
+    ["venue form", () => vi.mocked(getVenueDetails).mockImplementation(never), () => render(<VenueForm venueId={VENUE.id} onSaved={() => {}} />)],
+    [
+      "venue detail",
+      () => {
+        vi.mocked(getVenueDetails).mockImplementation(never);
+        vi.mocked(getVenueBookings).mockImplementation(never);
+        vi.mocked(getVenueHistory).mockImplementation(never);
+      },
+      () => render(<VenueDetail venue={VENUE} />),
+    ],
+    ["blocks", () => vi.mocked(listVenueBlocks).mockImplementation(never), () => render(<VenueBlocksPanel venue={VENUE} currentUserId="d1" />)],
+    ["block history", () => vi.mocked(getVenueBlockHistory).mockImplementation(never), renderBlockHistory],
+    ["holds", () => vi.mocked(listVenueHolds).mockImplementation(never), () => render(<VenueHoldsPanel venue={VENUE} currentUserId="d1" />)],
+    ["calendar", () => vi.mocked(getVenueCalendar).mockImplementation(never), () => render(<VenueCalendar venueId={VENUE.id} initialDate={WED_7_OCT} />)],
+  ])("SCRUM587_AC4_venue_screens_show_the_standard_loading_text (%s)", (_name, pend, renderScreen) => {
+    pend();
+    renderScreen();
+    const loading = screen.getAllByText("Loading...");
+    expect(loading.length).toBeGreaterThan(0);
+    loading.forEach((el) => expect(el).toHaveAttribute("role", "status"));
+  });
+
+  it.each([
+    [
+      "catalogue",
+      () => vi.mocked(getVenueCatalogue).mockResolvedValue([]),
+      renderCatalogueNow,
+      "No venues in the catalogue yet.",
+      "Add a venue with + Add new venue.",
+    ],
+    [
+      "venue bookings",
+      () => vi.mocked(getVenueBookings).mockResolvedValue([]),
+      () => render(<VenueDetail venue={VENUE} />),
+      "No bookings have been made against this venue.",
+      "A booking appears here when an Event Coordinator requests this venue.",
+    ],
+    [
+      "venue change history",
+      () => vi.mocked(getVenueHistory).mockResolvedValue([]),
+      () => render(<VenueDetail venue={VENUE} />),
+      "No changes have been recorded for this venue.",
+      "A change appears here when this venue's details are edited.",
+    ],
+    [
+      "blocks",
+      () => vi.mocked(listVenueBlocks).mockResolvedValue([]),
+      () => render(<VenueBlocksPanel venue={VENUE} currentUserId="d1" />),
+      "This venue has no blocks.",
+      "Add a block with + Add a block when the venue cannot be booked.",
+    ],
+    [
+      "blocks on a retired venue",
+      () => vi.mocked(listVenueBlocks).mockResolvedValue([]),
+      () => render(<VenueBlocksPanel venue={RETIRED} currentUserId="d1" />),
+      "This venue has no blocks.",
+      "A retired venue cannot be blocked.",
+    ],
+    [
+      "block history",
+      () => vi.mocked(getVenueBlockHistory).mockResolvedValue([]),
+      renderBlockHistory,
+      "No changes have been recorded for this block.",
+      "A change appears here when this block is edited.",
+    ],
+    [
+      "holds",
+      () => vi.mocked(listVenueHolds).mockResolvedValue([]),
+      () => render(<VenueHoldsPanel venue={VENUE} currentUserId="d1" />),
+      "This venue has no active holds.",
+      "Place a hold with + Place a hold to keep this venue for an Approved event.",
+    ],
+    [
+      "holds on a retired venue",
+      () => vi.mocked(listVenueHolds).mockResolvedValue([]),
+      () => render(<VenueHoldsPanel venue={RETIRED} currentUserId="d1" />),
+      "This venue has no active holds.",
+      "A retired venue cannot be held.",
+    ],
+    [
+      "calendar",
+      () => vi.mocked(getVenueCalendar).mockResolvedValue([]),
+      () => render(<VenueCalendar venueId={VENUE.id} initialDate={WED_7_OCT} />),
+      "Nothing booked or blocked in this period.",
+      "Use Previous or Next to look at another period.",
+    ],
+  ])(
+    "SCRUM587_AC4_empty_venue_lists_say_what_is_missing_and_what_to_do (%s)",
+    async (_name, empty, renderScreen, message, nextStep) => {
+      empty();
+      renderScreen();
+      const emptyState = (await screen.findByText(message)).closest(".ui-empty-state");
+      expect(emptyState).not.toBeNull();
+      expect(within(emptyState).getByText(nextStep)).toBeInTheDocument();
+    },
+  );
+
+  // Each load fails once, then answers; `shown` is what only the answer renders.
+  it.each([
+    ["catalogue", getVenueCatalogue, [VENUE], renderCatalogueNow, () => screen.findByText("Hall A")],
+    [
+      "venue form",
+      getVenueDetails,
+      VENUE,
+      () => render(<VenueForm venueId={VENUE.id} onSaved={() => {}} />),
+      () => screen.findByDisplayValue("Hall A"),
+    ],
+    [
+      "venue safety information",
+      getVenueDetails,
+      { ...VENUE, emergencyAccess: "Exit by the east stairs", knownRestrictions: null },
+      () => render(<VenueDetail venue={VENUE} />),
+      () => screen.findByText("Exit by the east stairs"),
+    ],
+    ["venue bookings", getVenueBookings, BOOKINGS, () => render(<VenueDetail venue={VENUE} />), () => screen.findByText("Approved")],
+    [
+      "venue change history",
+      getVenueHistory,
+      [{ id: "h1", changedAt: "2026-01-15T01:00:00Z", changedBy: null, oldValues: {}, newValues: { name: "Hall A" } }],
+      () => render(<VenueDetail venue={VENUE} />),
+      () => screen.findByText("Venue created"),
+    ],
+    [
+      "blocks",
+      listVenueBlocks,
+      BLOCKS,
+      () => render(<VenueBlocksPanel venue={VENUE} currentUserId="d1" />),
+      () => screen.findByText("Upcoming"),
+    ],
+    [
+      "block history",
+      getVenueBlockHistory,
+      [{ id: "bh1", action: "created", changedAt: "2026-01-15T01:00:00Z", changedBy: "d1", oldValues: null, newValues: { reason: "maintenance" } }],
+      renderBlockHistory,
+      () => screen.findByText("Created"),
+    ],
+    [
+      "holds",
+      listVenueHolds,
+      [HOLD],
+      () => render(<VenueHoldsPanel venue={VENUE} currentUserId="d1" />),
+      () => screen.findByText("Tentatively held"),
+    ],
+    ["hold event picker", getHoldCandidates, [EVENT], openHoldForm, () => screen.findByRole("option", { name: /Product Launch/ })],
+    [
+      "calendar",
+      getVenueCalendar,
+      [],
+      () => render(<VenueCalendar venueId={VENUE.id} initialDate={WED_7_OCT} />),
+      () => screen.findByText("Nothing booked or blocked in this period."),
+    ],
+  ])(
+    "SCRUM587_AC4_a_venue_load_that_fails_offers_try_again_and_reloads (%s)",
+    async (_name, load, answer, renderScreen, shown) => {
+      const user = userEvent.setup();
+      vi.mocked(load).mockReset().mockRejectedValueOnce(serverError).mockResolvedValue(answer);
+      await renderScreen();
+
+      const alert = await screen.findByRole("alert");
+      await user.click(within(alert).getByRole("button", { name: "Try again" }));
+
+      expect(await shown()).toBeInTheDocument();
+      expect(load).toHaveBeenCalledTimes(2);
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    },
+  );
+
+  it.each([
+    ["venue detail", getVenueBookings, () => render(<VenueDetail venue={VENUE} />)],
+    ["blocks", listVenueBlocks, () => render(<VenueBlocksPanel venue={VENUE} currentUserId="d1" />)],
+    ["block history", getVenueBlockHistory, renderBlockHistory],
+    ["holds", listVenueHolds, () => render(<VenueHoldsPanel venue={VENUE} currentUserId="d1" />)],
+    ["hold event picker", getHoldCandidates, openHoldForm],
+    ["calendar", getVenueCalendar, () => render(<VenueCalendar venueId={VENUE.id} initialDate={WED_7_OCT} />)],
+  ])("SCRUM587_AC4_an_expired_session_offers_no_try_again (%s)", async (_name, load, renderScreen) => {
+    vi.mocked(load).mockReset().mockRejectedValue(sessionExpired);
+    await renderScreen();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Your session has expired. Please sign in again.");
+    expect(within(alert).queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    [
+      "retiring a venue",
+      async () => {
+        vi.mocked(retireVenue).mockRejectedValue(serverError);
+        const { user } = await renderCatalogue();
+        await user.click(screen.getAllByRole("button", { name: "Retire venue" })[0]);
+        await user.click(screen.getByRole("button", { name: "Yes, retire" }));
+      },
+      "Could not retire this venue. Please try again.",
+    ],
+    [
+      "saving a venue with no changes",
+      async () => {
+        vi.mocked(getVenueDetails).mockResolvedValue(VENUE);
+        const user = userEvent.setup();
+        render(<VenueForm venueId={VENUE.id} onSaved={() => {}} />);
+        await screen.findByDisplayValue("Hall A");
+        await user.click(screen.getByRole("button", { name: "Save changes" }));
+      },
+      "Nothing has changed, so there is nothing to save.",
+    ],
+    [
+      "removing a block",
+      async () => {
+        vi.mocked(removeVenueBlock).mockRejectedValue(serverError);
+        const user = userEvent.setup();
+        render(<VenueBlocksPanel venue={VENUE} currentUserId="d1" />);
+        await screen.findByText("Upcoming");
+        await user.click(screen.getAllByRole("button", { name: "Remove" })[0]);
+        await user.click(screen.getByRole("button", { name: "Yes, remove" }));
+      },
+      "Could not remove this block. Please try again.",
+    ],
+    [
+      "the block form",
+      () => render(<VenueBlockForm onSubmit={() => {}} formError="The block could not be saved." />),
+      "The block could not be saved.",
+    ],
+    [
+      "the hold form",
+      () => render(<VenueHoldForm candidates={[EVENT]} onSubmit={() => {}} formError="The hold could not be placed." />),
+      "The hold could not be placed.",
+    ],
+  ])("SCRUM587_AC4_a_failed_venue_action_shows_the_error_without_try_again (%s)", async (_name, fail, message) => {
+    await fail();
+
+    const alert = (await screen.findByText(message)).closest('[role="alert"]');
+    expect(alert).toHaveClass("ui-error-notice");
+    expect(within(alert).queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+  });
+
+  describe("SCRUM587_AC4_venue_dates_use_the_standard_format", () => {
+    const MORNING = "2026-01-15T01:00:00Z"; // 9:00 am in Singapore
+    const LATE_MORNING = "2026-01-15T03:00:00Z";
+    const LATE_EVENING = "2026-01-15T14:00:00Z"; // 10:00 pm, the night before 16 Jan
+    const PAST_MIDNIGHT = "2026-01-15T17:00:00Z";
+
+    it("SCRUM587_AC4_venue_dates_use_the_standard_format (venue bookings and history)", async () => {
+      vi.mocked(getVenueBookings).mockResolvedValue([{ ...BOOKINGS[0], startsAt: MORNING, endsAt: LATE_MORNING }]);
+      vi.mocked(getVenueHistory).mockResolvedValue([
+        { id: "h1", changedAt: PAST_MIDNIGHT, changedBy: null, oldValues: {}, newValues: { name: "Hall A" } },
+      ]);
+      render(<VenueDetail venue={VENUE} />);
+
+      expect(await screen.findByText("15 Jan 2026, 9:00 am – 11:00 am")).toBeInTheDocument();
+      expect(await screen.findByText("16 Jan 2026, 1:00 am")).toBeInTheDocument();
+    });
+
+    it("SCRUM587_AC4_venue_dates_use_the_standard_format (block rows, audit and history)", async () => {
+      const user = userEvent.setup();
+      vi.mocked(listVenueBlocks).mockResolvedValue([
+        { ...BLOCKS[2], startsAt: LATE_EVENING, endsAt: PAST_MIDNIGHT, createdAt: MORNING, createdBy: "d1" },
+      ]);
+      vi.mocked(getVenueBlockHistory).mockResolvedValue([
+        { id: "bh1", action: "created", changedAt: LATE_MORNING, changedBy: "d1", oldValues: null, newValues: { reason: "other" } },
+      ]);
+      render(<VenueBlocksPanel venue={VENUE} currentUserId="d1" />);
+
+      expect(await screen.findByText("15 Jan 2026, 10:00 pm – 16 Jan 2026, 1:00 am")).toBeInTheDocument();
+      expect(document.querySelector(".venue-blocks__audit").textContent).toBe("Created 15 Jan 2026, 9:00 am by you");
+      await user.click(screen.getByRole("button", { name: "History" }));
+      expect(await screen.findByText("15 Jan 2026, 11:00 am")).toBeInTheDocument();
+    });
+
+    it("SCRUM587_AC4_venue_dates_use_the_standard_format (holds and the hold picker)", async () => {
+      const user = userEvent.setup();
+      const later = { eventStartsAt: "2099-01-15T01:00:00Z", eventEndsAt: "2099-01-15T03:00:00Z" };
+      vi.mocked(listVenueHolds).mockResolvedValue([
+        { ...HOLD, ...later, placedAt: MORNING, expiresAt: "2099-01-14T01:00:00Z" },
+      ]);
+      vi.mocked(getHoldCandidates).mockResolvedValue([
+        { ...EVENT, proposedStart: later.eventStartsAt, proposedEnd: later.eventEndsAt },
+      ]);
+      render(<VenueHoldsPanel venue={VENUE} currentUserId="d1" />);
+
+      expect(await screen.findByText("15 Jan 2099, 9:00 am – 11:00 am")).toBeInTheDocument();
+      expect(document.querySelector(".venue-holds__audit")).toHaveTextContent(
+        "Expires 14 Jan 2099, 9:00 am · Placed 15 Jan 2026, 9:00 am by you",
+      );
+      await user.click(screen.getByRole("button", { name: "+ Place a hold" }));
+      expect(
+        await screen.findByRole("option", { name: /^Product Launch · 15 Jan 2099, 9:00 am – 11:00 am · / }),
+      ).toBeInTheDocument();
+    });
+
+    it("SCRUM587_AC4_venue_dates_use_the_standard_format (block conflicts)", () => {
+      render(
+        <BlockConflictList
+          conflicts={[{ ...CONFLICTS[0], startsAt: LATE_EVENING, endsAt: PAST_MIDNIGHT }]}
+          onChangePeriod={() => {}}
+          onConfirmOverride={() => {}}
+        />,
+      );
+      expect(screen.getByText("15 Jan 2026, 10:00 pm – 16 Jan 2026, 1:00 am")).toBeInTheDocument();
+    });
+
+    it("SCRUM587_AC4_venue_dates_use_the_standard_format (calendar day labels and entries)", async () => {
+      const user = userEvent.setup();
+      // Noon in Singapore: inside the week of 5 Oct on every device's clock.
+      vi.mocked(getVenueCalendar).mockResolvedValue([
+        { kind: "block", id: "k1", startsAt: "2026-10-07T04:00:00Z", endsAt: "2026-10-07T06:00:00Z", reason: "maintenance" },
+      ]);
+      render(<VenueCalendar venueId={VENUE.id} initialDate={WED_7_OCT} />);
+
+      const headers = within(await screen.findByRole("table")).getAllByRole("columnheader");
+      expect(headers.map((th) => th.textContent)).toEqual([
+        "Mon 5 Oct", "Tue 6 Oct", "Wed 7 Oct", "Thu 8 Oct", "Fri 9 Oct", "Sat 10 Oct", "Sun 11 Oct",
+      ]);
+      expect(screen.getByText("7 Oct 2026, 12:00 pm – 2:00 pm")).toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "Month" }));
+      expect(await screen.findByRole("button", { name: "Show Wednesday, 7 October 2026" })).toBeInTheDocument();
+      expect(within(screen.getByRole("table")).getAllByRole("columnheader")[0]).toHaveTextContent("Mon");
+    });
+  });
+
+  it.each([
+    [
+      "a hold",
+      () => {
+        vi.mocked(listVenueHolds).mockResolvedValue([{ ...HOLD, eventStartsAt: null, eventEndsAt: null }]);
+        render(<VenueHoldsPanel venue={VENUE} currentUserId="d1" />);
+        return screen.findByText("Tentatively held");
+      },
+      () => document.querySelector(".venue-holds__item-main > span"),
+    ],
+    [
+      "a hold picker event",
+      async () => {
+        render(<VenueHoldForm candidates={[{ ...EVENT, proposedStart: null, proposedEnd: null }]} onSubmit={() => {}} />);
+      },
+      () => screen.getByRole("option", { name: /Product Launch/ }),
+    ],
+  ])("SCRUM587_AC4_a_venue_record_without_dates_says_not_recorded_once (%s)", async (_name, renderScreen, dates) => {
+    await renderScreen();
+    expect(dates().textContent).toMatch(/(^| · )no date( · |$)/);
+    expect(dates().textContent).not.toContain("no date – no date");
   });
 });

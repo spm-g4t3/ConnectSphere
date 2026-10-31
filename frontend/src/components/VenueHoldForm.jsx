@@ -15,10 +15,11 @@
 
 import { useId, useState } from "react";
 import { deviceTimeZoneLabel } from "../services/datetimeFormat";
-import { formatRange } from "../services/displayFormat";
+import { formatDateTimeRangeOrFallback } from "../services/displayFormat";
 import { toHoldPayload, validateHoldInput } from "../services/venueHoldValidation";
 import { fieldErrorWiring } from "./fieldErrors";
 import Button from "./ui/Button";
+import ErrorNotice from "./ui/ErrorNotice";
 
 /** The fields that render their own errors. Anything else goes in the alert. */
 const FIELDS = ["eventRequestId", "expiresAt"];
@@ -30,7 +31,7 @@ const FIELDS = ["eventRequestId", "expiresAt"];
 function candidateLabel(candidate) {
   const parts = [
     candidate.eventName || "Unnamed event",
-    formatRange(candidate.proposedStart, candidate.proposedEnd, "no date"),
+    formatDateTimeRangeOrFallback(candidate.proposedStart, candidate.proposedEnd, "no date"),
   ];
   if (Number.isInteger(candidate.expectedAttendance)) {
     parts.push(`${candidate.expectedAttendance} attending`);
@@ -43,6 +44,7 @@ export default function VenueHoldForm({
   candidates = [],
   loadingCandidates = false,
   candidatesError,
+  onRetryCandidates,
   onSubmit,
   onCancel,
   submitting = false,
@@ -91,26 +93,24 @@ export default function VenueHoldForm({
     );
   }
 
-  const showAlert = Boolean(formError) || unmatchedServerErrors.length > 0;
   const noCandidates = !loadingCandidates && !candidatesError && candidates.length === 0;
 
   return (
     <form className="venue-hold-form" onSubmit={handleSubmit} noValidate>
       <h2>Place a tentative hold</h2>
 
-      {showAlert && (
+      {/* No Try again: submitting the form again is the retry. */}
+      {formError && <ErrorNotice message={formError} />}
+      {unmatchedServerErrors.length > 0 && (
         <div className="venue-hold-form__error" role="alert">
-          {formError && <p>{formError}</p>}
-          {unmatchedServerErrors.length > 0 && (
-            <ul>
-              {unmatchedServerErrors.map((err, i) => (
-                <li key={i}>
-                  {err.field ? `${err.field}: ` : ""}
-                  {err.message}
-                </li>
-              ))}
-            </ul>
-          )}
+          <ul>
+            {unmatchedServerErrors.map((err, i) => (
+              <li key={i}>
+                {err.field ? `${err.field}: ` : ""}
+                {err.message}
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
@@ -133,11 +133,7 @@ export default function VenueHoldForm({
             ))}
           </select>
         </label>
-        {candidatesError && (
-          <p className="venue-hold-form__field-error" role="alert">
-            {candidatesError}
-          </p>
-        )}
+        {candidatesError && <ErrorNotice message={candidatesError} onRetry={onRetryCandidates} />}
         {noCandidates && (
           <p className="venue-hold-form__hint">There are no Approved events to hold a venue for.</p>
         )}

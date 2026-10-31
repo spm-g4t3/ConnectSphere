@@ -19,7 +19,6 @@ import {
   reinstateFlaggedBooking,
 } from "../../src/services/flaggedBookingService";
 import { formatVenuePeriod } from "../../src/services/datetimeFormat.js";
-import { formatTimestamp } from "../../src/services/displayFormat.js";
 import { deferred } from "../helpers/async.js";
 
 vi.mock("../../src/services/flaggedBookingService", () => ({
@@ -215,7 +214,7 @@ describe("the list (AC1)", () => {
     expect(term("Venue")).toHaveTextContent("Hall 1, Level 2");
     expect(term("Booking period")).toHaveTextContent(formatVenuePeriod(STARTS, ENDS));
     expect(term("Event's current period")).toHaveTextContent(formatVenuePeriod(EVENT_STARTS, EVENT_ENDS));
-    expect(term("Flagged")).toHaveTextContent(formatTimestamp(FLAGGED_AT));
+    expect(term("Flagged")).toHaveTextContent("20 Nov 2026, 10:30 am");
 
     expect(within(region).getByRole("heading", { name: "Why it was flagged" })).toBeInTheDocument();
     const reasons = within(region).getByRole("heading", { name: "Why it was flagged" }).nextElementSibling;

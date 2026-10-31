@@ -12,7 +12,7 @@
 // VenueForm is a stub here too: its Save button hands the catalogue whatever
 // the test put in formStub.saved, as the real form passes updateVenue's
 // response to onSaved. Timezone-safe: expected times are built with
-// formatOccupiedPeriod / formatRange from the same instants.
+// formatOccupiedPeriod / formatDateTimeRange from the same instants.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
@@ -22,7 +22,7 @@ import { MemoryRouter, Route, Routes, useLocation, useParams } from "react-route
 import VenueCatalogue from "../../src/components/VenueCatalogue.jsx";
 import { getVenueCatalogue } from "../../src/services/venueService";
 import { formatOccupiedPeriod } from "../../src/services/occupiedPeriodDisplay.js";
-import { formatRange } from "../../src/services/displayFormat.js";
+import { formatDateTimeRange } from "../../src/services/displayFormat.js";
 
 const formStub = vi.hoisted(() => ({ saved: undefined, options: undefined }));
 
@@ -286,16 +286,16 @@ describe("SCRUM484_AC8 VenueCatalogue flagged-bookings notice", () => {
     const rows = within(region).getAllByRole("listitem");
     expect(rows).toHaveLength(2);
     expect(within(rows[0]).getByText("Orientation")).toBeInTheDocument();
-    expect(within(rows[0]).getByText(formatOccupiedPeriod(ORIENTATION))).toBeInTheDocument();
+    expect(within(rows[0]).getByText(formatOccupiedPeriod(ORIENTATION, formatDateTimeRange))).toBeInTheDocument();
     expect(within(rows[1]).getByText("Career Fair")).toBeInTheDocument();
-    expect(within(rows[1]).getByText(formatOccupiedPeriod(CAREER_FAIR))).toBeInTheDocument();
+    expect(within(rows[1]).getByText(formatOccupiedPeriod(CAREER_FAIR, formatDateTimeRange))).toBeInTheDocument();
 
     // The occupied parts, each built from the same instants.
     const orientationPeriod = within(rows[0]).getByText(/^Setup /).textContent;
     expect(orientationPeriod).toBe(
-      `Setup ${formatRange(ORIENTATION.occupiedStartsAt, ORIENTATION.startsAt)} · ` +
-        `Event ${formatRange(ORIENTATION.startsAt, ORIENTATION.endsAt)} · ` +
-        `Turnaround ${formatRange(ORIENTATION.endsAt, ORIENTATION.occupiedEndsAt)}`,
+      `Setup ${formatDateTimeRange(ORIENTATION.occupiedStartsAt, ORIENTATION.startsAt)} · ` +
+        `Event ${formatDateTimeRange(ORIENTATION.startsAt, ORIENTATION.endsAt)} · ` +
+        `Turnaround ${formatDateTimeRange(ORIENTATION.endsAt, ORIENTATION.occupiedEndsAt)}`,
     );
 
     expect(
@@ -324,9 +324,9 @@ describe("SCRUM484_AC8 VenueCatalogue flagged-bookings notice", () => {
       "1 booking at Hall A flagged for review: Setup or turnaround time changed",
     );
     // Setup only: no Turnaround part is named.
-    expect(within(notice()).getByText(formatOccupiedPeriod(TECH_TALK))).toHaveTextContent(
-      `Setup ${formatRange(TECH_TALK.occupiedStartsAt, TECH_TALK.startsAt)} · ` +
-        `Event ${formatRange(TECH_TALK.startsAt, TECH_TALK.endsAt)}`,
+    expect(within(notice()).getByText(formatOccupiedPeriod(TECH_TALK, formatDateTimeRange))).toHaveTextContent(
+      `Setup ${formatDateTimeRange(TECH_TALK.occupiedStartsAt, TECH_TALK.startsAt)} · ` +
+        `Event ${formatDateTimeRange(TECH_TALK.startsAt, TECH_TALK.endsAt)}`,
     );
   });
 

@@ -35,14 +35,16 @@ import {
   getVenueDetails,
   getVenueHistory,
 } from "../services/venueService";
-import { formatTimestamp, shortId } from "../services/displayFormat";
+import { formatDateTime, formatDateTimeRange, shortId } from "../services/displayFormat";
 import { formatHoursEntry } from "../services/datetimeFormat";
 import { formatTurnaround } from "../services/turnaroundOptions";
 import { safetyFactText } from "../services/venueSafetyFacts";
 import VenueSafetyFacts from "./VenueSafetyFacts";
 import BookingSuitabilitySummary from "./BookingSuitabilitySummary";
-import Button from "./ui/Button";
 import StatusBadge from "./ui/StatusBadge";
+import LoadingText from "./ui/LoadingText";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
 import { BOOKING_GROUP_TONES, toneFor } from "../services/venueStatusTones";
 import { SESSION_EXPIRED } from "../services/apiErrors";
 
@@ -227,12 +229,6 @@ export default function VenueDetail({ venue }) {
     }
   }, [venueId]);
 
-  /** "Try again": back to Loading... so a second failure is visibly a new one. */
-  function retryDetails() {
-    setDetailsError(null);
-    setLoadingDetails(true);
-    fetchDetails();
-  }
 
   const fetchHistory = useCallback(async () => {
     try {
@@ -247,6 +243,17 @@ export default function VenueDetail({ venue }) {
       setLoadingHistory(false);
     }
   }, [venueId]);
+
+  // "Try again" goes back to Loading... so a second failure is visibly a new
+  // one. An expired session gets none: only signing in again fixes it.
+  function retryFor(error, setError, setLoading, fetch) {
+    if (error === SESSION_EXPIRED) return undefined;
+    return () => {
+      setError(null);
+      setLoading(true);
+      fetch();
+    };
+  }
 
   useEffect(() => {
     fetchBookings();
@@ -271,16 +278,12 @@ export default function VenueDetail({ venue }) {
         {/* No filter on retirement: a retired venue keeps its safety facts
             (SCRUM-493 AC5), and this shows them like everything else here. */}
 
-        {loadingDetails && <p>Loading...</p>}
+        {loadingDetails && <LoadingText />}
         {detailsError && (
-          <>
-            <p className="venue-detail__error" role="alert">
-              {detailsError}
-            </p>
-            <Button variant="secondary" onClick={retryDetails}>
-              Try again
-            </Button>
-          </>
+          <ErrorNotice
+            message={detailsError}
+            onRetry={retryFor(detailsError, setDetailsError, setLoadingDetails, fetchDetails)}
+          />
         )}
 
         {!loadingDetails && !detailsError && details && (
@@ -296,14 +299,18 @@ export default function VenueDetail({ venue }) {
         {/* No filter on retirement, here or server-side. A retired venue's
             bookings are exactly what this section exists to show. */}
 
-        {loadingBookings && <p>Loading...</p>}
+        {loadingBookings && <LoadingText />}
         {bookingsError && (
-          <p className="venue-detail__error" role="alert">
-            {bookingsError}
-          </p>
+          <ErrorNotice
+            message={bookingsError}
+            onRetry={retryFor(bookingsError, setBookingsError, setLoadingBookings, fetchBookings)}
+          />
         )}
         {!loadingBookings && !bookingsError && bookings.length === 0 && (
-          <p>No bookings have been made against this venue.</p>
+          <EmptyState
+            message="No bookings have been made against this venue."
+            nextStep="A booking appears here when an Event Coordinator requests this venue."
+          />
         )}
 
         {bookings.length > 0 && (
@@ -329,10 +336,7 @@ export default function VenueDetail({ venue }) {
                     {hasSuitability && booking.eventName && (
                       <strong className="venue-detail__booking-event">{booking.eventName}</strong>
                     )}
-                    <span>
-                      {formatTimestamp(booking.startsAt)} &ndash;{" "}
-                      {formatTimestamp(booking.endsAt)}
-                    </span>
+                    <span>{formatDateTimeRange(booking.startsAt, booking.endsAt)}</span>
                     <code title={booking.eventRequestId ?? undefined}>
                       {booking.eventRequestId ? shortId(booking.eventRequestId) : "no event"}
                     </code>
@@ -362,14 +366,18 @@ export default function VenueDetail({ venue }) {
       <section>
         <h3>Change history</h3>
 
-        {loadingHistory && <p>Loading...</p>}
+        {loadingHistory && <LoadingText />}
         {historyError && (
-          <p className="venue-detail__error" role="alert">
-            {historyError}
-          </p>
+          <ErrorNotice
+            message={historyError}
+            onRetry={retryFor(historyError, setHistoryError, setLoadingHistory, fetchHistory)}
+          />
         )}
         {!loadingHistory && !historyError && history.length === 0 && (
-          <p>No changes have been recorded for this venue.</p>
+          <EmptyState
+            message="No changes have been recorded for this venue."
+            nextStep="A change appears here when this venue's details are edited."
+          />
         )}
 
         {history.length > 0 && (
@@ -399,7 +407,7 @@ export default function VenueDetail({ venue }) {
                 return (
                   <li key={entry.id}>
                     <div className="venue-history__meta">
-                      <strong>{formatTimestamp(entry.changedAt)}</strong>
+                      <strong>{formatDateTime(entry.changedAt)}</strong>
                       {entry.changedBy ? (
                         <span>
                           by{" "}

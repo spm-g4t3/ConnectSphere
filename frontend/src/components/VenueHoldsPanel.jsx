@@ -26,13 +26,21 @@
 import { useCallback, useEffect, useState } from "react";
 import { getHoldCandidates, listVenueHolds, placeVenueHold } from "../services/venueService";
 import { holdConflicts, holdErrorMessage } from "../services/venueHoldErrors";
-import { formatRange, formatTimestamp } from "../services/displayFormat";
+import {
+  formatDateTime,
+  formatDateTimeRange,
+  formatDateTimeRangeOrFallback,
+} from "../services/displayFormat";
 import { formatOccupiedPeriod } from "../services/occupiedPeriodDisplay";
 import { reasonLabel } from "../services/venueBlockReasons";
 import VenueHoldForm from "./VenueHoldForm";
 import { BlockActor } from "./BlockHistory";
 import Button from "./ui/Button";
 import StatusBadge from "./ui/StatusBadge";
+import LoadingText from "./ui/LoadingText";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import { SESSION_EXPIRED } from "../services/apiErrors";
 import { HOLD_TONE } from "../services/venueStatusTones";
 
 /** "1 thing is" / "3 things are", for the conflict heading. */
@@ -46,14 +54,14 @@ function conflictText(conflict) {
     return {
       label: "Blocked",
       detail: conflict.reason ? reasonLabel(conflict.reason) : null,
-      period: formatRange(conflict.startsAt, conflict.endsAt),
+      period: formatDateTimeRange(conflict.startsAt, conflict.endsAt),
     };
   }
   return {
     label: conflict.kind === "hold" ? "Tentatively held" : "Booked",
     detail: conflict.eventName || "Unnamed event",
     // Setup · Event · Turnaround: the whole time that event keeps the venue.
-    period: formatOccupiedPeriod(conflict),
+    period: formatOccupiedPeriod(conflict, formatDateTimeRange),
   };
 }
 
@@ -110,6 +118,17 @@ export default function VenueHoldsPanel({ venue, currentUserId }) {
   useEffect(() => {
     fetchHolds();
   }, [fetchHolds]);
+
+  // The error clears first, so a second failure is visibly a new one.
+  function retryHolds() {
+    setListError(null);
+    fetchHolds();
+  }
+
+  function retryCandidates() {
+    setCandidatesError(null);
+    fetchCandidates();
+  }
 
   function clearFormFeedback() {
     setServerErrors([]);
@@ -214,16 +233,12 @@ export default function VenueHoldsPanel({ venue, currentUserId }) {
         Tentative holds for {venue.name} — {venue.location}
       </h2>
 
-      {panelError && (
-        <p className="venue-holds__error" role="alert">
-          {panelError}
-        </p>
-      )}
+      {panelError && <ErrorNotice message={panelError} />}
       {notice && (
         <div className="venue-holds__notice" role="status">
           <p>
             Hold placed. {venue.name} is tentatively held for {notice.eventName} until{" "}
-            {formatTimestamp(notice.expiresAt)}.
+            {formatDateTime(notice.expiresAt)}.
           </p>
         </div>
       )}
@@ -244,6 +259,7 @@ export default function VenueHoldsPanel({ venue, currentUserId }) {
             candidates={candidates}
             loadingCandidates={loadingCandidates}
             candidatesError={candidatesError}
+            onRetryCandidates={candidatesError === SESSION_EXPIRED ? undefined : retryCandidates}
             onSubmit={send}
             onCancel={closeForm}
             submitting={submitting}
@@ -258,14 +274,22 @@ export default function VenueHoldsPanel({ venue, currentUserId }) {
       <section className="venue-holds__current">
         <h3>Active holds</h3>
 
-        {loadingHolds && holds.length === 0 && <p>Loading...</p>}
+        {loadingHolds && holds.length === 0 && <LoadingText />}
         {listError && (
-          <p className="venue-holds__error" role="alert">
-            {listError}
-          </p>
+          <ErrorNotice
+            message={listError}
+            onRetry={listError === SESSION_EXPIRED ? undefined : retryHolds}
+          />
         )}
         {!loadingHolds && !listError && activeHolds.length === 0 && (
-          <p>This venue has no active holds.</p>
+          <EmptyState
+            message="This venue has no active holds."
+            nextStep={
+              venueRetired
+                ? "A retired venue cannot be held."
+                : "Place a hold with + Place a hold to keep this venue for an Approved event."
+            }
+          />
         )}
 
         {activeHolds.length > 0 && (
@@ -274,11 +298,11 @@ export default function VenueHoldsPanel({ venue, currentUserId }) {
               <li key={hold.id} className="venue-holds__item">
                 <div className="venue-holds__item-main">
                   <strong>{hold.eventName || "Unnamed event"}</strong>
-                  <span>{formatRange(hold.eventStartsAt, hold.eventEndsAt, "no date")}</span>
+                  <span>{formatDateTimeRangeOrFallback(hold.eventStartsAt, hold.eventEndsAt, "no date")}</span>
                   <StatusBadge tone={HOLD_TONE}>Tentatively held</StatusBadge>
                   <p className="venue-holds__audit">
-                    Expires {formatTimestamp(hold.expiresAt)} · Placed{" "}
-                    {formatTimestamp(hold.placedAt)} {renderPlacer(hold)}
+                    Expires {formatDateTime(hold.expiresAt)} · Placed{" "}
+                    {formatDateTime(hold.placedAt)} {renderPlacer(hold)}
                   </p>
                 </div>
               </li>

@@ -5,17 +5,17 @@
 // timestamp recorded"). One block's change trail.
 //
 // getVenueBlockHistory is mocked, so nothing touches the network.
-// Timezone-safe: every expected time string is built with formatTimestamp /
-// sgTime (Singapore time) from fixtures that carry an offset. No fake timers.
+// Timezone-safe: every expected time string is built with formatDateTime or
+// pinned as the fixed en-SG Singapore text, from fixtures that carry an
+// offset. No fake timers.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 
 import BlockHistory, { BlockActor } from "../../src/components/BlockHistory.jsx";
 import { getVenueBlockHistory } from "../../src/services/venueService";
-import { formatTimestamp } from "../../src/services/displayFormat";
+import { formatDateTime } from "../../src/services/displayFormat";
 import { deferred } from "../helpers/async.js";
-import { sgTime } from "../helpers/singaporeTime.js";
 
 vi.mock("../../src/services/venueService", () => ({
   getVenueBlockHistory: vi.fn(),
@@ -31,6 +31,10 @@ const OTHER = "d2a3b4c5-0000-4000-8000-000000000002";
 const START = "2026-11-01T09:00:00+08:00";
 const END = "2026-11-01T17:00:00+08:00";
 const LATER_END = "2026-11-02T17:00:00+08:00";
+// How the change values read: Singapore time, the fixed en-SG format.
+const START_TEXT = "1 Nov 2026, 9:00 am";
+const END_TEXT = "1 Nov 2026, 5:00 pm";
+const LATER_END_TEXT = "2 Nov 2026, 5:00 pm";
 
 const CREATED = {
   id: "c1000000-0000-4000-8000-000000000001",
@@ -81,7 +85,7 @@ function httpError(status) {
 }
 
 const MSG = {
-  loading: "Loading history...",
+  loading: "Loading...",
   empty: "No changes have been recorded for this block.",
   help: "Other staff are shown by a short user id — the API records ids, not names.",
   401: "Your session has expired. Please sign in again.",
@@ -146,7 +150,7 @@ describe("BlockHistory states", () => {
     expect(section).toHaveClass("block-history");
   });
 
-  it("SCRUM17_AC4_shows_Loading_history_while_the_first_fetch_is_in_flight_and_not_the_empty_state", async () => {
+  it("SCRUM17_AC4_shows_Loading_while_the_first_fetch_is_in_flight_and_not_the_empty_state", async () => {
     const pending = deferred();
     vi.mocked(getVenueBlockHistory).mockReturnValue(pending.promise);
     renderHistory();
@@ -218,8 +222,7 @@ describe("BlockHistory entries", () => {
       ["Removed", REMOVED],
     ]) {
       const meta = entryFor(label).querySelector(".venue-history__meta");
-      expect(within(meta).getByText(formatTimestamp(entry.changedAt))).toBeInTheDocument();
-      expect(within(meta).getByText(sgTime(entry.changedAt))).toBeInTheDocument();
+      expect(within(meta).getByText(formatDateTime(entry.changedAt))).toBeInTheDocument();
     }
   });
 
@@ -228,13 +231,13 @@ describe("BlockHistory entries", () => {
     const created = entryFor("Created");
     const lines = [...created.querySelectorAll(".venue-history__value")].map((el) => el.textContent);
     expect(lines).toEqual([
-      `Start: ${formatTimestamp(START)}`,
-      `End: ${formatTimestamp(END)}`,
+      `Start: ${START_TEXT}`,
+      `End: ${END_TEXT}`,
       "Reason: Maintenance",
       "Notes: Aircon servicing",
     ]);
     // Single text nodes, findable as whole strings.
-    expect(within(created).getByText(`Start: ${sgTime(START)}`)).toBeInTheDocument();
+    expect(within(created).getByText(`Start: ${START_TEXT}`)).toBeInTheDocument();
     // Hidden keys are not listed.
     expect(created.textContent).not.toMatch(/created_by|venue_id|removed_at/);
   });
@@ -252,7 +255,7 @@ describe("BlockHistory entries", () => {
     const amended = entryFor("Amended");
     expect(
       within(amended).getByText(
-        `End: ${sgTime(END)} → ${sgTime(LATER_END)}`,
+        `End: ${END_TEXT} → ${LATER_END_TEXT}`,
       ),
     ).toBeInTheDocument();
     expect(within(amended).getByText("Reason: Maintenance → Renovation")).toBeInTheDocument();
@@ -271,7 +274,7 @@ describe("BlockHistory entries", () => {
     await renderLoaded();
     expect(
       screen.getByText(
-        `Start: ${sgTime(START)} → ${sgTime(newStart)}`,
+        `Start: ${START_TEXT} → 1 Nov 2026, 12:00 pm`,
       ),
     ).toBeInTheDocument();
   });
@@ -422,7 +425,7 @@ describe("BlockHistory refetch", () => {
     expect(getVenueBlockHistory).toHaveBeenCalledTimes(1);
   });
 
-  it("SCRUM17_AC4_does_not_show_Loading_history_above_existing_entries_during_a_refetch", async () => {
+  it("SCRUM17_AC4_does_not_show_Loading_above_existing_entries_during_a_refetch", async () => {
     const { rerender } = await renderLoaded();
     const refetch = deferred();
     vi.mocked(getVenueBlockHistory).mockReturnValueOnce(refetch.promise);

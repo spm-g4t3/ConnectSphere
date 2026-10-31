@@ -29,6 +29,8 @@ import { createVenue, getVenueDetails, updateVenue } from "../services/venueServ
 import { describeClosing, formatVenuePeriod } from "../services/datetimeFormat";
 import BlockConflictList from "./BlockConflictList";
 import Button from "./ui/Button";
+import LoadingText from "./ui/LoadingText";
+import ErrorNotice from "./ui/ErrorNotice";
 import {
   ACCESSIBILITY_FEATURES,
   FACILITIES,
@@ -291,7 +293,7 @@ export default function VenueForm({ venueId = null, onSaved }) {
       });
       setLoadError(null);
     } catch {
-      setLoadError("Could not load this venue. Please go back and try again.");
+      setLoadError("Could not load this venue.");
     } finally {
       setLoading(false);
     }
@@ -300,6 +302,13 @@ export default function VenueForm({ venueId = null, onSaved }) {
   useEffect(() => {
     fetchVenue();
   }, [fetchVenue]);
+
+  /** Try again: back to Loading... so a second failure is visibly a new one. */
+  function retryVenue() {
+    setLoadError(null);
+    setLoading(true);
+    fetchVenue();
+  }
 
   function updateField(field, value) {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -503,15 +512,9 @@ export default function VenueForm({ venueId = null, onSaved }) {
     }
   }
 
-  if (loading) return <p>Loading...</p>;
+  if (loading) return <LoadingText />;
 
-  if (loadError) {
-    return (
-      <p className="venue-form__error" role="alert">
-        {loadError}
-      </p>
-    );
-  }
+  if (loadError) return <ErrorNotice message={loadError} onRetry={retryVenue} />;
 
   // Built from the BASELINE's codes, not the live selection, so an
   // unrecognised code's checkbox stays on screen after it is unticked and the
@@ -752,11 +755,7 @@ export default function VenueForm({ venueId = null, onSaved }) {
         );
       })}
 
-      {saveError && (
-        <p className="venue-form__error" role="alert">
-          {saveError}
-        </p>
-      )}
+      {saveError && <ErrorNotice message={saveError} />}
 
       {saveDetails.length > 0 && (
         <div className="venue-form__errors" role="alert">

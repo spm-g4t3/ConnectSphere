@@ -7,13 +7,11 @@
 // Time-zone safe: every fixture is built with the local Date constructor, and
 // entry timestamps are built from local Dates with toISOString, so day
 // bucketing reads the same in UTC (CI) and Asia/Singapore (dev machines).
-// Headings are compared against the same toLocaleDateString call wherever the
-// exact punctuation could differ between ICU versions ("Sep" vs "Sept").
+// Headings are the fixed en-SG text, so they read the same in every zone.
 
 import { describe, it, expect } from "vitest";
 
 import {
-  CALENDAR_LOCALE,
   CALENDAR_VIEWS,
   addDays,
   daysIn,
@@ -42,10 +40,6 @@ describe("SCRUM178_AC4 constants", () => {
   it("SCRUM178_AC4_offers_day_week_and_month_in_that_order", () => {
     expect(CALENDAR_VIEWS).toEqual(["day", "week", "month"]);
     expect(Object.isFrozen(CALENDAR_VIEWS)).toBe(true);
-  });
-
-  it("SCRUM178_AC4_pins_headings_to_en_GB", () => {
-    expect(CALENDAR_LOCALE).toBe("en-GB");
   });
 });
 
@@ -366,43 +360,20 @@ describe("SCRUM178_AC4 toWireWindow", () => {
 });
 
 describe("SCRUM178_AC4 rangeTitle", () => {
-  const FULL = { day: "numeric", month: "short", year: "numeric" };
-
   it("SCRUM178_AC4_day_title_names_the_weekday_and_date", () => {
-    const day = local(2026, 9, 5);
-    const title = rangeTitle("day", rangeFor("day", day));
-
-    expect(title).toBe(
-      day.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", year: "numeric" }),
-    );
-    expect(title).toMatch(/^Mon,? 5 Oct 2026$/);
+    expect(rangeTitle("day", rangeFor("day", local(2026, 9, 5)))).toBe("Mon, 5 Oct 2026");
   });
 
   it("SCRUM178_AC4_week_title_within_one_month_names_the_month_once", () => {
-    const title = rangeTitle("week", rangeFor("week", local(2026, 9, 7)));
-    expect(title).toBe(
-      `${local(2026, 9, 5).toLocaleDateString("en-GB", { day: "numeric" })} – ` +
-        local(2026, 9, 11).toLocaleDateString("en-GB", FULL),
-    );
-    expect(title).toBe("5 – 11 Oct 2026");
+    expect(rangeTitle("week", rangeFor("week", local(2026, 9, 7)))).toBe("5 – 11 Oct 2026");
   });
 
   it("SCRUM178_AC4_week_title_across_two_months_names_both_months", () => {
-    const title = rangeTitle("week", rangeFor("week", local(2026, 9, 1)));
-    expect(title).toBe(
-      `${local(2026, 8, 28).toLocaleDateString("en-GB", { day: "numeric", month: "short" })} – ` +
-        local(2026, 9, 4).toLocaleDateString("en-GB", FULL),
-    );
-    expect(title).toMatch(/^28 Sept? – 4 Oct 2026$/);
+    expect(rangeTitle("week", rangeFor("week", local(2026, 9, 1)))).toBe("28 Sept – 4 Oct 2026");
   });
 
   it("SCRUM178_AC4_week_title_across_two_years_names_both_years", () => {
-    const title = rangeTitle("week", rangeFor("week", local(2026, 0, 1)));
-    expect(title).toBe(
-      `${local(2025, 11, 29).toLocaleDateString("en-GB", FULL)} – ` +
-        local(2026, 0, 4).toLocaleDateString("en-GB", FULL),
-    );
-    expect(title).toBe("29 Dec 2025 – 4 Jan 2026");
+    expect(rangeTitle("week", rangeFor("week", local(2026, 0, 1)))).toBe("29 Dec 2025 – 4 Jan 2026");
   });
 
   it("SCRUM178_AC4_month_title_names_the_month_not_the_padding_before_it", () => {

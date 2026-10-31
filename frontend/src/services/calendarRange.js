@@ -23,18 +23,19 @@
 // Weeks start on Monday. Ranges are half-open [start, end), the same rule
 // the backend uses for blocks and for the calendar window itself.
 //
-// Titles are formatted in en-GB on purpose: the app's examples read
-// "5 – 11 Oct 2026", and a pinned locale means a test machine's own locale
-// cannot change what the heading says.
+// Titles use displayFormat's calendar-day helpers: the fixed en-SG format,
+// so a device's own locale cannot change what the heading says.
 
 import { toDatetimeLocalValue, toOffsetIsoString } from "./datetimeFormat";
+import {
+  formatCalendarDate,
+  formatDayMonth,
+  formatDayOfMonth,
+  formatMonthYear,
+  formatShortDay,
+} from "./displayFormat";
 
 export const CALENDAR_VIEWS = Object.freeze(["day", "week", "month"]);
-
-/** The locale every calendar heading and day label is written in. */
-export const CALENDAR_LOCALE = "en-GB";
-
-const FULL_DATE = { day: "numeric", month: "short", year: "numeric" };
 
 /**
  * Local midnight at the start of `date`'s day.
@@ -212,42 +213,31 @@ export function toWireWindow({ start, end }) {
 }
 
 /**
- * The heading over a view, in CALENDAR_LOCALE:
+ * The heading over a view:
  *
  *   - day:   "Mon, 5 Oct 2026"
  *   - week:  "5 – 11 Oct 2026", "28 Sept – 4 Oct 2026" across a month, and
  *            "29 Dec 2025 – 4 Jan 2026" across a year
  *   - month: "October 2026"
  *
- * Exact punctuation is whatever the runtime's en-GB data says.
- *
  * @param {"day"|"week"|"month"} view
  * @param {{start: Date, end: Date}} range  as rangeFor returns it
  * @returns {string}
  */
 export function rangeTitle(view, { start, end }) {
-  if (view === "day") {
-    return start.toLocaleDateString(CALENDAR_LOCALE, { weekday: "short", ...FULL_DATE });
-  }
+  if (view === "day") return formatShortDay(start);
 
   if (view === "month") {
     // A month range starts up to six days before the 1st, so its first day
     // can belong to the previous month. A week in, it never does.
-    return addDays(start, 7).toLocaleDateString(CALENDAR_LOCALE, {
-      month: "long",
-      year: "numeric",
-    });
+    return formatMonthYear(addDays(start, 7));
   }
 
   const last = addDays(end, -1);
   const sameYear = start.getFullYear() === last.getFullYear();
   const sameMonth = sameYear && start.getMonth() === last.getMonth();
-  const startOptions = sameMonth
-    ? { day: "numeric" }
-    : sameYear
-      ? { day: "numeric", month: "short" }
-      : FULL_DATE;
-  return `${start.toLocaleDateString(CALENDAR_LOCALE, startOptions)} – ${last.toLocaleDateString(CALENDAR_LOCALE, FULL_DATE)}`;
+  const formatStart = sameMonth ? formatDayOfMonth : sameYear ? formatDayMonth : formatCalendarDate;
+  return `${formatStart(start)} – ${formatCalendarDate(last)}`;
 }
 
 /**

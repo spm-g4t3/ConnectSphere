@@ -14,7 +14,7 @@ import userEvent from "@testing-library/user-event";
 
 import VenueHoldForm from "../../src/components/VenueHoldForm.jsx";
 import { toDatetimeLocalValue } from "../../src/services/datetimeFormat";
-import { formatRange } from "../../src/services/displayFormat";
+import { formatDateTimeRange } from "../../src/services/displayFormat";
 
 const MINUTE = 60 * 1000;
 const DAY = 24 * 60 * MINUTE;
@@ -69,7 +69,7 @@ describe("SCRUM491_AC2 VenueHoldForm event picker", () => {
     expect(options[0]).toHaveTextContent("Choose an event");
     expect(options[0]).toBeDisabled();
     expect(options[1]).toHaveTextContent(
-      `Product Launch · ${formatRange(LAUNCH.proposedStart, LAUNCH.proposedEnd)} · 120 attending · Coordinator: Casey Coordinator`,
+      `Product Launch · ${formatDateTimeRange(LAUNCH.proposedStart, LAUNCH.proposedEnd)} · 120 attending · Coordinator: Casey Coordinator`,
     );
   });
 
@@ -78,7 +78,7 @@ describe("SCRUM491_AC2 VenueHoldForm event picker", () => {
     const option = within(eventSelect()).getAllByRole("option")[2];
 
     expect(option).toHaveTextContent(
-      "Unnamed event · no date – no date · Coordinator: not assigned",
+      "Unnamed event · no date · Coordinator: not assigned",
     );
     expect(option).not.toHaveTextContent("attending");
   });

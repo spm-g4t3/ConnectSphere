@@ -199,7 +199,7 @@ button { cursor: pointer; }
 /* The rule above makes every .dashboard p muted grey, which would render a
    failed retire in exactly the same voice as the empty-state text. Same
    colour pair as .venue-search__error. */
-.dashboard .venue-catalogue__error, .dashboard .venue-form__error, .dashboard .venue-detail__error, .dashboard .review-queue__error, .dashboard .unassigned-queue__error, .dashboard .venue-block-form__error, .dashboard .notification-inbox__row-error, .dashboard .venue-blocks__error, .dashboard .venue-hold-form__error, .dashboard .venue-holds__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 6px 0 0; padding: 8px 12px; }
+.dashboard .review-queue__error, .dashboard .unassigned-queue__error, .dashboard .venue-block-form__error, .dashboard .notification-inbox__row-error, .dashboard .venue-hold-form__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 6px 0 0; padding: 8px 12px; }
 /* NECESSARY, not cosmetic. .dashboard li above forces flex with
    justify-content: space-between, which on a checkbox row throws the box to
    one edge of the card and its label to the other with the whole width
@@ -268,6 +268,8 @@ button { cursor: pointer; }
 .dashboard--venue-staff .block-conflicts__actions span { color: #8a5a00; font-size: 0.9rem; }
 /* The badge follows the venue's location inline, so it needs its own gap. */
 .dashboard--venue-staff .venue-catalogue__item-main .ui-status-badge { margin-left: var(--space-2); }
+/* A row's own error sits on its own line under the row's details. */
+.dashboard--venue-staff .venue-catalogue__item-main .ui-error-notice, .dashboard--venue-staff .venue-blocks__item-main .ui-error-notice { flex-basis: 100%; margin-top: var(--space-2); }
 /* SCRUM-127. The blocks panel. The notice uses the success green: a save,
    possibly with bookings flagged, is a success to read, not a fault. */
 .dashboard--venue-staff .venue-blocks__notice { background: #e8f7f1; border-radius: 8px; margin: 12px 0; padding: 10px 14px; }
@@ -291,7 +293,7 @@ button { cursor: pointer; }
    the catalogue -- but top-aligned, because notes can wrap to several lines. */
 .dashboard--venue-staff .venue-blocks__list li { align-items: flex-start; }
 .dashboard--venue-staff .venue-blocks__item-main { align-items: center; display: flex; flex: 1; flex-wrap: wrap; gap: 6px 12px; min-width: 0; }
-.dashboard--venue-staff .venue-blocks__notes, .dashboard--venue-staff .venue-blocks__clash-note, .dashboard--venue-staff .venue-blocks__ended-note, .dashboard--venue-staff .venue-blocks__item-main .venue-blocks__error { flex-basis: 100%; margin: 0; overflow-wrap: anywhere; }
+.dashboard--venue-staff .venue-blocks__notes, .dashboard--venue-staff .venue-blocks__clash-note, .dashboard--venue-staff .venue-blocks__ended-note { flex-basis: 100%; margin: 0; overflow-wrap: anywhere; }
 .dashboard--venue-staff .venue-blocks__notes { color: var(--ink); white-space: pre-wrap; }
 .dashboard--venue-staff .venue-blocks__clash-note { color: #8a5a00; font-size: 0.86rem; }
 .dashboard--venue-staff .venue-blocks__ended-note { font-size: 0.84rem; }
@@ -913,8 +915,6 @@ button.event-registration-page__back { background: none; border: 0; cursor: poin
 .venue-calendar__nav, .venue-calendar__views { display: flex; flex-wrap: wrap; gap: 6px; }
 .venue-calendar button:focus-visible { outline: 3px solid rgba(8, 127, 123, 0.35); outline-offset: 2px; }
 .venue-calendar__title { color: var(--teal-dark); font-size: 1.2rem; margin: 18px 0 12px; }
-.venue-calendar__loading, .venue-calendar__empty { color: var(--muted); }
-.venue-calendar__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 6px 0 0; padding: 8px 12px; }
 /* The table scrolls inside this box on a narrow screen, rather than seven
    columns being squeezed unreadable or the whole page scrolling sideways. */
 .venue-calendar__scroll { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); max-width: 100%; overflow-x: auto; }

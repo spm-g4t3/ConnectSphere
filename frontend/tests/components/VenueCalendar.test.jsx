@@ -16,9 +16,8 @@
 // Time-zone safe: dates are built with the local Date constructor and entry
 // timestamps come from local Dates via toISOString, so bucketing into days is
 // the same in UTC (CI) and Asia/Singapore. Expected headings and time ranges
-// are produced with the same toLocale* calls the component makes (time ranges
-// as Singapore time, via sgTime), so the
-// tests survive ICU differences between Node versions.
+// are produced with the same display-format calls the component makes, so
+// the tests survive ICU differences between Node versions.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
@@ -28,9 +27,8 @@ import VenueCalendar from "../../src/components/VenueCalendar.jsx";
 import { getVenueCalendar, getVenueDetails } from "../../src/services/venueService";
 import { blockCalendarLabel } from "../../src/services/venueBlockDisplay";
 import { VENUE_BLOCK_REASONS } from "../../src/services/venueBlockReasons";
-import { formatRange } from "../../src/services/displayFormat";
+import { formatDateTimeRange, formatLongDay, formatShortDay } from "../../src/services/displayFormat";
 import { deferred } from "../helpers/async.js";
-import { sgTime } from "../helpers/singaporeTime.js";
 
 vi.mock("../../src/services/venueService", () => ({
   getVenueCalendar: vi.fn(),
@@ -82,20 +80,17 @@ const BLOCK = {
   notes: "Secret staff note",
 };
 
-const FULL_DATE = { day: "numeric", month: "short", year: "numeric" };
-const DAY_TITLE = { weekday: "short", ...FULL_DATE };
-const DAY_BUTTON = { weekday: "long", day: "numeric", month: "long", year: "numeric" };
 
 function expectedRange(entry) {
-  return `${sgTime(entry.startsAt)} – ${sgTime(entry.endsAt)}`;
+  return formatDateTimeRange(entry.startsAt, entry.endsAt);
 }
 
 function dayTitle(date) {
-  return date.toLocaleDateString("en-GB", DAY_TITLE);
+  return formatShortDay(date);
 }
 
 function dayButtonName(date) {
-  return `Show ${date.toLocaleDateString("en-GB", DAY_BUTTON)}`;
+  return `Show ${formatLongDay(date)}`;
 }
 
 /** The window of the nth getVenueCalendar call (default: the last) as Dates. */
@@ -195,15 +190,8 @@ describe("SCRUM178_AC4 VenueCalendar views and the window requested", () => {
     const table = screen.getByRole("table", { name: "5 – 11 Oct 2026" });
     const headers = within(table).getAllByRole("columnheader");
     expect(headers).toHaveLength(7);
-    expect(headers[0]).toHaveTextContent(
-      local(2026, 9, 5).toLocaleDateString("en-GB", { weekday: "short" }),
-    );
-    expect(headers[0]).toHaveTextContent(
-      local(2026, 9, 5).toLocaleDateString("en-GB", { day: "numeric", month: "short" }),
-    );
-    expect(headers[6]).toHaveTextContent(
-      local(2026, 9, 11).toLocaleDateString("en-GB", { weekday: "short" }),
-    );
+    expect(headers[0]).toHaveTextContent("Mon 5 Oct");
+    expect(headers[6]).toHaveTextContent("Sun 11 Oct");
     expect(weekCells()).toHaveLength(7);
   });
 
@@ -274,10 +262,7 @@ describe("SCRUM178_AC4 VenueCalendar views and the window requested", () => {
     await user.click(within(nav).getByRole("button", { name: "Previous week" }));
     await user.click(within(nav).getByRole("button", { name: "Previous week" }));
 
-    const crossMonth =
-      `${local(2026, 8, 28).toLocaleDateString("en-GB", { day: "numeric", month: "short" })} – ` +
-      local(2026, 9, 4).toLocaleDateString("en-GB", FULL_DATE);
-    expect(await screen.findByRole("table", { name: crossMonth })).toBeInTheDocument();
+    expect(await screen.findByRole("table", { name: "28 Sept – 4 Oct 2026" })).toBeInTheDocument();
     expect(requestedWindow()).toMatchObject({ from: local(2026, 8, 28), to: local(2026, 9, 5) });
   });
 
@@ -451,7 +436,7 @@ describe("SCRUM178_AC4 VenueCalendar views and the window requested", () => {
 
     render(<VenueCalendar venueId={VENUE_ID} initialDate={WED_7_OCT} />);
 
-    expect(screen.getByRole("status")).toHaveTextContent("Loading calendar...");
+    expect(screen.getByRole("status")).toHaveTextContent("Loading...");
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
     expect(screen.queryByText("Nothing booked or blocked in this period.")).not.toBeInTheDocument();
 
@@ -521,7 +506,7 @@ describe("SCRUM178_AC4 VenueCalendar views and the window requested", () => {
     // The week answers first, while the month is still on its way.
     const staleEntry = { ...APPROVED, id: "b-stale", startsAt: oct(8, 9), endsAt: oct(8, 10), eventName: "Stale Event" };
     await act(async () => week.resolve([staleEntry]));
-    expect(screen.getByRole("status")).toHaveTextContent("Loading calendar...");
+    expect(screen.getByRole("status")).toHaveTextContent("Loading...");
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
     expect(screen.queryByText("Stale Event")).not.toBeInTheDocument();
 
@@ -1091,9 +1076,9 @@ describe("SCRUM484_AC7 VenueCalendar shows setup and turnaround on bookings", ()
 
   function threeParts(entry) {
     return (
-      `Setup ${formatRange(entry.occupiedStartsAt, entry.startsAt)} · ` +
-      `Event ${formatRange(entry.startsAt, entry.endsAt)} · ` +
-      `Turnaround ${formatRange(entry.endsAt, entry.occupiedEndsAt)}`
+      `Setup ${formatDateTimeRange(entry.occupiedStartsAt, entry.startsAt)} · ` +
+      `Event ${formatDateTimeRange(entry.startsAt, entry.endsAt)} · ` +
+      `Turnaround ${formatDateTimeRange(entry.endsAt, entry.occupiedEndsAt)}`
     );
   }
 
@@ -1104,9 +1089,9 @@ describe("SCRUM484_AC7 VenueCalendar shows setup and turnaround on bookings", ()
     const item = within(weekCells()[1]).getByRole("listitem");
     const time = item.querySelector(".venue-calendar__entry-time");
     expect(time.textContent).toBe(threeParts(PADDED));
-    expect(time).toHaveTextContent(`Setup ${formatRange(PADDED.occupiedStartsAt, PADDED.startsAt)}`);
-    expect(time).toHaveTextContent(`Event ${formatRange(PADDED.startsAt, PADDED.endsAt)}`);
-    expect(time).toHaveTextContent(`Turnaround ${formatRange(PADDED.endsAt, PADDED.occupiedEndsAt)}`);
+    expect(time).toHaveTextContent(`Setup ${formatDateTimeRange(PADDED.occupiedStartsAt, PADDED.startsAt)}`);
+    expect(time).toHaveTextContent(`Event ${formatDateTimeRange(PADDED.startsAt, PADDED.endsAt)}`);
+    expect(time).toHaveTextContent(`Turnaround ${formatDateTimeRange(PADDED.endsAt, PADDED.occupiedEndsAt)}`);
     expect(item).toHaveAttribute("title", threeParts(PADDED));
     expect(item.querySelector(".venue-calendar__entry-detail")).toHaveTextContent("Orientation");
   });
@@ -1129,8 +1114,8 @@ describe("SCRUM484_AC7 VenueCalendar shows setup and turnaround on bookings", ()
 
     const booked = within(cells[3]).getByRole("listitem");
     const bookedTime = booked.querySelector(".venue-calendar__entry-time");
-    expect(bookedTime.textContent).toBe(formatRange(ZERO_PADDING.startsAt, ZERO_PADDING.endsAt));
-    expect(booked).toHaveAttribute("title", formatRange(ZERO_PADDING.startsAt, ZERO_PADDING.endsAt));
+    expect(bookedTime.textContent).toBe(formatDateTimeRange(ZERO_PADDING.startsAt, ZERO_PADDING.endsAt));
+    expect(booked).toHaveAttribute("title", formatDateTimeRange(ZERO_PADDING.startsAt, ZERO_PADDING.endsAt));
 
     const blocked = within(cells[4]).getByRole("listitem");
     const blockedTime = blocked.querySelector(".venue-calendar__entry-time");
@@ -1208,8 +1193,8 @@ describe("SCRUM491_AC6 VenueCalendar shows active tentative holds", () => {
 
     const entry = document.querySelector(".venue-calendar__entry--held");
     const time = entry.querySelector(".venue-calendar__entry-time");
-    expect(time).toHaveTextContent(`Setup ${formatRange(HOLD.occupiedStartsAt, HOLD.startsAt)}`);
-    expect(time).toHaveTextContent(`Turnaround ${formatRange(HOLD.endsAt, HOLD.occupiedEndsAt)}`);
+    expect(time).toHaveTextContent(`Setup ${formatDateTimeRange(HOLD.occupiedStartsAt, HOLD.startsAt)}`);
+    expect(time).toHaveTextContent(`Turnaround ${formatDateTimeRange(HOLD.endsAt, HOLD.occupiedEndsAt)}`);
   });
 
   it("SCRUM491_AC6_a_hold_sits_beside_a_booking_and_a_block", async () => {

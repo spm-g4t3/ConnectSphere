@@ -11,7 +11,7 @@
 // should never reach rejects with "unexpected call".
 //
 // Timezone-safe: instants are compared with getTime(), expected strings come
-// from formatTimestamp / formatOccupiedPeriod, and datetime-local inputs are
+// from formatDateTime / formatOccupiedPeriod, and datetime-local inputs are
 // set with fireEvent.change through toDatetimeLocalValue. No fake timers.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -21,7 +21,7 @@ import { MemoryRouter } from "react-router-dom";
 
 import VenueCatalogue from "../../src/components/VenueCatalogue.jsx";
 import * as venueService from "../../src/services/venueService";
-import { formatTimestamp } from "../../src/services/displayFormat";
+import { formatDateTime, formatDateTimeRange } from "../../src/services/displayFormat";
 import { formatOccupiedPeriod } from "../../src/services/occupiedPeriodDisplay";
 import { toDatetimeLocalValue } from "../../src/services/datetimeFormat";
 
@@ -216,11 +216,11 @@ describe("SCRUM491 venue hold flow", () => {
     // AC2: the hold is placed and listed with its event, expiry and placer.
     await placeHold(user, LAUNCH, expires);
     expect(await screen.findByRole("status")).toHaveTextContent(
-      `Hold placed. Hall A is tentatively held for Product Launch until ${formatTimestamp(iso(expires))}.`,
+      `Hold placed. Hall A is tentatively held for Product Launch until ${formatDateTime(iso(expires))}.`,
     );
     const row = (await screen.findByText("by you")).closest("li");
     expect(row).toHaveTextContent("Product Launch");
-    expect(row).toHaveTextContent(`Expires ${formatTimestamp(iso(expires))}`);
+    expect(row).toHaveTextContent(`Expires ${formatDateTime(iso(expires))}`);
 
     // AC4: another event over the same period is refused, naming the hold.
     await placeHold(user, FAIR, expires);
@@ -232,7 +232,7 @@ describe("SCRUM491 venue hold flow", () => {
     expect(within(conflictRow).getByText("Product Launch")).toBeInTheDocument();
     expect(
       within(conflictRow).getByText(
-        formatOccupiedPeriod({ startsAt: LAUNCH.proposedStart, endsAt: LAUNCH.proposedEnd }),
+        formatOccupiedPeriod({ startsAt: LAUNCH.proposedStart, endsAt: LAUNCH.proposedEnd }, formatDateTimeRange),
       ),
     ).toBeInTheDocument();
     expect(screen.getAllByText("by you")).toHaveLength(1);

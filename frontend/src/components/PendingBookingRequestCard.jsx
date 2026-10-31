@@ -11,11 +11,12 @@
 import { useState } from "react";
 import BookingSuitabilitySummary from "./BookingSuitabilitySummary";
 import Button from "./ui/Button";
+import ErrorNotice from "./ui/ErrorNotice";
 import StatusBadge from "./ui/StatusBadge";
 import { BOOKABLE_EVENT_STATUSES, statusLabel } from "../services/bookingRequestEligibility";
 import { readBookingStatusDisplay } from "../services/bookingRequestStatusDisplay";
 import { BOOKING_GROUP_TONES, toneFor } from "../services/venueStatusTones";
-import { formatTimestamp } from "../services/displayFormat";
+import { formatDateTime } from "../services/displayFormat";
 import { capitalise, replacesFlaggedBookingText } from "../services/flaggedBookingDisplay";
 import { VENUE_TIME_NOTE, formatVenuePeriod, formatVenueRange } from "../services/datetimeFormat";
 import { formatOccupiedPeriod, occupiedPeriodParts } from "../services/occupiedPeriodDisplay";
@@ -82,6 +83,7 @@ export default function PendingBookingRequestCard({
   marksOnApproval,
   deciding,
   error,
+  onRetry,
   onApprove,
   onReject,
 }) {
@@ -187,7 +189,7 @@ export default function PendingBookingRequestCard({
             <dt>Setup notes</dt>
             <dd>{orNotSpecified(item.setupNotes)}</dd>
             <dt>Requested</dt>
-            <dd>{formatTimestamp(item.createdAt, "at an unknown time")}</dd>
+            <dd>{formatDateTime(item.createdAt, "at an unknown time")}</dd>
           </dl>
 
           <BookingSuitabilitySummary
@@ -207,17 +209,13 @@ export default function PendingBookingRequestCard({
                   <span>
                     Occupies {formatOccupiedPeriod(other, formatVenueRange)} {VENUE_TIME_NOTE}
                   </span>
-                  <span>Requested {formatTimestamp(other.createdAt, "at an unknown time")}</span>
+                  <span>Requested {formatDateTime(other.createdAt, "at an unknown time")}</span>
                 </li>
               ))}
             </ol>
           )}
 
-          {error && (
-            <p className="pending-bookings__error" role="alert">
-              {error}
-            </p>
-          )}
+          {error && <ErrorNotice message={error} onRetry={onRetry} />}
 
           <div className="pending-bookings__approve">
             {marksOnApproval > 0 && !approveBlockedBy && (

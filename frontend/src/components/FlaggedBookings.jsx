@@ -11,6 +11,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import FlaggedBookingCard from "./FlaggedBookingCard";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import LoadingText from "./ui/LoadingText";
 import {
   cancelFlaggedBooking,
   getFlaggedBookings,
@@ -30,6 +33,18 @@ const LIST_ERROR_MESSAGES = {
 };
 const LIST_DEFAULT_ERROR = "Flagged bookings could not be loaded. Please try again.";
 
+/**
+ * A failed list load as { message, retryable }. A 401 or 403 repeats on every
+ * attempt (only signing in or another role fixes it), so it gets no Try again.
+ */
+function listLoadError(err) {
+  const status = err?.response?.status;
+  return {
+    message: statusMessageOf(err, LIST_ERROR_MESSAGES, LIST_DEFAULT_ERROR),
+    retryable: status !== 401 && status !== 403,
+  };
+}
+
 function resolvedNotice(item, action) {
   const venue = item.venueName || "the venue";
   const event = item.eventName || "the event";
@@ -42,6 +57,8 @@ export default function FlaggedBookings({ asPage = false }) {
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  // Bumped by Try again, so the guarded first load below runs again.
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [expandedId, setExpandedId] = useState(null);
   // { id, action } while a resolution is in flight.
   const [resolving, setResolving] = useState(null);
@@ -59,7 +76,7 @@ export default function FlaggedBookings({ asPage = false }) {
       setBookings(asList(await getFlaggedBookings()));
       setError(null);
     } catch (err) {
-      setError(statusMessageOf(err, LIST_ERROR_MESSAGES, LIST_DEFAULT_ERROR));
+      setError(listLoadError(err));
     }
   }, []);
 
@@ -75,7 +92,7 @@ export default function FlaggedBookings({ asPage = false }) {
           setError(null);
         }
       } catch (err) {
-        if (!cancelled) setError(statusMessageOf(err, LIST_ERROR_MESSAGES, LIST_DEFAULT_ERROR));
+        if (!cancelled) setError(listLoadError(err));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -84,7 +101,13 @@ export default function FlaggedBookings({ asPage = false }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [loadAttempt]);
+
+  function retryLoad() {
+    setError(null);
+    setLoading(true);
+    setLoadAttempt((n) => n + 1);
+  }
 
   async function resolve(item, action, send) {
     if (sending.current) return;
@@ -125,23 +148,22 @@ export default function FlaggedBookings({ asPage = false }) {
     <section className="flagged-bookings">
       <Heading>Flagged bookings</Heading>
 
-      {loading && <p>Loading...</p>}
-      {error && (
-        <p className="pending-bookings__error" role="alert">
-          {error}
-        </p>
-      )}
-      {listError && (
-        <p className="pending-bookings__error" role="alert">
-          {listError}
-        </p>
-      )}
+      {loading && <LoadingText />}
+      {/* Signing in again or a different role is the fix for 401 and 403, not repeating the load. */}
+      {error && <ErrorNotice message={error.message} onRetry={error.retryable ? retryLoad : undefined} />}
+      {/* The list has already been refetched, so the stale booking may be gone. */}
+      {listError && <ErrorNotice message={listError} />}
       {notice && (
         <p className="pending-bookings__notice" role="status">
           {notice}
         </p>
       )}
-      {!loading && !error && bookings.length === 0 && <p>No bookings are flagged for review.</p>}
+      {!loading && !error && bookings.length === 0 && (
+        <EmptyState
+          message="No bookings are flagged for review."
+          nextStep="An approved booking appears here when a venue block, a change to the venue, a change to the event or a safety review affects it."
+        />
+      )}
 
       {bookings.length > 0 && (
         <ul>

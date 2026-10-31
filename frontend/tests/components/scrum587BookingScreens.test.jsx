@@ -195,3 +195,154 @@ describe("SCRUM587 AC5 one tone per booking status meaning", () => {
     expect(badge).toHaveClass(`ui-status-badge--${tone}`);
   });
 });
+
+const LISTS = [
+  ["pending", () => <PendingBookingRequests asPage />, "Event 1"],
+  ["flagged", () => <FlaggedBookings asPage />, "Board Retreat"],
+];
+
+const httpError = (status, data = {}) => Object.assign(new Error(`HTTP ${status}`), { response: { status, data } });
+
+const ddFor = (region, term) => within(region).getByText(term, { selector: "dt" }).nextElementSibling;
+
+describe("SCRUM587 AC4 loading, empty and error states on the booking screens", () => {
+  it.each(LISTS)("SCRUM587_AC4_booking_lists_show_the_standard_loading_text (%s)", async (_, ui) => {
+    vi.mocked(apiClient.get).mockReturnValue(new Promise(() => {}));
+    renderIn(ui());
+
+    const status = screen.getByRole("status");
+    expect(status).toHaveClass("ui-loading-text");
+    expect(status).toHaveTextContent(/^Loading\.\.\.$/);
+  });
+
+  it.each([
+    [
+      "pending",
+      () => <PendingBookingRequests asPage />,
+      "No pending booking requests.",
+      "A request appears here when a coordinator asks to book a venue for their event.",
+    ],
+    [
+      "flagged",
+      () => <FlaggedBookings asPage />,
+      "No bookings are flagged for review.",
+      "An approved booking appears here when a venue block, a change to the venue, a change to the event or a safety review affects it.",
+    ],
+  ])(
+    "SCRUM587_AC4_empty_booking_lists_say_what_is_missing_and_what_happens_next (%s)",
+    async (_, ui, message, nextStep) => {
+      answer({ pending: [], flagged: [] });
+      renderIn(ui());
+
+      const empty = (await screen.findByText(message)).closest(".ui-empty-state");
+      expect(empty).not.toBeNull();
+      expect(within(empty).getByText(nextStep)).toHaveClass("ui-empty-state__next-step");
+    },
+  );
+
+  it.each(LISTS)(
+    "SCRUM587_AC4_a_booking_list_that_fails_to_load_offers_try_again_and_reloads (%s)",
+    async (_, ui, firstName) => {
+      vi.mocked(apiClient.get).mockRejectedValueOnce(httpError(500));
+      const user = renderIn(ui());
+
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent(/could not be loaded/);
+      await user.click(within(alert).getByRole("button", { name: "Try again" }));
+
+      expect(await screen.findByText(firstName)).toBeInTheDocument();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      expect(apiClient.get).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it.each(LISTS)(
+    "SCRUM587_AC4_a_booking_list_refused_for_the_role_offers_no_try_again (%s)",
+    async (_, ui) => {
+      vi.mocked(apiClient.get).mockRejectedValueOnce(httpError(403));
+      renderIn(ui());
+
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent(/Only Venue Staff can see/);
+      expect(within(alert).queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+    },
+  );
+
+  // Approve is one click, so repeating it is the retry, but only when the
+  // server never answered. The reason forms are retried by submitting again.
+  it.each([
+    ["approve after a server failure", "approve", httpError(500), "Could not record the decision. Please try again.", true],
+    ["approve refused with a 409", "approve", httpError(409, { code: "VENUE_RETIRED" }), "This venue has been retired, so the request can't be approved.", false],
+    ["approve with an expired session", "approve", httpError(401), "Your session has expired. Please sign in again.", false],
+    ["reject after a server failure", "reject", httpError(500), "Could not record the decision. Please try again.", false],
+    ["reinstate after a server failure", "reinstate", httpError(500), "Could not resolve the flagged booking. Please try again.", false],
+    ["cancel after a server failure", "cancel", httpError(500), "Could not resolve the flagged booking. Please try again.", false],
+  ])(
+    "SCRUM587_AC4_a_failed_booking_decision_shows_the_error_with_the_right_retry (%s)",
+    async (_, action, err, message, offersRetry) => {
+      vi.mocked(apiClient.post).mockReset();
+      vi.mocked(apiClient.post).mockRejectedValue(err);
+      const pending = action === "approve" || action === "reject";
+      const user = renderIn(pending ? <PendingBookingRequests asPage /> : <FlaggedBookings asPage />);
+      const name = pending ? "Event 1" : "Board Retreat";
+      await screen.findByText(name);
+      await user.click(toggleFor(name));
+      const region = screen.getByRole("region", { name: pending ? "Event 1 at Hall 1" : "Board Retreat at Hall B" });
+
+      if (action === "approve") {
+        await user.click(within(region).getByRole("button", { name: "Approve" }));
+      } else {
+        const [label, button] = {
+          reject: ["Reason for rejecting (required)", "Reject"],
+          reinstate: ["Reason for reinstating (required)", "Reinstate"],
+          cancel: ["Reason for cancelling (required)", "Cancel booking"],
+        }[action];
+        await user.type(within(region).getByLabelText(label), "Clash");
+        await user.click(within(region).getByRole("button", { name: button }));
+      }
+
+      const alert = await within(region).findByRole("alert");
+      expect(alert).toHaveTextContent(message);
+      const retry = within(alert).queryByRole("button", { name: "Try again" });
+      if (!offersRetry) {
+        expect(retry).not.toBeInTheDocument();
+        return;
+      }
+      expect(retry).toBeInTheDocument();
+      vi.mocked(apiClient.post).mockResolvedValueOnce({ data: { markedConflicting: [] } });
+      await user.click(retry);
+      expect(apiClient.post).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(apiClient.post).mock.lastCall[0]).toBe("/booking-requests/1/approve");
+      expect(await screen.findByText(/^Approved Hall 1 for Event 1\./)).toBeInTheDocument();
+    },
+  );
+
+  it("SCRUM587_AC4_booking_dates_use_the_standard_format", async () => {
+    answer({
+      pending: [
+        {
+          ...pendingItem("1", "pending", "Pending", "PENDING"),
+          overlapping: [{ id: "9", eventName: "Gala", ...PERIOD, createdAt: "2026-10-07T14:05:00+08:00" }],
+        },
+      ],
+    });
+    const user = renderIn(
+      <>
+        <PendingBookingRequests asPage />
+        <FlaggedBookings />
+      </>,
+    );
+    await screen.findByText("Event 1");
+    await screen.findByText("Board Retreat");
+    await user.click(toggleFor("Event 1"));
+    await user.click(toggleFor("Board Retreat"));
+
+    const pending = screen.getByRole("region", { name: "Event 1 at Hall 1" });
+    expect(ddFor(pending, "Requested")).toHaveTextContent(/^6 Oct 2026, 10:00 am$/);
+    expect(within(pending).getByText("Requested 7 Oct 2026, 2:05 pm")).toBeInTheDocument();
+    const flagged = screen.getByRole("region", { name: "Board Retreat at Hall B" });
+    expect(ddFor(flagged, "Flagged")).toHaveTextContent(/^20 Nov 2026, 10:00 am$/);
+    // Venue periods keep their own helper and its zone note.
+    expect(ddFor(flagged, "Booking period")).toHaveTextContent(/\(Singapore time\)$/);
+  });
+});

@@ -10,7 +10,8 @@
 
 import FlaggedBookingFlagDetail from "./FlaggedBookingFlagDetail";
 import FlaggedBookingReasonForm from "./FlaggedBookingReasonForm";
-import { formatTimestamp } from "../services/displayFormat";
+import ErrorNotice from "./ui/ErrorNotice";
+import { formatDateTime } from "../services/displayFormat";
 import { formatVenuePeriod } from "../services/datetimeFormat";
 import { conflictText } from "../services/flaggedBookingErrors";
 import {
@@ -70,16 +71,13 @@ export default function FlaggedBookingCard({
             <dt>Event&apos;s current period</dt>
             <dd>{formatVenuePeriod(item.eventStartsAt, item.eventEndsAt)}</dd>
             <dt>Flagged</dt>
-            <dd>{formatTimestamp(item.flaggedAt, "at an unknown time")}</dd>
+            <dd>{formatDateTime(item.flaggedAt, "at an unknown time")}</dd>
           </dl>
 
           <FlaggedBookingFlagDetail item={item} headingLevel={3} />
 
-          {error && (
-            <p className="pending-bookings__error" role="alert">
-              {error}
-            </p>
-          )}
+          {/* Both resolutions are reason forms, so submitting again is the retry. */}
+          {error && <ErrorNotice message={error} />}
           {clashes.length > 0 && (
             <>
               <h3>What is in the way</h3>

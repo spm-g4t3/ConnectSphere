@@ -27,6 +27,10 @@ import VenueHoldsPanel from "./VenueHoldsPanel";
 import { formatOccupiedPeriod } from "../services/occupiedPeriodDisplay";
 import Button from "./ui/Button";
 import StatusBadge from "./ui/StatusBadge";
+import LoadingText from "./ui/LoadingText";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import { formatDateTimeRange } from "../services/displayFormat";
 import { VENUE_TONES } from "../services/venueStatusTones";
 import { flaggedBookingsHeading, venueSaveFlagReasons } from "../services/flaggedBookingDisplay";
 
@@ -96,6 +100,12 @@ export default function VenueCatalogue({ currentUserId, asPage = false } = {}) {
       setLoadingVenues(false);
     }
   }, []);
+
+  // The error clears first, so a second failure is visibly a new one.
+  function retryVenues() {
+    setVenuesError(null);
+    fetchVenues();
+  }
 
   // No focus/visibilitychange refetch, unlike MyEventRequests. That pattern
   // exists there because a Coordinator can move an Organiser's request out
@@ -251,7 +261,7 @@ export default function VenueCatalogue({ currentUserId, asPage = false } = {}) {
             {flaggedBookings.map((booking, i) => (
               <li key={booking.bookingId ?? i}>
                 <strong>{booking.eventName || "Unnamed event"}</strong>
-                <span>{formatOccupiedPeriod(booking)}</span>
+                <span>{formatOccupiedPeriod(booking, formatDateTimeRange)}</span>
               </li>
             ))}
           </ul>
@@ -266,14 +276,13 @@ export default function VenueCatalogue({ currentUserId, asPage = false } = {}) {
         </div>
       )}
 
-      {loadingVenues && <p>Loading...</p>}
-      {venuesError && (
-        <p className="venue-catalogue__error" role="alert">
-          {venuesError}
-        </p>
-      )}
+      {loadingVenues && <LoadingText />}
+      {venuesError && <ErrorNotice message={venuesError} onRetry={retryVenues} />}
       {!loadingVenues && !venuesError && venues.length === 0 && (
-        <p>No venues in the catalogue yet.</p>
+        <EmptyState
+          message="No venues in the catalogue yet."
+          nextStep="Add a venue with + Add new venue."
+        />
       )}
 
       <ul>
@@ -292,11 +301,9 @@ export default function VenueCatalogue({ currentUserId, asPage = false } = {}) {
                 <StatusBadge tone={retired ? VENUE_TONES.retired : VENUE_TONES.active}>
                   {retired ? "Retired" : "Active"}
                 </StatusBadge>
-                {retireError?.id === venue.id && (
-                  <p className="venue-catalogue__error" role="alert">
-                    {retireError.message}
-                  </p>
-                )}
+                {/* No Try again: retiring cannot be undone, so it goes back
+                    through Retire venue and its confirm. */}
+                {retireError?.id === venue.id && <ErrorNotice message={retireError.message} />}
               </div>
 
               <div className="venue-catalogue__item-actions">

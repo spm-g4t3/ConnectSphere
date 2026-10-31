@@ -6,7 +6,7 @@
 //
 // The four block calls in venueService are mocked, so nothing touches the
 // network. Timezone-safe: fixtures are instants relative to the real clock
-// with day-sized margins, expected ranges come from formatRange, sent
+// with day-sized margins, expected ranges come from formatDateTimeRange, sent
 // timestamps are checked by offset shape and getTime(), and datetime-local
 // inputs are set with fireEvent.change. No fake timers.
 
@@ -21,13 +21,11 @@ import {
   removeVenueBlock,
   updateVenueBlock,
 } from "../../src/services/venueService";
-import { formatRange } from "../../src/services/displayFormat";
+import { formatDateTime, formatDateTimeRange } from "../../src/services/displayFormat";
 import { formatOccupiedPeriod } from "../../src/services/occupiedPeriodDisplay";
 import { toDatetimeLocalValue } from "../../src/services/datetimeFormat";
 import { getVenueBlockHistory } from "../../src/services/venueService";
-import { formatTimestamp } from "../../src/services/displayFormat";
 import { deferred } from "../helpers/async.js";
-import { sgTime } from "../helpers/singaporeTime.js";
 
 vi.mock("../../src/services/venueService", () => ({
   listVenueBlocks: vi.fn(),
@@ -154,7 +152,7 @@ async function renderPanel(venue = VENUE) {
 
 /** The <li> for a block, found by its formatted range. */
 function rowFor(block) {
-  return screen.getByText(formatRange(block.startsAt, block.endsAt)).closest("li");
+  return screen.getByText(formatDateTimeRange(block.startsAt, block.endsAt)).closest("li");
 }
 
 function startInput() {
@@ -218,7 +216,7 @@ function noticeEl() {
 
 function panelAlert() {
   // The panel-level alert is the direct child of .venue-blocks.
-  return document.querySelector(".venue-blocks > p.venue-blocks__error[role='alert']");
+  return document.querySelector(".venue-blocks > .ui-error-notice[role='alert']");
 }
 
 function expectNoUuidInText() {
@@ -471,7 +469,7 @@ describe("VenueBlocksPanel conflicts and override (AC3)", () => {
     expect(screen.getByText("Tech Talk")).toBeInTheDocument();
     expect(screen.getByText("Career Fair")).toBeInTheDocument();
     expect(
-      screen.getByText(formatRange(BOOKING_A.startsAt, BOOKING_A.endsAt)),
+      screen.getByText(formatDateTimeRange(BOOKING_A.startsAt, BOOKING_A.endsAt)),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Choose a different period" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Override and flag 2 bookings" })).toBeEnabled();
@@ -532,11 +530,11 @@ describe("VenueBlocksPanel conflicts and override (AC3)", () => {
     expect(items).toHaveLength(2);
     expect(within(items[0]).getByText("Tech Talk")).toBeInTheDocument();
     expect(
-      within(items[0]).getByText(formatRange(BOOKING_A.startsAt, BOOKING_A.endsAt)),
+      within(items[0]).getByText(formatDateTimeRange(BOOKING_A.startsAt, BOOKING_A.endsAt)),
     ).toBeInTheDocument();
     expect(within(items[1]).getByText("Career Fair")).toBeInTheDocument();
     expect(
-      within(items[1]).getByText(formatRange(BOOKING_B.startsAt, BOOKING_B.endsAt)),
+      within(items[1]).getByText(formatDateTimeRange(BOOKING_B.startsAt, BOOKING_B.endsAt)),
     ).toBeInTheDocument();
 
     // The full event request id is only in the title, never in the text.
@@ -584,11 +582,11 @@ describe("VenueBlocksPanel conflicts and override (AC3)", () => {
     await waitFor(() => expect(noticeEl()).toHaveTextContent(MSG.saved));
     const item = within(noticeEl()).getByRole("listitem");
     expect(within(item).getByText("Tech Talk")).toBeInTheDocument();
-    expect(within(item).getByText(formatOccupiedPeriod(padded))).toBeInTheDocument();
-    expect(formatOccupiedPeriod(padded)).toBe(
-      `Setup ${formatRange(padded.occupiedStartsAt, padded.startsAt)} · ` +
-        `Event ${formatRange(padded.startsAt, padded.endsAt)} · ` +
-        `Turnaround ${formatRange(padded.endsAt, padded.occupiedEndsAt)}`,
+    expect(within(item).getByText(formatOccupiedPeriod(padded, formatDateTimeRange))).toBeInTheDocument();
+    expect(formatOccupiedPeriod(padded, formatDateTimeRange)).toBe(
+      `Setup ${formatDateTimeRange(padded.occupiedStartsAt, padded.startsAt)} · ` +
+        `Event ${formatDateTimeRange(padded.startsAt, padded.endsAt)} · ` +
+        `Turnaround ${formatDateTimeRange(padded.endsAt, padded.occupiedEndsAt)}`,
     );
   });
 
@@ -606,7 +604,7 @@ describe("VenueBlocksPanel conflicts and override (AC3)", () => {
     await waitFor(() => expect(noticeEl()).toHaveTextContent(MSG.saved));
     const item = within(noticeEl()).getByRole("listitem");
     expect(
-      within(item).getByText(formatRange(unpadded.startsAt, unpadded.endsAt)),
+      within(item).getByText(formatDateTimeRange(unpadded.startsAt, unpadded.endsAt)),
     ).toBeInTheDocument();
     expect(item).not.toHaveTextContent(/Setup |Turnaround |·/);
   });
@@ -632,7 +630,7 @@ describe("VenueBlocksPanel conflicts and override (AC3)", () => {
     expect(screen.getByText("Hackathon")).toBeInTheDocument();
     expect(screen.queryByText("Tech Talk")).not.toBeInTheDocument();
     expect(screen.getByText(MSG.changedSince)).toBeInTheDocument();
-    expect(screen.getByText(MSG.changedSince)).toHaveAttribute("role", "alert");
+    expect(screen.getByText(MSG.changedSince).closest('[role="alert"]')).toHaveClass("ui-error-notice");
     // The confirm closed itself: nobody confirms bookings they have not seen.
     expect(screen.queryByRole("button", { name: "Yes, override" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Override and flag 1 booking" })).toBeEnabled();
@@ -966,7 +964,7 @@ describe("VenueBlocksPanel edit (AC4)", () => {
       expect(listVenueBlocks).toHaveBeenCalledTimes(2);
       await waitFor(() =>
         expect(
-          screen.queryByText(formatRange(UPCOMING.startsAt, UPCOMING.endsAt)),
+          screen.queryByText(formatDateTimeRange(UPCOMING.startsAt, UPCOMING.endsAt)),
         ).not.toBeInTheDocument(),
       );
       expectNoUuidInText();
@@ -1059,7 +1057,7 @@ describe("VenueBlocksPanel remove (AC4)", () => {
     expect(listVenueBlocks).toHaveBeenCalledTimes(2);
     await waitFor(() =>
       expect(
-        screen.queryByText(formatRange(UPCOMING.startsAt, UPCOMING.endsAt)),
+        screen.queryByText(formatDateTimeRange(UPCOMING.startsAt, UPCOMING.endsAt)),
       ).not.toBeInTheDocument(),
     );
     expect(within(rowFor(IN_EFFECT)).getByRole("button", { name: "Remove" })).toBeEnabled();
@@ -1210,11 +1208,11 @@ describe("VenueBlocksPanel audit line and history (SCRUM-131, AC4)", () => {
     vi.mocked(listVenueBlocks).mockResolvedValue([audited(UPCOMING)]);
     await renderWithUser();
 
-    expect(auditOf(UPCOMING)).toHaveTextContent(`Created ${formatTimestamp(CREATED_AT)} by you`, {
+    expect(auditOf(UPCOMING)).toHaveTextContent(`Created ${formatDateTime(CREATED_AT)} by you`, {
       normalizeWhitespace: true,
     });
     expect(auditOf(UPCOMING).textContent).toBe(
-      `Created ${sgTime(CREATED_AT)} by you`,
+      `Created ${formatDateTime(CREATED_AT)} by you`,
     );
     // Never changed, so no amendment is named.
     expect(auditOf(UPCOMING).textContent).not.toContain("Last amended");
@@ -1229,7 +1227,7 @@ describe("VenueBlocksPanel audit line and history (SCRUM-131, AC4)", () => {
 
     const audit = auditOf(UPCOMING);
     expect(audit.textContent).toBe(
-      `Created ${formatTimestamp(CREATED_AT)} by you · Last amended ${formatTimestamp(AMENDED_AT)} by d2a3b4c5`,
+      `Created ${formatDateTime(CREATED_AT)} by you · Last amended ${formatDateTime(AMENDED_AT)} by d2a3b4c5`,
     );
     expect(audit.querySelector("code")).toHaveAttribute("title", OTHER);
     expect(audit.textContent).not.toContain(OTHER);
@@ -1243,7 +1241,7 @@ describe("VenueBlocksPanel audit line and history (SCRUM-131, AC4)", () => {
     ]);
     await renderWithUser();
     expect(auditOf(UPCOMING).textContent).toBe(
-      `Created ${formatTimestamp(CREATED_AT)} outside the app`,
+      `Created ${formatDateTime(CREATED_AT)} outside the app`,
     );
   });
 
@@ -1261,7 +1259,7 @@ describe("VenueBlocksPanel audit line and history (SCRUM-131, AC4)", () => {
     await renderWithUser(VENUE, {});
 
     const audit = auditOf(UPCOMING);
-    expect(audit.textContent).toBe(`Created ${formatTimestamp(CREATED_AT)} by d1000000`);
+    expect(audit.textContent).toBe(`Created ${formatDateTime(CREATED_AT)} by d1000000`);
     expect(audit.querySelector("code")).toHaveAttribute("title", ME);
     expect(audit.textContent).not.toContain("you");
   });
@@ -1540,7 +1538,7 @@ describe("VenueBlocksPanel coverage gaps (SCRUM-132)", () => {
     expect(items).toHaveLength(2);
     for (const item of items) {
       expect(within(item).getByText("Unnamed event")).toBeInTheDocument();
-      expect(within(item).getByText(formatRange(bare.startsAt, bare.endsAt))).toBeInTheDocument();
+      expect(within(item).getByText(formatDateTimeRange(bare.startsAt, bare.endsAt))).toBeInTheDocument();
       const code = within(item).getByText("no event");
       expect(code.tagName).toBe("CODE");
       expect(code).not.toHaveAttribute("title");

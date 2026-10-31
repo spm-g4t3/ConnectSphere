@@ -22,10 +22,10 @@
 //
 // The wording props let VenueForm reuse it for bookings that new opening hours
 // leave out; each defaults to the block wording, and formatPart writes each
-// period (formatOccupiedPeriod's own default when absent).
+// period (the standard date format when absent).
 
 import { useState } from "react";
-import { shortId } from "../services/displayFormat";
+import { formatDateTimeRange, shortId } from "../services/displayFormat";
 import { formatOccupiedPeriod } from "../services/occupiedPeriodDisplay";
 import Button from "./ui/Button";
 
@@ -61,7 +61,7 @@ export default function BlockConflictList({
   overrideLabel,
   confirmText = "Flag these bookings for review and notify each event's coordinator?",
   confirmLabel = "Yes, override",
-  formatPart,
+  formatPart = formatDateTimeRange,
 }) {
   // The signature the confirm was opened for, or null when it is closed.
   const [confirmingFor, setConfirmingFor] = useState(null);

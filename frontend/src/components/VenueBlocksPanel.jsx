@@ -39,7 +39,7 @@ import {
 import { blockErrorMessage, isStaleBlockError } from "../services/venueBlockErrors";
 import { BLOCK_PHASE_LABELS, blockPhase } from "../services/venueBlockDisplay";
 import { reasonLabel } from "../services/venueBlockReasons";
-import { formatRange, formatTimestamp, shortId } from "../services/displayFormat";
+import { formatDateTime, formatDateTimeRange, shortId } from "../services/displayFormat";
 import { blockAuditSummary } from "../services/venueBlockHistoryDisplay";
 import VenueBlockForm from "./VenueBlockForm";
 import BlockConflictList from "./BlockConflictList";
@@ -47,6 +47,10 @@ import BlockHistory, { BlockActor } from "./BlockHistory";
 import { formatOccupiedPeriod } from "../services/occupiedPeriodDisplay";
 import Button from "./ui/Button";
 import StatusBadge from "./ui/StatusBadge";
+import LoadingText from "./ui/LoadingText";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import { SESSION_EXPIRED } from "../services/apiErrors";
 import { BLOCK_PHASE_TONES, toneFor } from "../services/venueStatusTones";
 
 /** "1 booking was" / "3 bookings were". */
@@ -105,6 +109,12 @@ export default function VenueBlocksPanel({ venue, currentUserId }) {
   useEffect(() => {
     fetchBlocks();
   }, [fetchBlocks]);
+
+  // The error clears first, so a second failure is visibly a new one.
+  function retryBlocks() {
+    setListError(null);
+    fetchBlocks();
+  }
 
   function clearConflicts() {
     setConflicts([]);
@@ -267,7 +277,7 @@ export default function VenueBlocksPanel({ venue, currentUserId }) {
                   {/* The whole period the booking holds the venue, setup and
                       turnaround included (AC7): that is what the block
                       overlapped, which the event times alone may not show. */}
-                  <span>{formatOccupiedPeriod(booking)}</span>
+                  <span>{formatOccupiedPeriod(booking, formatDateTimeRange)}</span>
                   <code title={booking.eventRequestId ?? undefined}>
                     {booking.eventRequestId ? shortId(booking.eventRequestId) : "no event"}
                   </code>
@@ -295,12 +305,12 @@ export default function VenueBlocksPanel({ venue, currentUserId }) {
 
     return (
       <p className="venue-blocks__audit">
-        Created {formatTimestamp(created.at)}{" "}
+        Created {formatDateTime(created.at)}{" "}
         <BlockActor id={created.by} currentUserId={currentUserId} />
         {amended && (
           <>
             {" · Last amended "}
-            {formatTimestamp(amended.at)}{" "}
+            {formatDateTime(amended.at)}{" "}
             <BlockActor id={amended.by} currentUserId={currentUserId} />
           </>
         )}
@@ -329,7 +339,7 @@ export default function VenueBlocksPanel({ venue, currentUserId }) {
       <li key={block.id} className={className}>
         <div className="venue-blocks__item-main">
           <strong>{reasonLabel(block.reason)}</strong>
-          <span>{formatRange(block.startsAt, block.endsAt)}</span>
+          <span>{formatDateTimeRange(block.startsAt, block.endsAt)}</span>
           <StatusBadge tone={toneFor(BLOCK_PHASE_TONES, phase)}>
             {BLOCK_PHASE_LABELS[phase]}
           </StatusBadge>
@@ -343,11 +353,8 @@ export default function VenueBlocksPanel({ venue, currentUserId }) {
               Ended blocks are kept as a record and can&apos;t be changed.
             </p>
           )}
-          {removeError?.id === block.id && (
-            <p className="venue-blocks__error" role="alert">
-              {removeError.message}
-            </p>
-          )}
+          {/* No Try again on an action: Remove and its confirm are still there. */}
+          {removeError?.id === block.id && <ErrorNotice message={removeError.message} />}
         </div>
 
         <div className="venue-blocks__item-actions">
@@ -422,11 +429,7 @@ export default function VenueBlocksPanel({ venue, currentUserId }) {
         Blocks for {venue.name} — {venue.location}
       </h2>
 
-      {panelError && (
-        <p className="venue-blocks__error" role="alert">
-          {panelError}
-        </p>
-      )}
+      {panelError && <ErrorNotice message={panelError} />}
       {renderNotice()}
 
       {!formMode && (
@@ -454,11 +457,7 @@ export default function VenueBlocksPanel({ venue, currentUserId }) {
             onDatesChanged={clearConflicts}
             onDetailsChanged={clearConflicts}
           />
-          {overrideError && (
-            <p className="venue-blocks__error" role="alert">
-              {overrideError}
-            </p>
-          )}
+          {overrideError && <ErrorNotice message={overrideError} />}
           <BlockConflictList
             conflicts={conflicts}
             onChangePeriod={clearConflicts}
@@ -471,14 +470,22 @@ export default function VenueBlocksPanel({ venue, currentUserId }) {
       <section className="venue-blocks__current">
         <h3>Current and upcoming blocks</h3>
 
-        {loadingBlocks && blocks.length === 0 && <p>Loading...</p>}
+        {loadingBlocks && blocks.length === 0 && <LoadingText />}
         {listError && (
-          <p className="venue-blocks__error" role="alert">
-            {listError}
-          </p>
+          <ErrorNotice
+            message={listError}
+            onRetry={listError === SESSION_EXPIRED ? undefined : retryBlocks}
+          />
         )}
         {!loadingBlocks && !listError && blocks.length === 0 && (
-          <p>This venue has no blocks.</p>
+          <EmptyState
+            message="This venue has no blocks."
+            nextStep={
+              venueRetired
+                ? "A retired venue cannot be blocked."
+                : "Add a block with + Add a block when the venue cannot be booked."
+            }
+          />
         )}
 
         {blocks.length > 0 && (

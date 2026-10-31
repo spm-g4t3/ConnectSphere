@@ -21,7 +21,7 @@
 
 import { useEffect, useState } from "react";
 import { getVenueBlockHistory } from "../services/venueService";
-import { formatTimestamp, shortId } from "../services/displayFormat";
+import { formatDateTime, shortId } from "../services/displayFormat";
 import {
   blockCreationSummary,
   blockHistoryActionLabel,
@@ -29,6 +29,9 @@ import {
   isCurrentUser,
 } from "../services/venueBlockHistoryDisplay";
 import { SESSION_EXPIRED } from "../services/apiErrors";
+import LoadingText from "./ui/LoadingText";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
 
 // Keyed by status. The server's `error` is never shown: it is database prose
 // that can carry raw uuids.
@@ -122,6 +125,9 @@ export default function BlockHistory({ venueId, blockId, refreshKey, currentUser
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  // Bumped by Try again, so the retry reruns the effect and keeps its
+  // stale-response guard rather than fetching around it.
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let ignore = false;
@@ -145,18 +151,22 @@ export default function BlockHistory({ venueId, blockId, refreshKey, currentUser
     return () => {
       ignore = true;
     };
-  }, [venueId, blockId, refreshKey]);
+  }, [venueId, blockId, refreshKey, attempt]);
+
+  function retry() {
+    setError(null);
+    setAttempt((n) => n + 1);
+  }
 
   return (
     <section className="block-history" id={id} aria-label="Change history">
-      {loading && entries.length === 0 && <p>Loading history...</p>}
-      {error && (
-        <p className="venue-blocks__error" role="alert">
-          {error}
-        </p>
-      )}
+      {loading && entries.length === 0 && <LoadingText />}
+      {error && <ErrorNotice message={error} onRetry={error === SESSION_EXPIRED ? undefined : retry} />}
       {!loading && !error && entries.length === 0 && (
-        <p>No changes have been recorded for this block.</p>
+        <EmptyState
+          message="No changes have been recorded for this block."
+          nextStep="A change appears here when this block is edited."
+        />
       )}
 
       {entries.length > 0 && (
@@ -166,7 +176,7 @@ export default function BlockHistory({ venueId, blockId, refreshKey, currentUser
               <li key={entry?.id ?? index}>
                 <div className="venue-history__meta">
                   <strong>{blockHistoryActionLabel(entry?.action)}</strong>
-                  <span>{formatTimestamp(entry?.changedAt)}</span>
+                  <span>{formatDateTime(entry?.changedAt)}</span>
                   <BlockActor
                     id={entry?.changedBy}
                     currentUserId={currentUserId}

@@ -15,7 +15,7 @@
 // Like VenueDetail's fmt, nothing here may throw: one odd value would
 // otherwise blank the whole trail, the one place a change can be traced.
 
-import { formatTimestamp } from "./displayFormat";
+import { formatDateTime } from "./displayFormat";
 import { reasonLabel } from "./venueBlockReasons";
 
 export const BLOCK_HISTORY_ACTION_LABELS = Object.freeze({
@@ -74,7 +74,7 @@ function isPlainObject(value) {
 }
 
 /**
- * One history value, as text. Times through formatTimestamp, the reason
+ * One history value, as text. Times through formatDateTime, the reason
  * through reasonLabel, null or blank as "(none)". Never throws.
  *
  * @param {string} key    the snake_case column name
@@ -86,7 +86,7 @@ export function formatBlockHistoryValue(key, value) {
     if (value === null || value === undefined) return NONE;
     if (typeof value === "string" && value.trim() === "") return NONE;
 
-    if (TIME_KEYS.has(key)) return formatTimestamp(value, NONE);
+    if (TIME_KEYS.has(key)) return formatDateTime(value, NONE);
     if (typeof value === "object") return JSON.stringify(value);
     if (key === "reason") return String(reasonLabel(value));
     return String(value);

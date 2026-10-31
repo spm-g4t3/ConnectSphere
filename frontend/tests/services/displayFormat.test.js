@@ -12,12 +12,16 @@ import {
   formatDate,
   formatDateTime,
   formatDateTimeRange,
+  formatDateTimeRangeOrFallback,
   formatDay,
+  formatDayMonth,
   formatEventDate,
+  formatLongDay,
   formatMediumDateTime,
   formatMediumTimestamp,
   formatRange,
   formatTimestamp,
+  formatWeekdayShort,
   orNotSpecified,
   pluralise,
   shortId,
@@ -206,6 +210,29 @@ describe("the display format", () => {
     expect(formatDateTimeRange(null, undefined)).toBe("unknown – unknown");
     expect(formatDateTimeRange(null, MORNING, "-")).toBe("- – 15 Jan 2026, 9:00 am");
     expect(formatDateTimeRange("soon", LATE_MORNING)).toBe("soon – 15 Jan 2026, 11:00 am");
+  });
+});
+
+// The venue calendar builds its days as the device's local midnights.
+describe("calendar day labels", () => {
+  // Local midnight, so in Singapore it is the previous day in UTC, and east of
+  // Singapore it is the previous day in Singapore too: neither zone may shift it.
+  const MON_28_SEP = new Date(2026, 8, 28);
+
+  it("SCRUM587_AC4_calendar_day_labels_are_the_fixed_text_for_the_local_day", () => {
+    expect(formatWeekdayShort(MON_28_SEP)).toBe("Mon");
+    expect(formatDayMonth(MON_28_SEP)).toBe("28 Sept");
+    expect(formatLongDay(MON_28_SEP)).toBe("Monday, 28 September 2026");
+  });
+
+  it("SCRUM587_AC4_a_range_with_no_dates_says_the_fallback_once", () => {
+    expect(formatDateTimeRangeOrFallback(null, undefined, "no date")).toBe("no date");
+    expect(formatDateTimeRangeOrFallback(null, "2026-01-15T01:00:00Z", "no date")).toBe(
+      "no date – 15 Jan 2026, 9:00 am",
+    );
+    expect(formatDateTimeRangeOrFallback("2026-01-15T01:00:00Z", "2026-01-15T03:00:00Z", "no date")).toBe(
+      "15 Jan 2026, 9:00 am – 11:00 am",
+    );
   });
 });
 
