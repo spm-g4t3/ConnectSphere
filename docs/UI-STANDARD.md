@@ -84,6 +84,7 @@ Defined once on `:root` in `frontend/src/index.css`.
 
 - Use `ErrorNotice` with a `Try again` button. Never "Retry" or other wording.
 - Props: `message`, optional `onRetry` (the `Try again` button shows only when it is given).
+- Leave out `onRetry` when retrying cannot help or is already on screen: an expired session (only signing in again fixes it) or a form error (submitting again is the retry).
 
 ## Confirmations
 

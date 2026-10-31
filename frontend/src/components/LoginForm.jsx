@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
+import Button from "./ui/Button";
+import ErrorNotice from "./ui/ErrorNotice";
 
 export default function LoginForm() {
   const { login } = useAuth();
@@ -63,11 +65,12 @@ export default function LoginForm() {
         />
       </label>
 
-      {error && <p className="login-form__error" role="alert">{error}</p>}
+      {/* No Try again: submitting the form again is the retry. */}
+      {error && <ErrorNotice message={error} />}
 
-      <button type="submit" disabled={submitting}>
+      <Button type="submit" disabled={submitting}>
         {submitting ? "Logging in..." : "Log in"}
-      </button>
+      </Button>
     </form>
   );
 }

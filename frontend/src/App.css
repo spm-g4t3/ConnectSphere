@@ -34,7 +34,7 @@ button { cursor: pointer; }
    one: cursor: wait is right for a login in flight, but a permanently
    disabled Edit is not-allowed, not a wait. */
 .dashboard button:disabled { cursor: not-allowed; opacity: 0.65; }
-.app-nav__error, .venue-search__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 0; padding: 8px 12px; }
+.venue-search__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 0; padding: 8px 12px; }
 .auth-success { animation: auth-success-fade 3.5s ease-in-out forwards; background: #e8f7f1; border: 1px solid #b9e2d1; border-radius: 6px; color: #17684f; margin: 18px auto 0; max-width: 1080px; padding: 10px 14px; }
 @keyframes auth-success-fade {
   0%, 100% { opacity: 0; transform: translateY(-6px); }
@@ -47,7 +47,6 @@ button { cursor: pointer; }
 .login-form input { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); padding: 12px; }
 .login-form input:focus { border-color: var(--teal); outline: 2px solid rgba(8, 127, 123, 0.16); }
 .login-form button { width: 100%; }
-.login-form__error { background: #fff0ee; border-radius: 6px; color: #a43c32; padding: 10px 12px; }
 .eyebrow { color: var(--teal); font-size: 0.75rem; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; }
 .placeholder-page p, .loading-screen { color: var(--muted); }
 .loading-screen { align-items: center; display: grid; min-height: 100svh; place-items: center; }
@@ -208,7 +207,7 @@ button { cursor: pointer; }
 .dashboard--venue-staff .status--retired { background: #eef2f1; color: var(--muted); }
 /* The rule above makes every .dashboard p muted grey, which would render a
    failed retire in exactly the same voice as the empty-state text. Same
-   colour pair as .app-nav__error. */
+   colour pair as .venue-search__error. */
 .dashboard .venue-catalogue__error, .dashboard .venue-form__error, .dashboard .venue-detail__error, .dashboard .review-queue__error, .dashboard .unassigned-queue__error, .dashboard .venue-block-form__error, .dashboard .notification-inbox__row-error, .dashboard .venue-blocks__error, .dashboard .venue-hold-form__error, .dashboard .venue-holds__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 6px 0 0; padding: 8px 12px; }
 /* NECESSARY, not cosmetic. .dashboard li above forces flex with
    justify-content: space-between, which on a checkbox row throws the box to

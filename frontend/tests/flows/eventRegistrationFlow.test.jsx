@@ -302,7 +302,7 @@ describe("SCRUM36 attendee registration through the real App route", () => {
   it("SCRUM36_AC4_waits_for_authentication_to_load", () => {
     auth(null, true);
     render(<App />);
-    expect(screen.getByText("Loading ConnectSphere...")).toBeInTheDocument();
+    expect(screen.getByText("Loading...")).toBeInTheDocument();
     expect(getOpenEvent).not.toHaveBeenCalled();
     expect(registerForEvent).not.toHaveBeenCalled();
   });
