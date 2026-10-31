@@ -1,7 +1,7 @@
 # SCRUM-177 — Notify Users of Registration Changes
 
 **Story:** Notify Users of Registration Changes
-**Subtasks so far:** SCRUM-235, the notification contract (migration 044). SCRUM-236, the handlers and transition rules (migration 045). SCRUM-238, recipient resolution (migration 046). SCRUM-237, the opening/closing job (migration 047). SCRUM-239, the flows wired in (migration 048).
+**Subtasks so far:** SCRUM-235, the notification contract (migration 044). SCRUM-236, the handlers and transition rules (migration 045). SCRUM-238, recipient resolution (migration 046). SCRUM-237, the opening/closing job (migration 047). SCRUM-239, the flows wired in (migration 048). SCRUM-240, idempotency (migration 049).
 **Status as of 30 October 2026:** contract, handlers, recipients, the job and the flows are built and tested against the schema (PGlite). Migrations 044–048 haven't been applied to live Supabase, and the two-session race test (`waitingListConcurrency.realdb.test.js`) hasn't been run against them.
 
 The contract is in three places, and they must agree:
@@ -92,7 +92,7 @@ select notify_registration_change(
 - Dedupe: unique on `(recipient_id, event_request_id, type, occurrenceKey)`. Repeating an occurrence inserts nothing, and a new occurrence notifies again.
 - The row is also checked by `notifications_registration_change_shape`: the event must be set, the key must be present, and the audience must be allowed for the type.
 
-**Occurrence keys.** Since 047, window notices use `opened:<n>` / `closed:<n>`, where `n` is the event's `registration_notice_state.window_generation` after the transition. That makes the key stable: a retry of a rolled-back transition reuses it, and a reopening always gets a new one, whatever the dates. Capacity notices still use `full:` / `released:` plus the UTC instant of the transition. The recorded state already stops a repeat, so the key is a second guard.
+**Occurrence keys.** Since 047, window notices use `opened:<n>` / `closed:<n>`, where `n` is the event's `registration_notice_state.window_generation` after the transition. That makes the key stable: a retry of a rolled-back transition reuses it, and a reopening always gets a new one, whatever the dates. Since 049, capacity notices use `full:<n>` / `released:<n>` from `capacity_generation` in the same way. Section 6 has the full guarantee.
 
 ## 5. Handlers and transition rules (SCRUM-236, migration 045)
 
@@ -225,7 +225,39 @@ All the columns are `timestamptz` and are compared as instants, so time zones ne
 
 **Failures.** Each event runs in its own subtransaction. If one fails, its work is rolled back and it's reported in `failures` and logged by the job, and it stays due for the next run; the other events still go. A failed RPC is logged and retried on the next tick. Two API processes running the job at once are safe, because events are visited in a fixed order under their locks and the second run finds them settled.
 
-## 6. Open questions
+## 6. Idempotency and delivery guarantees (SCRUM-240, migration 049)
+
+**Occurrence identity.** A notice's occurrence is `(event_request_id, type, occurrenceKey)`. The key is `opened:<n>`, `closed:<n>`, `full:<n>` or `released:<n>`, where `n` is the event's `window_generation` or `capacity_generation` after the transition. Both counters only ever go up, so:
+- the same transition always gets the same key, including when it's retried after a rollback;
+- a later legitimate transition (a reopening, a refill) gets a new key and is never suppressed;
+- an edited date creates no occurrence unless the window actually changes.
+
+Promotion keeps its own identity, `(registrationId, waitlistedAt)` from 037. Each queue entry is promoted once, and a rejoin is a new entry.
+
+**Where uniqueness is enforced.** In the database, never in process memory:
+1. `registration_notice_state` records the last announced state. Each handler reads and changes it under the event row lock, then its own row lock. Two workers, or a flow and a worker, on the same event therefore run one after the other, and the second finds the transition already recorded.
+2. `notifications_one_per_registration_change` is unique on `(recipient_id, event_request_id, type, occurrenceKey)`. Any writer, even one that skipped step 1, inserts with `on conflict do nothing`, and a plain duplicate insert fails with 23505. That's a per-recipient backstop: one row per person per occurrence.
+
+The job's in-process `running` flag only avoids overlapping ticks in one process. Correctness doesn't depend on it, so a restart, a second API instance or a repeated run is safe.
+
+**Bookkeeping and writes commit together.** The state change and every notice for a transition are written in one transaction: the flow's own, or the job's per-event subtransaction. If any notice fails, all of them and the state change are rolled back:
+- **job:** the event is reported in `failures`, stays due, and is retried on the next run with the same key;
+- **flow:** the operation itself fails (a withdrawal isn't recorded), and a retry does all of it.
+
+A transition is therefore never recorded with some of its notices missing, so there's never partial work to repair.
+
+**Scheduled and immediate paths.** Both call the same handlers against the same state, so whichever commits first announces the transition, and the other finds nothing to do. Both jobs can promote at an opening; the promotion runs under the event lock, so a place is handed out once and its capacity transition is announced once.
+
+**Guarantee.** For every committed registration transition, each recipient resolved at that moment gets exactly one in-app notification row, committed atomically with the transition.
+
+**Limitations**
+- "Delivery" means the in-app notification row. There's no push or email; the inbox reads the row.
+- The scheduled path is at most a minute late, plus any downtime. A window that opened and closed again entirely during downtime is never announced (section 5a).
+- Recipients are resolved when the transition is announced. For a late scheduled run, that's the waiting list at that moment, not at the boundary.
+- An event whose notices keep failing is retried every minute and logged each time; nothing escalates beyond the log.
+- Simultaneous workers are proved in `registrationNoticeRaces.realdb.test.js`, which needs `CONCURRENCY_DATABASE_URL` (a disposable Postgres) and is skipped otherwise, including in CI. The PGlite suites cover everything else on one connection.
+
+## 7. Open questions
 
 1. Someone in the product role should sign off on every **proposed** row in section 3, and on dropping the actor's own notice.
 2. When an event is **cancelled**, it leaves Confirmed. Should waiting attendees be told? `event_cancelled` reaches staff only. Until someone decides, the window handler sends nothing for a cancelled event.

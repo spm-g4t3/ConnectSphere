@@ -30,18 +30,21 @@ const PREAMBLE = SUPABASE_PREAMBLE.replace(
   end $$;`,
 );
 
-/** Builds the schema in a fresh database and returns a factory for new connections. */
-export async function createRealSchemaDb() {
+/**
+ * Builds the schema in a fresh database and returns a factory for new connections.
+ * Each test file names its own database: files run in parallel, and each drops its own.
+ */
+export async function createRealSchemaDb({ database = DATABASE } = {}) {
   guard(REAL_DB_URL);
   const { default: pg } = await import('pg');
   const admin = new pg.Client({ connectionString: REAL_DB_URL });
   await admin.connect();
-  await admin.query(`drop database if exists ${DATABASE} with (force)`);
-  await admin.query(`create database ${DATABASE}`);
+  await admin.query(`drop database if exists ${database} with (force)`);
+  await admin.query(`create database ${database}`);
   await admin.end();
 
   const url = new URL(REAL_DB_URL);
-  url.pathname = `/${DATABASE}`;
+  url.pathname = `/${database}`;
   const connect = async ({ role } = {}) => {
     const client = new pg.Client({ connectionString: url.toString() });
     await client.connect();
