@@ -830,3 +830,13 @@ begin
 end;
 $$;
 revoke execute on function apply_significant_event_change(uuid, jsonb, text, uuid, jsonb) from public, anon, authenticated;
+
+-- ---------------------------------------------------------------------
+-- 6. Strip the reason from attendee notices stored before 042
+-- ---------------------------------------------------------------------
+-- notificationService.js sends payloads unchanged, so an older row would still
+-- put the coordinator's reason in the attendee's browser. Re-runnable.
+update notifications
+   set payload = payload - 'reason'
+ where type = 'event_significant_change_attendee'
+   and payload ? 'reason';

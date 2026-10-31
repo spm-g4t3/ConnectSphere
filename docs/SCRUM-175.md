@@ -38,7 +38,7 @@ coordinator's message. No attendee notice carries the internal reason.
 | AC4: affected staff told | Date/time: SCRUM-395 tells Venue Staff and Technical Support. Cancellation: 013's staff notices, kept in 042 | AC3-06, AC4-01; `cancelEventRequestDatabase` |
 | AC5: organiser told of a change request decision | SCRUM-402's `process_change_request` (PR #95) | SCRUM-402's tests; not verifiable here (D1) |
 | AC6: told of a reschedule, postponement or cancellation | Reschedule/postponement: SCRUM-395. Cancellation: `cancel_event_request` (042) | AC3-06, AC4-01, AC6-01 to AC6-03 |
-| AC7: names the event and change, nothing unauthorised | Attendee payloads carry public details only; display never shows a reason | AC7-01 to AC7-05, T-01 to T-03 |
+| AC7: names the event and change, nothing unauthorised | Attendee payloads carry public details only; display never shows a reason | AC7-01 to AC7-06, T-01 to T-03 |
 
 ## 3. Design decisions
 
@@ -84,9 +84,9 @@ the internal reason.
 ### D6. The reason is removed at the source
 
 `notificationService.js` passes payloads to the client unchanged, so 042 removes
-the reason from `event_significant_change_attendee` in SQL. The display also never
-shows it, for rows stored before 042. An optional clean-up of stored rows exists
-outside the repo and is not part of 042.
+the reason from `event_significant_change_attendee` in SQL, both from new notices
+and, in section 6, from rows stored before 042 (re-runnable). The display also
+never shows it.
 
 *Rejected: hiding it only in the display.* The reason would still reach the
 attendee's browser.
@@ -133,10 +133,8 @@ Commands (inside `backend/` or `frontend/`): `npx vitest run <files>`. CI's
 
 1. Paste `backend/db/migrations/042_event_change_notification_types.sql` into the
    Supabase SQL editor and run it once. It is re-runnable (D2).
-2. The optional clean-up of stored attendee reasons (D6) is separate; run it only
-   if wanted.
-3. Tell SCRUM-402's owner (D1; their 036 and 039 widen the list the same way,
+2. Tell SCRUM-402's owner (D1; their 036 and 039 widen the list the same way,
    D2) and SCRUM-395's owner (D6: attendee notices no longer carry the reason).
    A later migration that restates `notifications_type_known` whole, as AGENTS.md
    says, must include `event_confirmed` and `event_venue_changed`.
-4. Redeploy the API and frontend.
+3. Redeploy the API and frontend.

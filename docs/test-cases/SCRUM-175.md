@@ -72,6 +72,7 @@
 | AC7-03 (trap) | AC7 | display | `SCRUM175_AC7_attendee_cancellation_never_shows_the_internal_reason`, `…_an_attendee_change_notice_never_shows_a_reason`, `…_attendee_confirmation_does_not_show_organiser_only_booking_data` | A reason or booking data shown from an older or malformed row |
 | AC7-04 | AC7 | display | `SCRUM175_AC7_%s_with_%s_audience_is_generic` (event_confirmed with venue_staff or no audience, event_venue_changed with organiser) | An unexpected audience shown attendee or organiser wording |
 | AC7-05 | AC7 | display | `SCRUM175_AC7_attendee_%s_opens_the_attendee_event_page`, `…_attendee_event_cancelled_opens_nothing`, `…_organiser_event_confirmed_opens_their_list_focused_on_the_event` | A notice opening a page its reader cannot see |
+| AC7-06 (trap) | AC7 | pglite | `SCRUM175_AC7_042_strips_the_reason_from_attendee_notices_stored_before_it` (new) | A pre-042 attendee row still sends the reason to the browser; the organiser's row loses it (D6) |
 | T-01 | AC7 | types | `SCRUM175_AC7_%s_inserts_when_it_names_its_event`, `…_is_refused_without_an_event` (event_confirmed, event_venue_changed) | A notice that cannot name its event |
 | T-02 | AC7 | types | `SCRUM175_AC7_an_unknown_type_is_still_refused`, `…_the_widened_list_keeps_037s_types_and_adds_each_new_type_once`, `SCRUM175_AC7_existing_type_%s_still_inserts` (4 types) | Widening drops or duplicates a type |
 | T-03 | D2 | types | `SCRUM175_AC7_rerunning_042_keeps_a_type_another_migration_added` | Re-running 042 drops a type another branch added |
