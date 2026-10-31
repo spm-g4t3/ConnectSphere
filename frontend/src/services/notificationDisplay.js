@@ -96,6 +96,12 @@
 //     fields }; fields lists the registration dates the new start now precedes
 //   registration_promoted (037, SCRUM-460): { eventRequestId, eventName,
 //     registrationId }
+//   registration_opened / registration_closed / registration_capacity_reached
+//     / registration_place_released (044, SCRUM-177): { audience,
+//     eventRequestId, eventName, occurrenceKey }, plus opensAt, closesAt and
+//     cause; closedAt and cause; capacity and registeredCount; and capacity,
+//     registeredCount and cause. audience is organiser, coordinator or (opened
+//     and closed only) waitlisted
 //   equipment_* (097, SCRUM-176): { audience, eventRequestId, eventName,
 //     lines: [{ equipmentType, quantity, reserved, outcome }], ... }; see
 //     describeEquipmentNotification for what each type adds.
@@ -116,6 +122,14 @@ const PREVIOUS_COORDINATOR = "the previous coordinator";
 // Week 7: a flagged booking tells its coordinator another plan is needed.
 const ALTERNATIVE_ARRANGEMENTS = " Alternative arrangements are required.";
 const VENUE_RETIRED = "The venue has been retired.";
+// registration_closed causes (044, 045); the same reasons registration_closed_reason gives.
+const REGISTRATION_CLOSED_CAUSES = Object.freeze({
+  closing_time: "The closing time passed.",
+  switched_off: "Registration was switched off.",
+  settings_changed: "The registration dates were changed.",
+  event_started: "The event has started.",
+  event_not_confirmed: "The event is no longer confirmed.",
+});
 
 /** True when `value` is a time that will parse. */
 function isInstant(value) {
@@ -809,6 +823,57 @@ const DESCRIBERS = {
     return {
       headline: `You have a place at ${eventName}`,
       detail: "A place opened and you were first on the waiting list, so you are now registered.",
+    };
+  },
+
+  // SCRUM-177 (AC1). Staff are told the window; a waiting attendee that the
+  // queue is moving again.
+  registration_opened(payload, { eventName }) {
+    if (payload.audience === "waitlisted") {
+      return {
+        headline: `Registration for ${eventName} has reopened`,
+        detail: "Places can be offered from the waiting list again. You keep your place in the queue.",
+      };
+    }
+    return {
+      headline: `Registration for ${eventName} is open`,
+      detail: isInstant(payload.closesAt)
+        ? `Attendees can register until ${formatDateTime(payload.closesAt)}.`
+        : "Attendees can register until registration is switched off or the event starts.",
+    };
+  },
+
+  // SCRUM-177 (AC1). A cause this build does not know is left out, not guessed.
+  registration_closed(payload, { eventName }) {
+    const cause = Object.hasOwn(REGISTRATION_CLOSED_CAUSES, payload.cause ?? "")
+      ? `${REGISTRATION_CLOSED_CAUSES[payload.cause]} `
+      : "";
+    return {
+      headline: `Registration for ${eventName} has closed`,
+      detail: payload.audience === "waitlisted"
+        ? `${cause}No places are offered from the waiting list while it is closed; you keep your place in the queue.`
+        : `${cause}No new attendees can register.`,
+    };
+  },
+
+  // SCRUM-177 (AC2). Counts only; never who registered.
+  registration_capacity_reached(payload, { eventName }) {
+    return {
+      headline: `${eventName} is full`,
+      detail: Number.isInteger(payload.capacity)
+        ? `All ${payload.capacity} places are taken.`
+        : "All places are taken.",
+    };
+  },
+
+  // SCRUM-177 (AC4). Sent only when nobody was waiting to take the place.
+  registration_place_released(payload, { eventName }) {
+    const counts = Number.isInteger(payload.capacity) && Number.isInteger(payload.registeredCount)
+      ? ` ${payload.registeredCount} of ${payload.capacity} places are now taken.`
+      : "";
+    return {
+      headline: `A place opened at ${eventName}`,
+      detail: `An attendee withdrew.${counts}`,
     };
   },
 

@@ -1198,6 +1198,11 @@ const FIXTURES = {
   // SCRUM-175 (042).
   event_confirmed: { audience: "organiser", eventName: "Tech Talk", reconfirmed: false, venues: [] },
   event_venue_changed: { audience: "attendee", eventName: "Tech Talk", previousVenueName: "Hall A", venueName: "Hall B" },
+  // SCRUM-177 (044).
+  registration_opened: { audience: "organiser", eventName: "Tech Talk", cause: "opening_time" },
+  registration_closed: { audience: "organiser", eventName: "Tech Talk", cause: "closing_time" },
+  registration_capacity_reached: { audience: "organiser", eventName: "Tech Talk", capacity: 2, registeredCount: 2 },
+  registration_place_released: { audience: "organiser", eventName: "Tech Talk", cause: "withdrawal" },
 };
 
 describe("describeNotification: event_rejected (SCRUM-347)", () => {
@@ -1298,5 +1303,74 @@ describe("describeNotification: registration_promoted (SCRUM-460 AC5)", () => {
         headline: "You have a place at Tech Talk",
         detail: "A place opened and you were first on the waiting list, so you are now registered.",
       });
+  });
+});
+
+describe("describeNotification: registration changes (SCRUM-177)", () => {
+  const d = (type, payload) => describeNotification({ id: "n1", type, payload: { eventName: "Tech Talk", ...payload } });
+
+  it("SCRUM177_AC1_tells_staff_registration_opened_and_until_when", () => {
+    expect(d("registration_opened", { audience: "organiser", closesAt: "2026-11-20T02:00:00Z" })).toEqual({
+      headline: "Registration for Tech Talk is open",
+      detail: `Attendees can register until ${formatDateTime("2026-11-20T02:00:00Z")}.`,
+    });
+    expect(d("registration_opened", { audience: "coordinator", closesAt: null }).detail)
+      .toBe("Attendees can register until registration is switched off or the event starts.");
+  });
+
+  it("SCRUM177_AC3_tells_a_waiting_attendee_the_queue_moves_again", () => {
+    expect(d("registration_opened", { audience: "waitlisted" })).toEqual({
+      headline: "Registration for Tech Talk has reopened",
+      detail: "Places can be offered from the waiting list again. You keep your place in the queue.",
+    });
+  });
+
+  it("SCRUM177_AC1_says_why_registration_closed", () => {
+    expect(d("registration_closed", { audience: "organiser", cause: "switched_off" })).toEqual({
+      headline: "Registration for Tech Talk has closed",
+      detail: "Registration was switched off. No new attendees can register.",
+    });
+  });
+
+  it("SCRUM177_AC3_tells_a_waiting_attendee_the_queue_is_paused", () => {
+    expect(d("registration_closed", { audience: "waitlisted", cause: "closing_time" }).detail).toBe(
+      "The closing time passed. No places are offered from the waiting list while it is closed; you keep your place in the queue.",
+    );
+  });
+
+  it.each([
+    ["closing_time", "The closing time passed."],
+    ["settings_changed", "The registration dates were changed."],
+    ["event_started", "The event has started."],
+    ["event_not_confirmed", "The event is no longer confirmed."],
+  ])("SCRUM177_AC1_a_close_by_%s_says_why", (cause, sentence) => {
+    expect(d("registration_closed", { audience: "coordinator", cause }).detail)
+      .toBe(`${sentence} No new attendees can register.`);
+  });
+
+  it("SCRUM177_AC1_an_unknown_cause_is_left_out", () => {
+    expect(d("registration_closed", { audience: "organiser", cause: "toString" }).detail).toBe("No new attendees can register.");
+  });
+
+  it("SCRUM177_AC2_tells_staff_the_event_is_full", () => {
+    expect(d("registration_capacity_reached", { capacity: 50, registeredCount: 50 })).toEqual({
+      headline: "Tech Talk is full",
+      detail: "All 50 places are taken.",
+    });
+    expect(d("registration_capacity_reached", {}).detail).toBe("All places are taken.");
+  });
+
+  it("SCRUM177_AC4_tells_staff_a_withdrawal_freed_a_place_without_naming_the_attendee", () => {
+    expect(d("registration_place_released", { cause: "withdrawal", capacity: 50, registeredCount: 49 })).toEqual({
+      headline: "A place opened at Tech Talk",
+      detail: "An attendee withdrew. 49 of 50 places are now taken.",
+    });
+    expect(d("registration_place_released", {}).detail).toBe("An attendee withdrew.");
+  });
+
+  it("SCRUM177_AC5_every_registration_notice_names_its_event", () => {
+    for (const type of ["registration_opened", "registration_closed", "registration_capacity_reached", "registration_place_released"]) {
+      expect(d(type, {}).headline).toContain("Tech Talk");
+    }
   });
 });

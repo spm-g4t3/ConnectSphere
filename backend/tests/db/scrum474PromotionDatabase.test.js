@@ -106,8 +106,9 @@ describe('SCRUM474 one shared promotion operation', () => {
     const sources = await functionSources(db);
     const callers = Object.keys(sources).filter((name) => sources[name].includes('promote_waitlisted_registrations('));
     expect(callers.sort()).toEqual([
-      'join_event_waitlist', 'process_waitlist_promotions', 'promote_waitlist_on_confirmation',
-      'register_for_event', 'setup_event_registration', 'withdraw_registration',
+      'join_event_waitlist', 'process_registration_window_notices', 'process_waitlist_promotions',
+      'promote_waitlist_on_confirmation', 'register_for_event', 'setup_event_registration',
+      'withdraw_registration',
     ]);
     // Only the shared operation turns a waitlisted row into a registered one.
     const promoters = Object.keys(sources)
@@ -227,9 +228,10 @@ describe('SCRUM474 lock order, the basis of the concurrency guarantees', () => {
 
   it('SCRUM474_AC6_AC8_every_registration_writer_is_known_and_locks_the_event_first', async () => {
     const sources = await functionSources(db);
-    // These two only call promote_waitlisted_registrations, which locks the event itself.
+    // These three only call promote_waitlisted_registrations, which locks the event itself.
+    const callersOnly = ['promote_waitlist_on_confirmation', 'process_waitlist_promotions', 'process_registration_window_notices'];
     const writers = Object.keys(sources).filter((name) => REGISTRATION_TOUCH.test(sources[name])
-      && name !== 'promote_waitlist_on_confirmation' && name !== 'process_waitlist_promotions');
+      && !callersOnly.includes(name));
     expect(writers.sort()).toEqual(Object.keys(EVENT_LOCK).sort());
     for (const [name, marker] of Object.entries(EVENT_LOCK)) {
       const lock = indexOf(sources[name], marker);

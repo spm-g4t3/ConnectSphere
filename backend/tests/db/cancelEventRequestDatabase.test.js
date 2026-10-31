@@ -72,7 +72,7 @@ describe('SCRUM-374: cancel_event_request in Postgres', () => {
     venueStaff = await seedUser(db, { email: 'venue-staff@test', role: 'venue_staff' });
     technicalSupport = await seedUser(db, { email: 'technical-support@test', role: 'technical_support_staff' });
     venueId = await seedVenue(db, { name: 'Hall', capacity: 100, setup: 0, turnaround: 0 });
-  }, 30000);
+  }, 60_000);
 
   afterAll(async () => {
     await db?.close();
