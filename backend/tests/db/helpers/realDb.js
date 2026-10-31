@@ -20,13 +20,15 @@ function guard(url) {
   }
 }
 
-// The roles are cluster-wide, so a second run on the same server must not fail on them.
+// The roles are cluster-wide, so a second run on the same server must not fail on them,
+// nor two files building their databases at once (both can pass the check, one then loses).
 const PREAMBLE = SUPABASE_PREAMBLE.replace(
   /create role (\w+) nologin( bypassrls)?;/g,
   (_match, role, bypass = '') => `do $$ begin
     if not exists (select 1 from pg_roles where rolname = '${role}') then
       create role ${role} nologin${bypass};
     end if;
+  exception when duplicate_object or unique_violation then null;
   end $$;`,
 );
 

@@ -135,8 +135,8 @@ describe.skipIf(!REAL_DB_URL)('SCRUM240 registration notices under simultaneous 
     expect(second.error).toBeUndefined();
     const released = Object.entries(await notices(event)).filter(([key]) => key.startsWith('registration_place_released'));
     expect(released).toEqual([
-      [`registration_place_released released:2 ${COORDINATOR}`, 1],
       [`registration_place_released released:2 ${ORGANISER}`, 1],
+      [`registration_place_released released:2 ${COORDINATOR}`, 1],
     ]);
   });
 
@@ -157,8 +157,8 @@ describe.skipIf(!REAL_DB_URL)('SCRUM240 registration notices under simultaneous 
     expect(counts.filter(([key]) => key.startsWith('registration_promoted'))).toEqual([[`registration_promoted null ${Y}`, 1]]);
     // The place went straight to the queue, so it was never free and the event never stopped being full.
     expect(counts.filter(([key]) => !key.startsWith('registration_promoted'))).toEqual([
-      [`registration_capacity_reached full:1 ${COORDINATOR}`, 1],
       [`registration_capacity_reached full:1 ${ORGANISER}`, 1],
+      [`registration_capacity_reached full:1 ${COORDINATOR}`, 1],
     ]);
   });
 });

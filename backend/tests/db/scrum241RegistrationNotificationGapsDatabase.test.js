@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
+import { withSafetyReviewTransitionGuardDisabled } from '../fixtures/safetyReviewTestHelpers.js';
 
 // SCRUM-241: what the earlier SCRUM-177 suites left open. Events whose waiting
 // list is off; every notice of a whole registration lifecycle naming its event
@@ -19,6 +20,7 @@ const START = '2026-11-20T10:00:00Z';
 let db;
 let event;
 
+const after = (instant, hours) => new Date(Date.parse(instant) + hours * 3_600_000).toISOString();
 const at = (instant) => db.query("select set_config('test.now', $1, true)", [instant]);
 const result = async (sql, params) => (await db.query(sql, params)).rows[0].result;
 const register = (attendee, id = event) => result('select register_for_event($1::uuid, $2::uuid) as result', [id, attendee]);
@@ -210,3 +212,27 @@ describe('client roles cannot reach registration notices', () => {
     expect(code).toBe('42501');
   });
 });
+
+describe('final statuses (SCRUM-242 review)', () => {
+  it.each(['completed', 'cancelled'])(
+    'SCRUM177_AC1_a_%s_event_still_recorded_open_settles_without_a_stale_closing_notice',
+    async (status) => {
+      // The job was down across the start, so the window is still recorded open when the event ends.
+      await at(OPENS);
+      await save({ waitlist: true });
+      await register(A);
+      await join(B);
+      await at(after(START, 3));
+      await withSafetyReviewTransitionGuardDisabled(db, () => db.query(
+        'update event_requests set status = $2 where id = $1', [event, status],
+      ));
+      await run();
+
+      expect((await sent()).filter(([type]) => type === 'registration_closed')).toEqual([]);
+      expect((await db.query(
+        'select open_announced from registration_notice_state where event_request_id = $1', [event],
+      )).rows[0].open_announced).toBe(false);
+    },
+  );
+});
+
