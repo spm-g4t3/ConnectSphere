@@ -759,3 +759,77 @@ describe("SCRUM172_AC7 selecting a notification opens its event", () => {
     expect(getUnreadCount).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("SCRUM177 registration notifications in the inbox", () => {
+  const EVENT = "33333333-3333-4333-8333-333333333333";
+  const ORGANISER = { id: "o1", name: "Olu Organiser", role: "event_organiser" };
+  const COORDINATOR = { id: "c1", name: "Priya Nair", role: "event_coordinator" };
+  const registrationNotice = (type, payload) => notification({
+    type,
+    bookingId: null,
+    blockId: null,
+    eventRequestId: EVENT,
+    payload: { eventRequestId: EVENT, eventName: "Tech Talk", ...payload },
+  });
+
+  function Probe({ label }) {
+    const { id } = useParams();
+    return <p>{label}{id ? ` ${id}` : ""}</p>;
+  }
+
+  beforeEach(() => {
+    vi.mocked(getUnreadCount).mockResolvedValue(1);
+  });
+
+  it("SCRUM177_AC3_AC5_a_waiting_attendee_reads_the_closure_and_opens_their_own_places", async () => {
+    const user = userEvent.setup();
+    vi.mocked(markNotificationRead).mockResolvedValue({});
+    vi.mocked(listNotifications).mockResolvedValue([
+      registrationNotice("registration_closed", { audience: "waitlisted", cause: "closing_time" }),
+    ]);
+    renderInbox({ routes: <Route path="/registered-events" element={<Probe label="My registrations" />} /> });
+
+    const link = await screen.findByRole("link", { name: "Registration for Tech Talk has closed" });
+    expect(link).toHaveAttribute("href", "/registered-events");
+    expect(screen.getByText(
+      "The closing time passed. No places are offered from the waiting list while it is closed; you keep your place in the queue.",
+    )).toBeInTheDocument();
+
+    await user.click(link);
+    expect(await screen.findByText("My registrations")).toBeInTheDocument();
+  });
+
+  it("SCRUM177_AC2_AC5_the_organiser_reads_that_the_event_is_full_and_opens_its_registration_page", async () => {
+    vi.mocked(listNotifications).mockResolvedValue([
+      registrationNotice("registration_capacity_reached", { audience: "organiser", capacity: 50, registeredCount: 50 }),
+    ]);
+    renderInbox({ user: ORGANISER });
+
+    const link = await screen.findByRole("link", { name: "Tech Talk is full" });
+    expect(link).toHaveAttribute("href", `/events/${EVENT}/registration`);
+    expect(screen.getByText("All 50 places are taken.")).toBeInTheDocument();
+  });
+
+  it("SCRUM177_AC4_AC5_the_coordinator_reads_a_freed_place_and_opens_the_event_review", async () => {
+    vi.mocked(listNotifications).mockResolvedValue([
+      registrationNotice("registration_place_released", { audience: "coordinator", cause: "withdrawal", capacity: 50, registeredCount: 49 }),
+    ]);
+    renderInbox({ user: COORDINATOR });
+
+    const link = await screen.findByRole("link", { name: "A place opened at Tech Talk" });
+    expect(link).toHaveAttribute("href", `/event-requests/${EVENT}`);
+    expect(screen.getByText("An attendee withdrew. 49 of 50 places are now taken.")).toBeInTheDocument();
+  });
+
+  it("SCRUM177_AC5_no_registration_notice_falls_back_to_the_unknown_type_text", async () => {
+    vi.mocked(listNotifications).mockResolvedValue([
+      registrationNotice("registration_opened", { audience: "organiser", cause: "opening_time", closesAt: null }),
+      registrationNotice("registration_promoted", { registrationId: "r1" }),
+    ].map((n, i) => ({ ...n, id: `00000000-0000-4000-8000-00000000000${i}` })));
+    renderInbox({ user: ATTENDEE });
+
+    expect(await screen.findByText("Registration for Tech Talk is open")).toBeInTheDocument();
+    expect(screen.getByText("You have a place at Tech Talk")).toBeInTheDocument();
+    expect(screen.queryByText("New notification")).not.toBeInTheDocument();
+  });
+});

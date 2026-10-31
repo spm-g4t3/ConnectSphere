@@ -1,7 +1,7 @@
 # SCRUM-177 — Notify Users of Registration Changes
 
 **Story:** Notify Users of Registration Changes
-**Subtasks so far:** SCRUM-235, the notification contract (migration 044). SCRUM-236, the handlers and transition rules (migration 045). SCRUM-238, recipient resolution (migration 046). SCRUM-237, the opening/closing job (migration 047). SCRUM-239, the flows wired in (migration 048). SCRUM-240, idempotency (migration 049).
+**Subtasks so far:** SCRUM-235, the notification contract (migration 044). SCRUM-236, the handlers and transition rules (migration 045). SCRUM-238, recipient resolution (migration 046). SCRUM-237, the opening/closing job (migration 047). SCRUM-239, the flows wired in (migration 048). SCRUM-240, idempotency (migration 049). SCRUM-241, the test map (section 8).
 **Status as of 30 October 2026:** contract, handlers, recipients, the job and the flows are built and tested against the schema (PGlite). Migrations 044–048 haven't been applied to live Supabase, and the two-session race test (`waitingListConcurrency.realdb.test.js`) hasn't been run against them.
 
 The contract is in three places, and they must agree:
@@ -261,3 +261,19 @@ A transition is therefore never recorded with some of its notices missing, so th
 
 1. Someone in the product role should sign off on every **proposed** row in section 3, and on dropping the actor's own notice.
 2. When an event is **cancelled**, it leaves Confirmed. Should waiting attendees be told? `event_cancelled` reaches staff only. Until someone decides, the window handler sends nothing for a cancelled event.
+
+## 8. Test map (SCRUM-241)
+
+Test names start `SCRUM177_AC<n>_`, so `grep -rn "SCRUM177_AC3" backend/tests frontend/tests` lists every test for a criterion. Database tests run on the real schema (PGlite, `createSchemaDb`: baseline plus every migration), with the clock injected through `test.now`. `*.realdb.test.js` needs a real PostgreSQL server (`CONCURRENCY_DATABASE_URL`) and is skipped otherwise, including in CI.
+
+| AC | What is asserted | Where |
+|---|---|---|
+| 1. Opening and closing notify relevant users | boundaries just before, at and after the opening and closing times; closing at the start with no closing time; ineligible events (not Confirmed, no start, switched off); moved dates; recovery after downtime; settings saves, switching off, leaving and returning to Confirmed; a cancelled event sends nothing; no waiting list means managers only | `scrum237…`, `scrum236…`, `scrum239…`, `scrum241…` |
+| 2. Capacity reached notifies Organiser/Coordinator | only the transition into full (not repeats, not an event with room or no limit); registration, a join that registers, catch-up and job promotion, a capacity lowered by the Organiser (coordinator only); refills are new occurrences | `scrum236…`, `scrum239…`, `scrum240…`, `scrum241…` |
+| 3. Waiting-list changes notify the affected attendee | promotion after a withdrawal or a capacity rise, in queue order, the promoted attendee alone; none while registration is closed; a list switched off still promotes its queue; the queue is told of opening and closing, not of an event that started | `scrum239…`, `scrum238…`, `scrum241…`, `scrum474…` |
+| 4. Withdrawal updates state and notifies | the counts and capacity returned; a place the queue takes isn't reported free; with no queue or while closed, managers are told; back-to-back releases; a refused withdrawal sends nothing; a notice that can't be stored fails the withdrawal | `scrum239…`, `scrum240…`, `scrum241…` |
+| 5. Every notification identifies its event | the event column and `eventRequestId`/`eventName` on every type in a full lifecycle; the API maps each type's event; every type has readable wording and none falls back to "New notification"; each role's link | `scrum235…`, `scrum241…`, `notificationService.test.js`, `notificationDisplay.test.js`, `notificationLink.test.js`, `NotificationInbox.test.jsx` |
+| 6. Only relevant users | exact recipient sets; deduplication when one person holds several roles; reassigned, absent or excluded coordinators; withdrawn, cancelled and registered attendees aren't "waitlisted"; other events' people; the actor isn't told; client roles read no rows and can't call any writer | `scrum238…`, `scrum241…`, `scrum235…` |
+
+**Retries, duplicates, rollback and partial failure:** `scrum240…` (PGlite) and `scrum237…` (per-event failure isolation). **Simultaneous workers:** `registrationNoticeRaces.realdb.test.js` (two job runs, a rollback, a save racing the job, a withdrawal racing a stale capacity call, one released place racing the promotion job) and the SCRUM-476 races in `waitingListConcurrency.realdb.test.js`. **The job's timer and startup:** `registrationWindowScheduler.test.js`, `backgroundJobs.test.js`, `app.test.js`.
+

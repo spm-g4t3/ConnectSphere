@@ -102,7 +102,7 @@ afterEach(async () => { await db.exec('rollback'); });
 const OPENED_1 = ['registration_opened opened:1 coordinator', 'registration_opened opened:1 organiser', 'registration_opened opened:1 waitlisted'];
 
 describe('repeated polling and restarts', () => {
-  it('SCRUM240_any_number_of_runs_announce_an_opening_once', async () => {
+  it('SCRUM177_AC1_any_number_of_runs_announce_an_opening_once', async () => {
     await at(OPENS);
     for (let i = 0; i < 5; i += 1) await run();
 
@@ -110,7 +110,7 @@ describe('repeated polling and restarts', () => {
     expect(await state()).toMatchObject({ open_announced: true, window_generation: 1 });
   });
 
-  it('SCRUM240_what_was_sent_is_known_from_the_database_alone', async () => {
+  it('SCRUM177_AC1_what_was_sent_is_known_from_the_database_alone', async () => {
     // A restarted API process has no memory of earlier runs; the stored state is what stops a repeat.
     await at(OPENS);
     await run();
@@ -121,7 +121,7 @@ describe('repeated polling and restarts', () => {
 });
 
 describe('partial failure and retry', () => {
-  it('SCRUM240_a_failure_after_some_notices_were_written_leaves_none_and_no_recorded_transition', async () => {
+  it('SCRUM177_AC1_a_failure_after_some_notices_were_written_leaves_none_and_no_recorded_transition', async () => {
     await at(OPENS);
     await fail(COORDINATOR);
 
@@ -131,7 +131,7 @@ describe('partial failure and retry', () => {
     expect(await state()).toBeNull();
   });
 
-  it('SCRUM240_the_retry_sends_every_notice_once_with_the_key_the_failed_attempt_would_have_used', async () => {
+  it('SCRUM177_AC1_the_retry_sends_every_notice_once_with_the_key_the_failed_attempt_would_have_used', async () => {
     await at(OPENS);
     await fail(COORDINATOR);
     await run();
@@ -142,7 +142,7 @@ describe('partial failure and retry', () => {
     expect(await sent()).toEqual(OPENED_1);
   });
 
-  it('SCRUM240_a_flow_whose_notice_fails_fails_whole_and_succeeds_whole_on_retry', async () => {
+  it('SCRUM177_AC4_a_flow_whose_notice_fails_fails_whole_and_succeeds_whole_on_retry', async () => {
     await at(OPENS);
     await run();
     await db.query("update event_registrations set status = 'withdrawn' where attendee_id = $1", [B]);
@@ -165,7 +165,7 @@ describe('partial failure and retry', () => {
 });
 
 describe('the unique occurrence', () => {
-  it('SCRUM240_a_stale_writer_repeating_an_occurrence_adds_nothing', async () => {
+  it('SCRUM177_AC6_a_stale_writer_repeating_an_occurrence_adds_nothing', async () => {
     await at(OPENS);
     await run();
 
@@ -177,7 +177,7 @@ describe('the unique occurrence', () => {
     expect(await sent()).toEqual(OPENED_1);
   });
 
-  it('SCRUM240_the_database_refuses_a_second_row_for_one_occurrence_and_recipient', async () => {
+  it('SCRUM177_AC6_the_database_refuses_a_second_row_for_one_occurrence_and_recipient', async () => {
     await at(OPENS);
     await run();
 
@@ -188,7 +188,7 @@ describe('the unique occurrence', () => {
     )).toBe('23505');
   });
 
-  it('SCRUM240_the_same_key_on_another_event_is_another_occurrence', async () => {
+  it('SCRUM177_AC5_the_same_key_on_another_event_is_another_occurrence', async () => {
     const other = await seed('Other event');
     await at(OPENS);
     await run();
@@ -199,7 +199,7 @@ describe('the unique occurrence', () => {
 });
 
 describe('one transition, two paths', () => {
-  it('SCRUM240_an_opening_the_settings_save_announced_is_not_announced_again_by_the_job', async () => {
+  it('SCRUM177_AC1_an_opening_the_settings_save_announced_is_not_announced_again_by_the_job', async () => {
     await at(OPENS);
     await db.query('select setup_event_registration($1, $2, true, $3, $4, 1, $5, true)', [event, ORGANISER, OPENS, CLOSES, DEADLINE]);
     await run();
@@ -208,7 +208,7 @@ describe('one transition, two paths', () => {
       .toEqual(['registration_opened opened:1 coordinator', 'registration_opened opened:1 waitlisted']);
   });
 
-  it('SCRUM240_a_promotion_by_either_job_announces_the_filled_capacity_once', async () => {
+  it('SCRUM177_AC2_a_promotion_by_either_job_announces_the_filled_capacity_once', async () => {
     // A second place, freed while closed: when the window opens both jobs can promote B.
     await setEvent({ registration_capacity: 2 });
     await at(OPENS);
@@ -224,7 +224,7 @@ describe('one transition, two paths', () => {
 });
 
 describe('edited dates and later windows', () => {
-  it('SCRUM240_a_closing_time_moved_after_the_run_that_would_have_closed_it_is_not_a_closure', async () => {
+  it('SCRUM177_AC1_a_closing_time_moved_after_the_run_that_would_have_closed_it_is_not_a_closure', async () => {
     await at(OPENS);
     await run();
     await setEvent({ registration_closes_at: after(CLOSES, 48) });
@@ -234,7 +234,7 @@ describe('edited dates and later windows', () => {
     expect((await sent()).filter((n) => n.startsWith('registration_closed'))).toEqual([]);
   });
 
-  it('SCRUM240_each_later_window_is_a_new_occurrence_and_none_is_suppressed', async () => {
+  it('SCRUM177_AC1_each_later_window_is_a_new_occurrence_and_none_is_suppressed', async () => {
     await at(OPENS);
     await run();
     await at(CLOSES);
@@ -254,7 +254,7 @@ describe('edited dates and later windows', () => {
     expect(await sent()).toHaveLength(12);
   });
 
-  it('SCRUM240_capacity_refills_are_new_occurrences_with_their_own_keys', async () => {
+  it('SCRUM177_AC2_capacity_refills_are_new_occurrences_with_their_own_keys', async () => {
     await at(OPENS);
     await run();
     await db.query("update event_registrations set status = 'withdrawn' where attendee_id = $1", [B]);

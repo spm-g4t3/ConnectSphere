@@ -46,7 +46,7 @@ async function race(first, second, { finish = 'commit' } = {}) {
 }
 
 /** A Confirmed event whose window is open now but not yet announced: the job finds it due. */
-async function dueEvent({ registerX = false } = {}) {
+async function dueEvent({ registerX = false, queueY = false } = {}) {
   const event = await seedEvent(owner, {
     status: 'confirmed',
     organiser_id: ORGANISER,
@@ -61,6 +61,9 @@ async function dueEvent({ registerX = false } = {}) {
   });
   if (registerX) {
     await owner.query('select register_for_event($1, $2)', [event, X]);
+  }
+  if (queueY) {
+    await owner.query('select join_event_waitlist($1, $2)', [event, Y]);
   }
   return event;
 }
@@ -91,7 +94,7 @@ describe.skipIf(!REAL_DB_URL)('SCRUM240 registration notices under simultaneous 
     await Promise.all([A, B, owner].filter(Boolean).map((client) => client.end()));
   });
 
-  it('SCRUM240_two_job_runs_at_once_announce_an_opening_once', async () => {
+  it('SCRUM177_AC1_two_job_runs_at_once_announce_an_opening_once', async () => {
     const event = await dueEvent();
 
     const second = await race((client) => runJob(client), (client) => runJob(client));
@@ -103,7 +106,7 @@ describe.skipIf(!REAL_DB_URL)('SCRUM240 registration notices under simultaneous 
     });
   });
 
-  it('SCRUM240_if_the_first_run_rolls_back_the_second_announces_with_the_same_key', async () => {
+  it('SCRUM177_AC1_if_the_first_run_rolls_back_the_second_announces_with_the_same_key', async () => {
     const event = await dueEvent();
 
     await race((client) => runJob(client), (client) => runJob(client), { finish: 'rollback' });
@@ -114,7 +117,7 @@ describe.skipIf(!REAL_DB_URL)('SCRUM240 registration notices under simultaneous 
     });
   });
 
-  it('SCRUM240_a_settings_save_and_the_job_at_once_announce_the_opening_once', async () => {
+  it('SCRUM177_AC1_a_settings_save_and_the_job_at_once_announce_the_opening_once', async () => {
     const event = await dueEvent();
 
     const second = await race((client) => saveOpen(client, event), (client) => runJob(client));
@@ -124,7 +127,7 @@ describe.skipIf(!REAL_DB_URL)('SCRUM240 registration notices under simultaneous 
     expect(await notices(event)).toEqual({ [`registration_opened opened:1 ${COORDINATOR}`]: 1 });
   });
 
-  it('SCRUM240_a_withdrawal_and_a_stale_capacity_call_at_once_release_the_place_once', async () => {
+  it('SCRUM177_AC4_a_withdrawal_and_a_stale_capacity_call_at_once_release_the_place_once', async () => {
     const event = await dueEvent({ registerX: true });
 
     const second = await race((client) => withdraw(client, event, X), (client) => capacity(client, event));
@@ -134,6 +137,28 @@ describe.skipIf(!REAL_DB_URL)('SCRUM240 registration notices under simultaneous 
     expect(released).toEqual([
       [`registration_place_released released:2 ${COORDINATOR}`, 1],
       [`registration_place_released released:2 ${ORGANISER}`, 1],
+    ]);
+  });
+
+  it('SCRUM177_AC3_AC4_one_released_place_raced_by_the_promotion_job_promotes_and_notifies_once', async () => {
+    const event = await dueEvent({ registerX: true, queueY: true });
+
+    const second = await race(
+      (client) => withdraw(client, event, X),
+      (client) => client.query('select process_waitlist_promotions()'),
+    );
+
+    expect(second.error).toBeUndefined();
+    const statuses = Object.fromEntries((await owner.query(
+      'select attendee_id, status from event_registrations where event_request_id = $1', [event],
+    )).rows.map((r) => [r.attendee_id, r.status]));
+    expect(statuses).toEqual({ [X]: 'withdrawn', [Y]: 'registered' });
+    const counts = Object.entries(await notices(event)).filter(([key]) => !key.startsWith('registration_opened'));
+    expect(counts.filter(([key]) => key.startsWith('registration_promoted'))).toEqual([[`registration_promoted null ${Y}`, 1]]);
+    // The place went straight to the queue, so it was never free and the event never stopped being full.
+    expect(counts.filter(([key]) => !key.startsWith('registration_promoted'))).toEqual([
+      [`registration_capacity_reached full:1 ${COORDINATOR}`, 1],
+      [`registration_capacity_reached full:1 ${ORGANISER}`, 1],
     ]);
   });
 });
