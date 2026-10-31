@@ -293,5 +293,33 @@ describe('SCRUM-175: confirmation, venue change and cancellation notices', () =>
       // The organiser's notice still carries it.
       expect((await notices(id, 'event_cancelled', 'organiser'))[0].payload.reason).toBe('Sponsor pulled out');
     });
+
+    it('SCRUM175_AC7_a_date_change_tells_attendees_without_the_reason', async () => {
+      const id = await makeEvent('confirmed');
+      await register(id, ['registered']);
+      // A significant change re-checks the submission fields; makeEvent leaves purpose out.
+      await db.query("update event_requests set purpose = 'Talk' where id = $1", [id]);
+
+      await db.query(
+        `select apply_significant_event_change($1, jsonb_build_object('proposedStart', $2::text, 'proposedEnd', $3::text),
+                'Speaker moved', $4)`,
+        [id, at('15:00'), at('17:00'), coordinator],
+      );
+
+      const [attendee] = await rows(
+        "select recipient_id, payload from notifications where event_request_id = $1 and type = 'event_significant_change_attendee'",
+        [id],
+      );
+      expect(attendee.recipient_id).toBe(attendees[0]);
+      expect(attendee.payload).not.toHaveProperty('reason');
+      expect(JSON.stringify(attendee.payload)).not.toContain('Speaker moved');
+      // The organiser's notice still carries it.
+      const organiserNotice = await one(
+        "select recipient_id, payload from notifications where event_request_id = $1 and type = 'event_significant_change'",
+        [id],
+      );
+      expect(organiserNotice.recipient_id).toBe(organiser);
+      expect(organiserNotice.payload.reason).toBe('Speaker moved');
+    });
   });
 });

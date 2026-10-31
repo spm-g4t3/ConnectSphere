@@ -188,6 +188,21 @@ describe("SCRUM175_AC7 notices expose nothing the reader may not see", () => {
     }
   });
 
+  it("SCRUM175_AC7_an_attendee_change_notice_never_shows_a_reason", () => {
+    // Rows stored before 042 still carry the coordinator's reason.
+    const secret = "Speaker double-booked";
+    for (const period of [{ startsAt: STARTS, endsAt: ENDS }, {}]) {
+      const { headline, detail } = describe175("event_significant_change_attendee", {
+        eventRequestId: EVENT,
+        eventName: "Tech Talk",
+        reason: secret,
+        ...period,
+      });
+      expect(`${headline} ${detail}`).not.toContain(secret);
+      expect(detail).not.toMatch(/reason/i);
+    }
+  });
+
   it("SCRUM175_AC7_attendee_confirmation_does_not_show_organiser_only_booking_data", () => {
     // An attendee payload carries venue names only; booking periods (with setup
     // and turnaround) and organiser venue rows must not leak in if present.

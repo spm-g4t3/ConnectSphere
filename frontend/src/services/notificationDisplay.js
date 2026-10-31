@@ -83,7 +83,7 @@
 //   event_significant_change (096): { eventRequestId, eventName, reason,
 //     changedFields, statusBefore, statusAfter }
 //   event_significant_change_attendee (096): { eventRequestId, eventName,
-//     startsAt, endsAt, reason }
+//     startsAt, endsAt }; rows from before 042 may carry a reason, never shown
 //   event_details_changed (022, SCRUM-387): { eventRequestId, eventName,
 //     reason, changedFields, status }; changedFields are the camelCase names
 //     in eventDetailFields.js, and eventName is the name after the edit
@@ -837,13 +837,14 @@ const DESCRIBERS = {
     };
   },
 
+  // The reason is internal, as with cancellation, so it is never shown here,
+  // even on older rows that still carry it.
   event_significant_change_attendee(payload, { eventName }) {
-    const period = payload.startsAt && payload.endsAt
-      ? ` The event now runs ${formatRange(payload.startsAt, payload.endsAt)}.`
-      : "";
     return {
       headline: `An event you registered for has changed: ${eventName}`,
-      detail: `Reason: ${payload.reason || NO_REASON}.${period}`,
+      detail: payload.startsAt && payload.endsAt
+        ? `The event now runs ${formatRange(payload.startsAt, payload.endsAt)}.`
+        : "Check the event for its latest details.",
     };
   },
 

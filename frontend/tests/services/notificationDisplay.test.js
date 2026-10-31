@@ -162,8 +162,7 @@ describe("describeNotification: booking_flagged_setup_change (SCRUM-484 AC8)", (
       };
       const { headline, detail } = describeNotification(notification);
       expect(headline).toBe("An event you registered for has changed: Tech Talk");
-      expect(detail).toContain("Reason: Updated schedule.");
-      expect(detail).toContain(formatRange(PAYLOAD.startsAt, PAYLOAD.endsAt));
+      expect(detail).toBe(`The event now runs ${formatRange(PAYLOAD.startsAt, PAYLOAD.endsAt)}.`);
     });
 
     it("SCRUM395_AC9_explains_a_venue_booking_flag", () => {
@@ -1276,7 +1275,7 @@ describe("describeNotification: fallbacks for sparse payloads", () => {
 
   it("SCRUM395_AC9_significant_change_types_fall_back_when_fields_are_missing", () => {
     expect(d("event_significant_change", {}).detail).toContain("Reason:");
-    expect(d("event_significant_change_attendee", { startsAt: PAYLOAD.startsAt }).detail).not.toContain("now runs");
+    expect(d("event_significant_change_attendee", { startsAt: PAYLOAD.startsAt }).detail).toBe("Check the event for its latest details.");
     expect(d("event_significant_change_attendee", { reason: "Moved", startsAt: PAYLOAD.startsAt, endsAt: PAYLOAD.endsAt }).detail)
       .toContain("now runs");
     expect(d("booking_flagged_event_change", {}).detail).toContain("Coordinator's reason:");
