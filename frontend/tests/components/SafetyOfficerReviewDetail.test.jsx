@@ -132,7 +132,7 @@ describe("SCRUM-490 Safety Officer review details", () => {
     expect(screen.getByText(/Affected bookings: 1; equipment request affected: yes/)).toBeInTheDocument();
     expect(screen.getByText(/Affected bookings: 0; equipment request affected: no/)).toBeInTheDocument();
 
-    await user.selectOptions(screen.getByRole("combobox"), "changes_requested");
+    await user.click(screen.getByRole("radio", { name: "Request changes" }));
     const affectedBookings = screen.getAllByLabelText("Mark this booking as affected");
     await user.click(affectedBookings[0]);
     await user.click(affectedBookings[0]);

@@ -1,8 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { submitSafetyReviewResponse } from "../services/safetyReviewService";
 import { formatDateTime } from "../services/displayFormat";
-import { EVENT_STATUS_BADGES, OUTCOME_LABELS, OUTCOME_TONES, eventRange } from "./safetyReviewLabels";
+import {
+  EVENT_STATUS_BADGES,
+  OUTCOME_LABELS,
+  OUTCOME_TONES,
+  RESPONSE_CHOICES,
+  eventRange,
+} from "./safetyReviewLabels";
 import Button from "./ui/Button";
+import ConfirmDialog from "./ui/ConfirmDialog";
 import StatusBadge from "./ui/StatusBadge";
 
 function recorded(value) {
@@ -15,7 +22,11 @@ export function SafetyReviewDetail({ detail, onSubmitted, onError, readOnly = fa
   const [affectedBookingIds, setAffectedBookingIds] = useState([]);
   const [equipmentAffected, setEquipmentAffected] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [confirmingReject, setConfirmingReject] = useState(false);
   const headingRef = useRef(null);
+  const submitButtonRef = useRef(null);
+  const refocusSubmit = useRef(false);
+  const choiceId = useId();
 
   const { event, venues, equipment, history } = detail;
 
@@ -24,6 +35,14 @@ export function SafetyReviewDetail({ detail, onSubmitted, onError, readOnly = fa
   useEffect(() => {
     headingRef.current?.focus();
   }, [event.id]);
+
+  // The dialog has gone from the page by the time this runs, so focus can land
+  // back on Submit response instead of being lost to the page body.
+  useEffect(() => {
+    if (confirmingReject || !refocusSubmit.current) return;
+    refocusSubmit.current = false;
+    submitButtonRef.current?.focus();
+  }, [confirmingReject]);
   const canMarkArrangements = outcome !== "approved";
   const responseAllowed = event.status === "safety_review";
   const closedStatus = EVENT_STATUS_BADGES[event.status];
@@ -36,8 +55,7 @@ export function SafetyReviewDetail({ detail, onSubmitted, onError, readOnly = fa
     );
   }
 
-  async function submit(eventObject) {
-    eventObject.preventDefault();
+  async function sendResponse() {
     setSubmitting(true);
     onError(null);
     try {
@@ -55,9 +73,27 @@ export function SafetyReviewDetail({ detail, onSubmitted, onError, readOnly = fa
           error.response?.data?.error ??
           "The safety review response could not be submitted. Please try again.",
       });
+      refocusSubmit.current = true;
     } finally {
       setSubmitting(false);
+      setConfirmingReject(false);
     }
+  }
+
+  function submit(eventObject) {
+    eventObject.preventDefault();
+    // Rejecting stops the arrangement going ahead, so it is confirmed first.
+    if (outcome === "rejected") {
+      refocusSubmit.current = false;
+      setConfirmingReject(true);
+      return;
+    }
+    sendResponse();
+  }
+
+  function cancelReject() {
+    refocusSubmit.current = true;
+    setConfirmingReject(false);
   }
 
   return (
@@ -157,14 +193,34 @@ export function SafetyReviewDetail({ detail, onSubmitted, onError, readOnly = fa
       {!readOnly && (responseAllowed ? (
         <form className="safety-review__response" onSubmit={submit}>
           <h3>Record your response</h3>
-          <label>
-            Response
-            <select value={outcome} onChange={(eventObject) => setOutcome(eventObject.target.value)}>
-              <option value="approved">Approve</option>
-              <option value="changes_requested">Request changes</option>
-              <option value="rejected">Reject the safety arrangement</option>
-            </select>
-          </label>
+          <fieldset className="safety-review__choices">
+            <legend>Response</legend>
+            {RESPONSE_CHOICES.map((choice) => {
+              const nameId = `${choiceId}-${choice.value}-name`;
+              const consequenceId = `${choiceId}-${choice.value}-consequence`;
+              // The whole row is the click target; the name alone is the label
+              // and the consequence is read as its description.
+              return (
+                <label key={choice.value} className="safety-review__choice">
+                  <input
+                    type="radio"
+                    name={`${choiceId}-outcome`}
+                    value={choice.value}
+                    checked={outcome === choice.value}
+                    onChange={() => setOutcome(choice.value)}
+                    aria-labelledby={nameId}
+                    aria-describedby={consequenceId}
+                  />
+                  <span className="safety-review__choice-text">
+                    <span id={nameId} className="safety-review__choice-name">{choice.label}</span>
+                    <span id={consequenceId} className="safety-review__choice-consequence">
+                      {choice.consequence}
+                    </span>
+                  </span>
+                </label>
+              );
+            })}
+          </fieldset>
           <label>
             {outcome === "rejected" ? "Reason" : "Note"}
             <textarea
@@ -177,9 +233,21 @@ export function SafetyReviewDetail({ detail, onSubmitted, onError, readOnly = fa
           {outcome !== "approved" && (
             <p>Select each booking or the equipment request that the coordinator needs to change.</p>
           )}
-          <Button type="submit" disabled={submitting}>
+          <Button ref={submitButtonRef} type="submit" disabled={submitting}>
             {submitting ? "Submitting..." : "Submit response"}
           </Button>
+          <ConfirmDialog
+            open={confirmingReject}
+            title={`Reject the safety arrangement for ${event.eventName}?`}
+            confirmLabel="Reject arrangement"
+            cancelLabel="Go back"
+            danger
+            busy={submitting}
+            onConfirm={sendResponse}
+            onCancel={cancelReject}
+          >
+            The organiser and coordinator are notified with your reason, and the event goes back to planning.
+          </ConfirmDialog>
         </form>
       ) : (
         <p role="status">

@@ -12,6 +12,28 @@ export const OUTCOME_TONES = {
   rejected: "danger",
 };
 
+// The choices a Safety Officer can record, each with what it does to the event,
+// so the officer sees the consequence before choosing.
+export const RESPONSE_CHOICES = [
+  {
+    value: "approved",
+    label: "Approve",
+    consequence: "The event moves to Safety approved. The organiser and coordinator are notified.",
+  },
+  {
+    value: "changes_requested",
+    label: "Request changes",
+    consequence:
+      "The event goes back to planning to change the items you mark. The organiser and coordinator are notified with your note.",
+  },
+  {
+    value: "rejected",
+    label: "Reject the safety arrangement",
+    consequence:
+      "The arrangement cannot go ahead as planned. The event goes back to planning, and the organiser and coordinator are notified with your reason.",
+  },
+];
+
 // The safety review API sends only the raw status, so this screen carries the
 // same words the rest of the app shows for each status a reviewed event can be in.
 export const EVENT_STATUS_BADGES = {
