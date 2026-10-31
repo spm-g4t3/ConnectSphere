@@ -218,9 +218,10 @@ describe('ineligible events', () => {
     await run();
     await withSafetyReviewTransitionGuardDisabled(db, () => setEvent({ status: 'cancelled' }));
 
+    // Since 043 the cancellation itself settles it, so the job finds nothing due.
     await at(LATER(OPENS, 1));
-    expect(await run()).toEqual({ notified: 0, events: 1, failures: [] });
     expect(await run()).toEqual({ notified: 0, events: 0, failures: [] });
+    expect(await notices('registration_closed')).toEqual([]);
   });
 });
 

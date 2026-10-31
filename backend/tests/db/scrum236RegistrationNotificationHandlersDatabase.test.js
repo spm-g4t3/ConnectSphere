@@ -169,10 +169,12 @@ describe('announce_registration_window: closing', () => {
   });
 
   it('SCRUM177_AC1_leaving_confirmed_closes_with_event_not_confirmed', async () => {
+    // Since 043 the status change announces it itself, so the handler then finds it settled.
     await withSafetyReviewTransitionGuardDisabled(db, () => setEvent({ status: 'approved' }));
 
-    expect(await window_()).toBe(3);
+    expect(await notices('registration_closed')).toHaveLength(3);
     expect((await notices('registration_closed'))[0].payload.cause).toBe('event_not_confirmed');
+    expect(await window_()).toBe(0);
   });
 
   it('SCRUM177_AC1_a_cancelled_event_sends_no_closing_notice_and_does_not_announce_it_later', async () => {

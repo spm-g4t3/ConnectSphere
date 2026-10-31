@@ -1,8 +1,8 @@
 # SCRUM-177 — Notify Users of Registration Changes
 
 **Story:** Notify Users of Registration Changes
-**Subtasks so far:** SCRUM-235, the notification contract (migration 039). SCRUM-236, the handlers and transition rules (migration 040). SCRUM-238, recipient resolution (migration 041). SCRUM-237, the opening/closing job (migration 042).
-**Status as of 30 October 2026:** contract and handlers built and tested. No registration flow or job calls the handlers yet. The job is SCRUM-237 and the flows are SCRUM-239.
+**Subtasks so far:** SCRUM-235, the notification contract (migration 039). SCRUM-236, the handlers and transition rules (migration 040). SCRUM-238, recipient resolution (migration 041). SCRUM-237, the opening/closing job (migration 042). SCRUM-239, the flows wired in (migration 043).
+**Status as of 30 October 2026:** contract, handlers, recipients, the job and the flows are built and tested against the schema (PGlite). Migrations 039–043 haven't been applied to live Supabase, and the two-session race test (`waitingListConcurrency.realdb.test.js`) hasn't been run against them.
 
 The contract is in three places, and they must agree:
 
@@ -134,7 +134,7 @@ When the table is created, every existing event's current state is recorded, so 
 
 **Waiting-list status.** waitlisted → registered is the only status change the system makes, and `promote_waitlisted_registrations` notifies it as `registration_promoted`. Since 041 its recipient is the `registrant` the resolver finds for the promoted registration: the attendee whose status changed, and no one else. Joining and leaving are the attendee's own actions and send nothing.
 
-**Call order for SCRUM-239.** Inside the flow's transaction, after its writes:
+**Call order (wired in 043).** Inside the flow's transaction, after its writes:
 1. Run the promotion.
 2. Call `announce_registration_capacity`.
 3. Call `announce_registration_window`.
@@ -143,12 +143,19 @@ Doing this after promotion means a queued attendee who just got a place is told 
 
 | Flow | Calls |
 |---|---|
-| `register_for_event`, `join_event_waitlist` (when it registers) | capacity `registration` |
-| `withdraw_registration` | capacity `withdrawal` |
-| `setup_event_registration` | capacity `settings_changed`, window `settings_changed` |
-| `promote_waitlisted_registrations` callers that aren't covered above (the confirmation trigger, the job) | capacity `promotion` |
-| return to Confirmed (trigger) | window `event_confirmed` |
-| opening/closing job (SCRUM-237) | window with null, for each event whose live state differs from the announced state |
+| `register_for_event` | capacity `promotion` after a catch-up promotion; capacity `registration` after a new registration |
+| `join_event_waitlist` | capacity `promotion` after a catch-up promotion. A join that finds room goes through `register_for_event`; a join that queues sends nothing |
+| `withdraw_registration` | promotion, then capacity `withdrawal` |
+| `setup_event_registration` (only once saved; refused or invalid saves return earlier) | promotion, then capacity `settings_changed`, then window `settings_changed` |
+| `promote_waitlist_on_confirmation` (return to Confirmed) | promotion, capacity `promotion` if anyone was promoted, then window `event_confirmed` |
+| `announce_registration_window_on_status_change` (new trigger: leaving Confirmed) | window with null: closes with `event_not_confirmed`; a cancellation settles silently |
+| `process_waitlist_promotions` (promotion job) | capacity `promotion` for each event where it promoted |
+| `process_registration_window_notices` (SCRUM-237 job) | promotion, capacity `promotion`, window with null |
+| `leave_event_waitlist` | nothing: the attendee's own act, and no place changes |
+
+**Guarantees kept from SCRUM-460.** The flows are 037's, restated with only these calls added. Every handler runs after the flow's own event lock, takes the same event row first and then its own `registration_notice_state` row, and runs inside the RPC's single transaction. Promotion is still the one operation that hands out places, in queue order and only while registration is open, so one released place still gives at most one promotion. A notice is a row in that transaction: if the operation rolls back, the notice goes with it. If a notice can't be stored, the operation fails instead of committing without it. No outbox is needed.
+
+**Withdrawal confirmations.** The withdrawing attendee gets the API's `withdrawn` answer and no notification, so nothing is duplicated. A promoted attendee gets one `registration_promoted`, as before.
 
 **Recipient resolution (SCRUM-238, migration 041).** Every registration notice, promotion included, gets its recipients from one function:
 
