@@ -5,6 +5,7 @@ import {
 } from "../services/safetyReviewService";
 import { formatRange } from "../services/displayFormat";
 import NotificationInbox from "./NotificationInbox";
+import Button from "./ui/Button";
 import { SafetyReviewDetail } from "./SafetyReviewDetail";
 import { OUTCOME_LABELS } from "./safetyReviewLabels";
 
@@ -104,9 +105,8 @@ export default function SafetyOfficerDashboard({ user }) {
 
       {selectedId ? (
         <section>
-          <button
-            className="safety-review__back"
-            type="button"
+          <Button
+            variant="link"
             onClick={() => {
               returnFocusId.current = selectedId;
               setSelectedId(null);
@@ -116,7 +116,7 @@ export default function SafetyOfficerDashboard({ user }) {
             }}
           >
             &larr; Back to Safety review
-          </button>
+          </Button>
           {detailLoading && <p>Loading event arrangements...</p>}
           {message && <p className="safety-review__success" role="status">{message}</p>}
           {error && <p className="safety-review__error" role="alert">{error}</p>}
@@ -145,8 +145,7 @@ export default function SafetyOfficerDashboard({ user }) {
                   <p>Coordinator: {event.coordinatorName ?? "Not recorded"}</p>
                   <p>Waiting: {waitingLabel(event.waitingSeconds)}</p>
                 </div>
-                <button
-                  type="button"
+                <Button
                   ref={(node) => {
                     if (node) rowButtons.current.set(event.id, node);
                     else rowButtons.current.delete(event.id);
@@ -154,7 +153,7 @@ export default function SafetyOfficerDashboard({ user }) {
                   onClick={() => openReview(event.id)}
                 >
                   Review event
-                </button>
+                </Button>
               </li>
             ))}
           </ul>

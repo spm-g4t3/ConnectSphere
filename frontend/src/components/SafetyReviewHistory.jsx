@@ -5,8 +5,10 @@ import {
   getSafetyReviewHistory,
 } from "../services/safetyReviewService";
 import { formatRange, formatTimestamp } from "../services/displayFormat";
-import { OUTCOME_LABELS } from "./safetyReviewLabels";
+import { OUTCOME_LABELS, OUTCOME_TONES } from "./safetyReviewLabels";
 import { SafetyReviewDetail } from "./SafetyReviewDetail";
+import Button from "./ui/Button";
+import StatusBadge from "./ui/StatusBadge";
 
 export default function SafetyReviewHistory() {
   const [history, setHistory] = useState([]);
@@ -67,9 +69,8 @@ export default function SafetyReviewHistory() {
 
       {selectedId ? (
         <section>
-          <button
-            className="safety-review__back"
-            type="button"
+          <Button
+            variant="link"
             onClick={() => {
               returnFocusId.current = selectedId;
               setSelectedId(null);
@@ -78,7 +79,7 @@ export default function SafetyReviewHistory() {
             }}
           >
             &larr; Back to Review history
-          </button>
+          </Button>
           {detailLoading && <p>Loading event arrangements...</p>}
           {error && <p className="safety-review__error" role="alert">{error}</p>}
           {detail && (
@@ -105,13 +106,17 @@ export default function SafetyReviewHistory() {
                 <div>
                   <strong>{event.eventName}</strong>
                   <p>{formatRange(event.startsAt, event.endsAt, "Date and time not recorded")}</p>
-                  <p>Outcome: {OUTCOME_LABELS[event.outcome] ?? event.outcome}</p>
+                  <p>
+                    Outcome:{" "}
+                    <StatusBadge tone={OUTCOME_TONES[event.outcome] ?? "neutral"}>
+                      {OUTCOME_LABELS[event.outcome] ?? event.outcome}
+                    </StatusBadge>
+                  </p>
                   {event.note && <p>Note: {event.note}</p>}
                   <p>Reviewed by: {event.safetyOfficerName ?? "Not recorded"}</p>
                   <p>Reviewed: {formatTimestamp(event.respondedAt)}</p>
                 </div>
-                <button
-                  type="button"
+                <Button
                   ref={(node) => {
                     if (node) rowButtons.current.set(event.id, node);
                     else rowButtons.current.delete(event.id);
@@ -119,7 +124,7 @@ export default function SafetyReviewHistory() {
                   onClick={() => openDetail(event.id)}
                 >
                   View details
-                </button>
+                </Button>
               </li>
             ))}
           </ul>

@@ -172,7 +172,9 @@ describe("SCRUM-490 Safety Officer review details", () => {
       />,
     );
 
-    expect(screen.getByRole("status")).toHaveTextContent("This event is now safety_approved");
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "This event is now Safety approved. No further response can be submitted.",
+    );
     expect(screen.queryByRole("button", { name: "Submit response" })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Mark this booking as affected")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Mark the equipment request as affected")).not.toBeInTheDocument();

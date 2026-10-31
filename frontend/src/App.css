@@ -66,7 +66,8 @@ button { cursor: pointer; }
 .safety-review__response textarea { resize: vertical; }
 .safety-review__history li { align-items: flex-start; display: grid; justify-content: start; }
 .safety-review__history span { color: var(--muted); font-size: 0.88rem; }
-.safety-review__back { margin-bottom: 10px; }
+/* The detail heading below has no top margin, so the back link keeps a gap. */
+.dashboard--safety-officer > section > .ui-button--link { margin-bottom: var(--space-3); }
 .safety-review__error { background: #fff0ee; border-radius: 6px; color: #a43c32 !important; padding: 10px 12px; }
 .safety-review__success { background: #e8f7f1; border-radius: 6px; color: #17684f !important; padding: 10px 12px; }
 .safety-approval-notice { align-items: flex-start; background: #e8f7f1; border: 1px solid #9dd9c3; border-radius: 8px; color: #145b45; display: flex; gap: 10px; margin: 12px 0; padding: 12px 14px; }

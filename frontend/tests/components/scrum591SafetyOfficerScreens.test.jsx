@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import SafetyOfficerDashboard from "../../src/components/SafetyOfficerDashboard.jsx";
 import SafetyReviewHistory from "../../src/components/SafetyReviewHistory.jsx";
+import { SafetyReviewDetail } from "../../src/components/SafetyReviewDetail.jsx";
 import {
   getSafetyReview,
   getSafetyReviewHistory,
@@ -162,5 +163,100 @@ describe("SCRUM591_AC6 focus follows the user into a review and back", () => {
     await user.click(screen.getByRole("button", { name: /Back to Review history/ }));
 
     expect(rowButton("Event event-2", "View details")).toHaveFocus();
+  });
+});
+
+function expectEveryButtonIsShared() {
+  const buttons = screen.getAllByRole("button");
+  for (const button of buttons) expect(button).toHaveClass("ui-button");
+}
+
+function renderDetail(detail) {
+  render(<SafetyReviewDetail detail={detail} onSubmitted={vi.fn()} onError={vi.fn()} />);
+}
+
+const OUTCOMES = [
+  ["approved", "Approved", "success"],
+  ["changes_requested", "Changes requested", "warning"],
+  ["rejected", "Safety arrangement rejected", "danger"],
+];
+
+describe("SCRUM591_AC3 the Safety Officer screens use the shared buttons and status badges", () => {
+  it("SCRUM591_AC3_safety_officer_screens_use_the_shared_button", async () => {
+    const user = userEvent.setup();
+    await renderQueue();
+    expectEveryButtonIsShared();
+
+    // The detail carries the response form, so Submit response is checked too.
+    await user.click(rowButton("Event event-1", "Review event"));
+    await screen.findByRole("heading", { level: 2, name: "Event event-1" });
+    expect(screen.getByRole("button", { name: "Submit response" })).toBeInTheDocument();
+    expectEveryButtonIsShared();
+    expect(screen.getByRole("button", { name: /Back to Safety review/ })).toHaveClass("ui-button--link");
+  });
+
+  it("SCRUM591_AC3_review_history_screens_use_the_shared_button", async () => {
+    const user = userEvent.setup();
+    await renderHistory();
+    expectEveryButtonIsShared();
+
+    await user.click(rowButton("Event event-1", "View details"));
+    await screen.findByRole("heading", { level: 2, name: "Event event-1" });
+    expectEveryButtonIsShared();
+    expect(screen.getByRole("button", { name: /Back to Review history/ })).toHaveClass("ui-button--link");
+  });
+
+  it("SCRUM591_AC3_no_screen_keeps_its_own_back_class", async () => {
+    const user = userEvent.setup();
+    await renderQueue();
+    await user.click(rowButton("Event event-1", "Review event"));
+    await screen.findByRole("heading", { level: 2, name: "Event event-1" });
+    expect(document.querySelector(".safety-review__back")).toBeNull();
+  });
+
+  it.each(OUTCOMES)(
+    "SCRUM591_AC3_outcomes_show_as_status_badges_with_their_tone (%s)",
+    async (outcome, label, tone) => {
+      getSafetyReviewHistory.mockResolvedValue([{ ...historyRow("event-1"), outcome }]);
+      await renderHistory();
+
+      const row = screen.getByText("Event event-1").closest("li");
+      // The "Outcome:" text stays, so the meaning is not carried by colour alone.
+      expect(row).toHaveTextContent(`Outcome: ${label}`);
+      expect(within(row).getByText(label)).toHaveClass("ui-status-badge", `ui-status-badge--${tone}`);
+    },
+  );
+
+  it.each(OUTCOMES)(
+    "SCRUM591_AC3_detail_history_outcomes_show_as_status_badges_with_their_tone (%s)",
+    (outcome, label, tone) => {
+      renderDetail({
+        ...detailFor("event-1"),
+        history: [{
+          id: "response-1",
+          outcome,
+          safetyOfficerName: "Riley",
+          createdAt: "2026-11-01T10:00:00Z",
+          affectedBookingIds: [],
+          equipmentAffected: false,
+        }],
+      });
+
+      expect(screen.getByText(label)).toHaveClass("ui-status-badge", `ui-status-badge--${tone}`);
+    },
+  );
+
+  it("SCRUM591_AC3_a_closed_event_shows_its_status_as_a_badge_not_the_raw_value", () => {
+    renderDetail(detailFor("event-1", "safety_approved"));
+
+    const status = screen.getByRole("status");
+    expect(within(status).getByText("Safety approved")).toHaveClass("ui-status-badge--success");
+    expect(status).not.toHaveTextContent("safety_approved");
+  });
+
+  it("SCRUM591_AC3_an_unknown_closed_status_falls_back_to_its_raw_value_in_a_neutral_badge", () => {
+    renderDetail(detailFor("event-1", "on_hold"));
+
+    expect(within(screen.getByRole("status")).getByText("on_hold")).toHaveClass("ui-status-badge--neutral");
   });
 });

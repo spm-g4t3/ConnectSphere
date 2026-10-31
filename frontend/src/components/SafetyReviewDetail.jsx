@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { submitSafetyReviewResponse } from "../services/safetyReviewService";
 import { formatRange, formatTimestamp } from "../services/displayFormat";
-import { OUTCOME_LABELS } from "./safetyReviewLabels";
+import { EVENT_STATUS_BADGES, OUTCOME_LABELS, OUTCOME_TONES } from "./safetyReviewLabels";
+import Button from "./ui/Button";
+import StatusBadge from "./ui/StatusBadge";
 
 function recorded(value) {
   return typeof value === "string" && value.trim() ? value : "Not recorded";
@@ -24,6 +26,7 @@ export function SafetyReviewDetail({ detail, onSubmitted, onError, readOnly = fa
   }, [event.id]);
   const canMarkArrangements = outcome !== "approved";
   const responseAllowed = event.status === "safety_review";
+  const closedStatus = EVENT_STATUS_BADGES[event.status];
 
   function toggleBooking(bookingId) {
     setAffectedBookingIds((current) =>
@@ -137,7 +140,9 @@ export function SafetyReviewDetail({ detail, onSubmitted, onError, readOnly = fa
         <ol className="safety-review__history">
           {history.map((response) => (
             <li key={response.id}>
-              <strong>{OUTCOME_LABELS[response.outcome] ?? response.outcome}</strong>
+              <StatusBadge tone={OUTCOME_TONES[response.outcome] ?? "neutral"}>
+                {OUTCOME_LABELS[response.outcome] ?? response.outcome}
+              </StatusBadge>
               <span>{response.safetyOfficerName ?? "Safety Officer"} · {formatTimestamp(response.createdAt)}</span>
               {response.note && <p>{response.note}</p>}
               <p>
@@ -172,12 +177,18 @@ export function SafetyReviewDetail({ detail, onSubmitted, onError, readOnly = fa
           {outcome !== "approved" && (
             <p>Select each booking or the equipment request that the coordinator needs to change.</p>
           )}
-          <button type="submit" disabled={submitting}>
+          <Button type="submit" disabled={submitting}>
             {submitting ? "Submitting..." : "Submit response"}
-          </button>
+          </Button>
         </form>
       ) : (
-        <p role="status">This event is now {event.status}; no further response can be submitted.</p>
+        <p role="status">
+          This event is now{" "}
+          <StatusBadge tone={closedStatus?.tone ?? "neutral"}>
+            {closedStatus?.label ?? event.status}
+          </StatusBadge>
+          . No further response can be submitted.
+        </p>
       ))}
     </section>
   );
