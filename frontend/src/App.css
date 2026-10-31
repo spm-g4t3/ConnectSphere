@@ -52,8 +52,10 @@ button { cursor: pointer; }
 .loading-screen { align-items: center; display: grid; min-height: 100svh; place-items: center; }
 .dashboard { padding-top: 54px; }
 .safety-review__queue > li { align-items: flex-start; }
-.safety-review__queue > li > div { min-width: 0; }
+/* Names, venues and notes can be long single words; wrap them inside a 360px screen. */
+.safety-review__queue > li > div { min-width: 0; overflow-wrap: anywhere; }
 .safety-review__queue p { margin: 5px 0; }
+.safety-review__detail h2, .safety-review__arrangements strong { overflow-wrap: anywhere; }
 .safety-review__detail h3 { color: var(--teal-dark); margin: 24px 0 12px; }
 .safety-review__facts { display: grid; gap: 7px 16px; grid-template-columns: minmax(150px, 220px) minmax(0, 1fr); margin: 14px 0; }
 .safety-review__facts dt { color: var(--muted); font-size: 0.86rem; font-weight: 700; }
@@ -73,12 +75,17 @@ button { cursor: pointer; }
 .safety-review__choice-text { display: grid; gap: var(--space-1); min-width: 0; }
 .safety-review__choice-name { font-weight: 700; }
 .safety-review__choice-consequence { color: var(--color-muted); font-size: var(--font-size-sm); overflow-wrap: anywhere; }
-.safety-review__history li { align-items: flex-start; display: grid; justify-content: start; }
+.safety-review__history li { align-items: flex-start; display: grid; justify-content: start; overflow-wrap: anywhere; }
 .safety-review__history span { color: var(--muted); font-size: 0.88rem; }
 /* The detail heading below has no top margin, so the back link keeps a gap. */
 .dashboard--safety-officer > section > .ui-button--link { margin-bottom: var(--space-3); }
 /* Two classes so the green outranks the muted .dashboard p colour. */
 .dashboard .safety-review__success { background: var(--color-success-soft); border-radius: var(--radius-control); color: var(--color-success); padding: var(--space-2) var(--space-3); }
+/* Two columns leave the values too narrow on a phone, so each label sits above its value. */
+@media (max-width: 720px) {
+  .safety-review__facts { gap: var(--space-1); grid-template-columns: minmax(0, 1fr); }
+  .safety-review__facts dd { margin-bottom: var(--space-2); }
+}
 .safety-approval-notice { align-items: flex-start; background: #e8f7f1; border: 1px solid #9dd9c3; border-radius: 8px; color: #145b45; display: flex; gap: 10px; margin: 12px 0; padding: 12px 14px; }
 .safety-approval-notice__check { align-items: center; background: #17684f; border-radius: 50%; color: white; display: inline-flex; flex: 0 0 22px; font-size: 0.85rem; font-weight: 800; height: 22px; justify-content: center; line-height: 1; }
 .safety-approval-notice p { color: inherit; margin: 3px 0 0; }

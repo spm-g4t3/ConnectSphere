@@ -16,7 +16,13 @@ function recorded(value) {
   return typeof value === "string" && value.trim() ? value : "Not recorded";
 }
 
-export function SafetyReviewDetail({ detail, onSubmitted, onError, readOnly = false }) {
+export function SafetyReviewDetail({
+  detail,
+  onSubmitted,
+  onError,
+  readOnly = false,
+  focusRequest = 0,
+}) {
   const [outcome, setOutcome] = useState("approved");
   const [note, setNote] = useState("");
   const [affectedBookingIds, setAffectedBookingIds] = useState([]);
@@ -25,27 +31,37 @@ export function SafetyReviewDetail({ detail, onSubmitted, onError, readOnly = fa
   const [confirmingReject, setConfirmingReject] = useState(false);
   const headingRef = useRef(null);
   const submitButtonRef = useRef(null);
+  const closedLineRef = useRef(null);
   const refocusSubmit = useRef(false);
   const choiceId = useId();
 
   const { event, venues, equipment, history } = detail;
-
-  // Opening an event moves focus to its name so screen readers start there.
-  // Keyed on the id: a refresh of the same event after a response keeps focus put.
-  useEffect(() => {
-    headingRef.current?.focus();
-  }, [event.id]);
-
-  // The dialog has gone from the page by the time this runs, so focus can land
-  // back on Submit response instead of being lost to the page body.
-  useEffect(() => {
-    if (confirmingReject || !refocusSubmit.current) return;
-    refocusSubmit.current = false;
-    submitButtonRef.current?.focus();
-  }, [confirmingReject]);
   const canMarkArrangements = outcome !== "approved";
   const responseAllowed = event.status === "safety_review";
   const closedStatus = EVENT_STATUS_BADGES[event.status];
+  const wasResponseAllowed = useRef(responseAllowed);
+
+  // A recorded response replaces the form, so focus moves to the line that
+  // says the event is closed rather than dropping to the page body.
+  useEffect(() => {
+    if (wasResponseAllowed.current && !responseAllowed) closedLineRef.current?.focus();
+    wasResponseAllowed.current = responseAllowed;
+  }, [responseAllowed]);
+
+  // Opening an event moves focus to its name so screen readers start there.
+  // A refresh of the same event keeps focus put unless the parent asks for it
+  // (its Try again button has gone). Runs after the effect above, so it wins.
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, [event.id, focusRequest]);
+
+  // The dialog, or the disabled state while sending, has gone by the time this
+  // runs, so focus can land back on Submit response instead of the page body.
+  useEffect(() => {
+    if (confirmingReject || submitting || !refocusSubmit.current) return;
+    refocusSubmit.current = false;
+    submitButtonRef.current?.focus();
+  }, [confirmingReject, submitting]);
 
   function toggleBooking(bookingId) {
     setAffectedBookingIds((current) =>
@@ -250,7 +266,7 @@ export function SafetyReviewDetail({ detail, onSubmitted, onError, readOnly = fa
           </ConfirmDialog>
         </form>
       ) : (
-        <p role="status">
+        <p ref={closedLineRef} tabIndex={-1} role="status">
           This event is now{" "}
           <StatusBadge tone={closedStatus?.tone ?? "neutral"}>
             {closedStatus?.label ?? event.status}

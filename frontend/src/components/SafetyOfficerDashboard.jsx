@@ -31,6 +31,7 @@ export default function SafetyOfficerDashboard({ user }) {
   // each carries the retry for what failed (none for a form error).
   const [error, setError] = useState(null);
   const [message, setMessage] = useState(null);
+  const [detailFocusRequest, setDetailFocusRequest] = useState(0);
   const rowButtons = useRef(new Map());
   const listHeadingRef = useRef(null);
   const returnFocusId = useRef(null);
@@ -79,12 +80,14 @@ export default function SafetyOfficerDashboard({ user }) {
     }
   }
 
-  async function reloadDetail(id, failureMessage) {
+  async function reloadDetail(id, failureMessage, retried = false) {
     try {
       setDetail(await getSafetyReview(id));
       setError(null);
+      // Try again had focus and has now gone, so focus returns to the event.
+      if (retried) setDetailFocusRequest((count) => count + 1);
     } catch {
-      setError({ message: failureMessage, retry: () => reloadDetail(id, failureMessage) });
+      setError({ message: failureMessage, retry: () => reloadDetail(id, failureMessage, true) });
     }
   }
 
@@ -108,7 +111,7 @@ export default function SafetyOfficerDashboard({ user }) {
         setDetail(await getSafetyReview(selectedId));
       } catch {
         const failureMessage = `${responseError.message} The latest safety history could not be loaded.`;
-        setError({ message: failureMessage, retry: () => reloadDetail(selectedId, failureMessage) });
+        setError({ message: failureMessage, retry: () => reloadDetail(selectedId, failureMessage, true) });
       }
     }
   }
@@ -140,6 +143,7 @@ export default function SafetyOfficerDashboard({ user }) {
               detail={detail}
               onSubmitted={responseSubmitted}
               onError={responseError}
+              focusRequest={detailFocusRequest}
             />
           )}
         </section>

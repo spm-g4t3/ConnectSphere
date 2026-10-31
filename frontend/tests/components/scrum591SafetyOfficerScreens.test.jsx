@@ -649,3 +649,97 @@ describe("SCRUM591_AC8 rejecting is confirmed; other responses send straight awa
     },
   );
 });
+
+describe("SCRUM591_AC6 every control works from the keyboard and focus is never lost", () => {
+  it("SCRUM591_AC6_a_recorded_response_moves_focus_to_the_closed_event_line", async () => {
+    const user = userEvent.setup();
+    await renderQueue();
+    await user.click(rowButton("Event event-1", "Review event"));
+    await screen.findByRole("heading", { level: 2, name: "Event event-1" });
+
+    getSafetyReview.mockImplementation(async (id) => detailFor(id, "safety_approved"));
+    await user.click(screen.getByRole("button", { name: "Submit response" }));
+
+    const closedLine = await screen.findByText(/No further response can be submitted/);
+    expect(closedLine).toHaveFocus();
+  });
+
+  it("SCRUM591_AC6_a_failed_response_returns_focus_to_submit", async () => {
+    const user = userEvent.setup();
+    // Browsers drop focus from a button once it is disabled; jsdom does not,
+    // so the blur stands in for that while the response is being sent.
+    submitSafetyReviewResponse.mockImplementation(async () => {
+      document.activeElement.blur();
+      throw failure("The note is too long.");
+    });
+    renderResponseForm();
+
+    await user.click(screen.getByRole("button", { name: "Submit response" }));
+
+    expect(screen.getByRole("button", { name: "Submit response" })).toHaveFocus();
+  });
+
+  it.each([
+    ["the history refresh after a response", undefined],
+    ["the reload after a conflict", { status: 409, data: { error: "Event changed." } }],
+  ])("SCRUM591_AC6_a_successful_try_again_returns_focus_to_the_event_heading (%s)", async (_name, response) => {
+    const user = userEvent.setup();
+    if (response) submitSafetyReviewResponse.mockRejectedValue(Object.assign(new Error("conflict"), { response }));
+    await renderQueue();
+    await user.click(rowButton("Event event-1", "Review event"));
+    await screen.findByRole("heading", { level: 2, name: "Event event-1" });
+
+    getSafetyReview.mockRejectedValueOnce(new Error("reload failed"));
+    await user.click(screen.getByRole("button", { name: "Submit response" }));
+    const tryAgain = within(await screen.findByRole("alert")).getByRole("button", { name: "Try again" });
+
+    getSafetyReview.mockImplementation(async (id) => detailFor(id, "safety_approved"));
+    await user.click(tryAgain);
+
+    await screen.findByText(/No further response can be submitted/);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Event event-1" })).toHaveFocus();
+  });
+
+  it("SCRUM591_AC6_every_control_on_an_open_review_is_reachable_with_tab", async () => {
+    const user = userEvent.setup();
+    getSafetyReview.mockResolvedValue(REVIEW_WITH_ARRANGEMENTS);
+    await renderQueue();
+    await user.click(rowButton("Event event-1", "Review event"));
+    await screen.findByRole("heading", { level: 2, name: "Event event-1" });
+    // Request changes shows the checkboxes; tabbing then starts from the top of the page.
+    await user.click(screen.getByRole("radio", { name: "Request changes" }));
+    document.activeElement.blur();
+
+    const [bookingOne, bookingTwo] = screen.getAllByLabelText("Mark this booking as affected");
+    const expected = [
+      screen.getByRole("button", { name: /Back to Safety review/ }),
+      bookingOne,
+      bookingTwo,
+      screen.getByLabelText("Mark the equipment request as affected"),
+      // A radio group is one tab stop: only the chosen radio is in the order.
+      screen.getByRole("radio", { name: "Request changes" }),
+      screen.getByRole("textbox", { name: "Note" }),
+      screen.getByRole("button", { name: "Submit response" }),
+    ];
+    const reached = [];
+    for (let step = 0; step < expected.length; step += 1) {
+      await user.tab();
+      reached.push(document.activeElement);
+    }
+
+    expect(reached).toEqual(expected);
+  });
+
+  it("SCRUM591_AC6_response_choices_change_with_the_arrow_keys", async () => {
+    const user = userEvent.setup();
+    renderResponseForm();
+
+    await user.click(screen.getByRole("radio", { name: "Approve" }));
+    await user.keyboard("{ArrowDown}");
+
+    expect(screen.getByRole("radio", { name: "Request changes" })).toBeChecked();
+    expect(screen.getByRole("radio", { name: "Request changes" })).toHaveFocus();
+    expect(screen.getByRole("textbox", { name: "Note" })).toBeRequired();
+  });
+});
