@@ -26,6 +26,7 @@ import EquipmentAvailabilityCheck from "./components/EquipmentAvailabilityCheck"
 import EquipmentReview from "./components/EquipmentReview";
 import EventRegistrationSettings from "./components/EventRegistrationSettings";
 import RegistrationEventsList from "./components/RegistrationEventsList";
+import EventRegistrationList from "./components/EventRegistrationList";
 import EquipmentRequestQueue from "./components/EquipmentRequestQueue";
 import SafetyOfficerDashboard from "./components/SafetyOfficerDashboard";
 import SafetyReviewHistory from "./components/SafetyReviewHistory";
@@ -73,6 +74,11 @@ function VenueCalendarRoute() {
 function EventRegistrationSettingsRoute() {
   const { eventId } = useParams();
   return <EventRegistrationSettings key={eventId} eventId={eventId} />;
+}
+
+function EventRegistrationListRoute() {
+  const { eventId } = useParams();
+  return <EventRegistrationList key={eventId} eventId={eventId} />;
 }
 
 function AppRoutes() {
@@ -134,6 +140,14 @@ function AppRoutes() {
           element={
             <ProtectedRoute allowedRoles={["event_organiser"]}>
               <EventRegistrationSettingsRoute />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/events/:eventId/registrations"
+          element={
+            <ProtectedRoute allowedRoles={["event_organiser", "event_coordinator"]}>
+              <EventRegistrationListRoute />
             </ProtectedRoute>
           }
         />

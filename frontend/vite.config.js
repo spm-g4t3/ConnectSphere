@@ -249,6 +249,12 @@ const SCRUM347_FILES = [
   'src/components/EventRejectionPanel.jsx',
 ]
 
+// SCRUM-478: the registration list page is new and owned outright. Its links in
+// MyEventRequests.jsx and CoordinatorRequestDetail.jsx stay ungated.
+const SCRUM478_FILES = [
+  'src/components/EventRegistrationList.jsx',
+]
+
 // SCRUM-584: the shared ui components, new files only this story owns.
 const SCRUM584_FILES = [
   'src/components/ui/Button.jsx',
@@ -313,6 +319,7 @@ export default defineConfig({
         ...SCRUM355_FILES.map((file) => [file, FULL]),
         ...SCRUM387_FILES.map((file) => [file, FULL]),
         ...SCRUM347_FILES.map((file) => [file, FULL]),
+        ...SCRUM478_FILES.map((file) => [file, FULL]),
         ...SCRUM584_FILES.map((file) => [file, FULL]),
       ]),
     },
