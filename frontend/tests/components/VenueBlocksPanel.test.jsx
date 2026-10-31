@@ -27,6 +27,7 @@ import { toDatetimeLocalValue } from "../../src/services/datetimeFormat";
 import { getVenueBlockHistory } from "../../src/services/venueService";
 import { formatTimestamp } from "../../src/services/displayFormat";
 import { deferred } from "../helpers/async.js";
+import { sgTime } from "../helpers/singaporeTime.js";
 
 vi.mock("../../src/services/venueService", () => ({
   listVenueBlocks: vi.fn(),
@@ -1213,7 +1214,7 @@ describe("VenueBlocksPanel audit line and history (SCRUM-131, AC4)", () => {
       normalizeWhitespace: true,
     });
     expect(auditOf(UPCOMING).textContent).toBe(
-      `Created ${new Date(CREATED_AT).toLocaleString()} by you`,
+      `Created ${sgTime(CREATED_AT)} by you`,
     );
     // Never changed, so no amendment is named.
     expect(auditOf(UPCOMING).textContent).not.toContain("Last amended");

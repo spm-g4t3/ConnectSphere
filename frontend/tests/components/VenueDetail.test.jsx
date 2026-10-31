@@ -3,7 +3,7 @@
 // SCRUM-125 regression. shortId and formatTimestamp moved from VenueDetail.jsx
 // into services/displayFormat.js; a booking row must render exactly as it did
 // before. The venue service is mocked, so nothing touches the network.
-// Timezone-safe: the expected range is computed with toLocaleString from
+// Timezone-safe: the expected range is computed as Singapore time (sgTime) from
 // fixtures that carry offsets.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -16,6 +16,7 @@ import {
   getVenueDetails,
   getVenueHistory,
 } from "../../src/services/venueService";
+import { sgTime } from "../helpers/singaporeTime.js";
 
 // SCRUM-493: VenueDetail also fetches getVenueDetails for its safety section.
 // The default (set in beforeEach) is a venue with neither fact recorded, so
@@ -59,8 +60,8 @@ describe("SCRUM17 VenueDetail after the display helpers moved", () => {
 
     const row = code.closest("li");
     const expectedRange =
-      `${new Date(BOOKING.startsAt).toLocaleString()} – ` +
-      `${new Date(BOOKING.endsAt).toLocaleString()}`;
+      `${sgTime(BOOKING.startsAt)} – ` +
+      `${sgTime(BOOKING.endsAt)}`;
     expect(within(row).getByText(expectedRange).tagName).toBe("SPAN");
 
     expect(getVenueBookings).toHaveBeenCalledWith(VENUE.id);
@@ -103,7 +104,7 @@ describe("SCRUM17 VenueDetail after the display helpers moved", () => {
 
     const code = await screen.findByText("9b1deb4d");
     expect(code).toHaveAttribute("title", editor);
-    expect(screen.getByText(new Date(changedAt).toLocaleString())).toBeInTheDocument();
+    expect(screen.getByText(sgTime(changedAt))).toBeInTheDocument();
   });
 });
 

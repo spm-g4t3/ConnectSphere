@@ -6,7 +6,7 @@
 //
 // getVenueBlockHistory is mocked, so nothing touches the network.
 // Timezone-safe: every expected time string is built with formatTimestamp /
-// toLocaleString from fixtures that carry an offset. No fake timers.
+// sgTime (Singapore time) from fixtures that carry an offset. No fake timers.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
@@ -15,6 +15,7 @@ import BlockHistory, { BlockActor } from "../../src/components/BlockHistory.jsx"
 import { getVenueBlockHistory } from "../../src/services/venueService";
 import { formatTimestamp } from "../../src/services/displayFormat";
 import { deferred } from "../helpers/async.js";
+import { sgTime } from "../helpers/singaporeTime.js";
 
 vi.mock("../../src/services/venueService", () => ({
   getVenueBlockHistory: vi.fn(),
@@ -218,7 +219,7 @@ describe("BlockHistory entries", () => {
     ]) {
       const meta = entryFor(label).querySelector(".venue-history__meta");
       expect(within(meta).getByText(formatTimestamp(entry.changedAt))).toBeInTheDocument();
-      expect(within(meta).getByText(new Date(entry.changedAt).toLocaleString())).toBeInTheDocument();
+      expect(within(meta).getByText(sgTime(entry.changedAt))).toBeInTheDocument();
     }
   });
 
@@ -233,7 +234,7 @@ describe("BlockHistory entries", () => {
       "Notes: Aircon servicing",
     ]);
     // Single text nodes, findable as whole strings.
-    expect(within(created).getByText(`Start: ${new Date(START).toLocaleString()}`)).toBeInTheDocument();
+    expect(within(created).getByText(`Start: ${sgTime(START)}`)).toBeInTheDocument();
     // Hidden keys are not listed.
     expect(created.textContent).not.toMatch(/created_by|venue_id|removed_at/);
   });
@@ -251,7 +252,7 @@ describe("BlockHistory entries", () => {
     const amended = entryFor("Amended");
     expect(
       within(amended).getByText(
-        `End: ${new Date(END).toLocaleString()} → ${new Date(LATER_END).toLocaleString()}`,
+        `End: ${sgTime(END)} → ${sgTime(LATER_END)}`,
       ),
     ).toBeInTheDocument();
     expect(within(amended).getByText("Reason: Maintenance → Renovation")).toBeInTheDocument();
@@ -270,7 +271,7 @@ describe("BlockHistory entries", () => {
     await renderLoaded();
     expect(
       screen.getByText(
-        `Start: ${new Date(START).toLocaleString()} → ${new Date(newStart).toLocaleString()}`,
+        `Start: ${sgTime(START)} → ${sgTime(newStart)}`,
       ),
     ).toBeInTheDocument();
   });

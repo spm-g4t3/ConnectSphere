@@ -49,6 +49,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { normaliseRole } from "../auth/normaliseRole";
+import { mayHaveRegistrationList } from "../services/registrationStatuses";
 import AssignmentHistory from "./AssignmentHistory";
 import EventVenueFinder from "./EventVenueFinder";
 import EventVenueSuitability from "./EventVenueSuitability";
@@ -808,6 +809,13 @@ export default function CoordinatorRequestDetail({
           </div>
         )}
       </section>
+
+      {/* Only the assigned coordinator may read the list; the server checks again. */}
+      {isAssignedCoordinator && mayHaveRegistrationList(current.status) && (
+        <p>
+          <Link to={`/events/${current.id}/registrations`}>View registrations</Link>
+        </p>
+      )}
 
       {/* SCRUM-19. What the decision section shows, in order:
 

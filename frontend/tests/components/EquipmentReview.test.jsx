@@ -365,3 +365,118 @@ describe("EquipmentReview: completing", () => {
     expect(screen.queryByRole("button", { name: "Take over review" })).not.toBeInTheDocument();
   });
 });
+
+// SCRUM-574: the "stock now available" row on a Cannot be fully arranged request.
+describe("EquipmentReview: stock back for missing items", () => {
+  const CABLE = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+
+  /** A line marked cannot be provided. `available` is SCRUM-23's figure, which counts this event's own units as free. */
+  function missing({ id = PROJECTOR, name = "Projector", quantity, reserved = 0, available }) {
+    return line({
+      id,
+      name,
+      quantity,
+      reserved,
+      shortBy: quantity - reserved,
+      outcome: "cannot_be_provided",
+      outcomeNote: "Not enough in stock",
+      availability: availability("Partially available", quantity, available),
+    });
+  }
+
+  const cannot = (lines) => state({ status: "cannot_be_fully_arranged", statusLabel: "Cannot be fully arranged", lines });
+
+  const OUTCOMES = {
+    some: [
+      missing({ quantity: 1, available: 1 }),
+      missing({ id: MIC, name: "Microphone", quantity: 2, available: 2 }),
+      missing({ id: CABLE, name: "Cable", quantity: 1, available: 0 }),
+    ],
+    all: [
+      missing({ quantity: 3, reserved: 1, available: 10 }),
+      missing({ id: MIC, name: "Microphone", quantity: 1, available: 5 }),
+    ],
+    none: [
+      missing({ quantity: 2, available: 0 }),
+      missing({ id: MIC, name: "Microphone", quantity: 1, available: 0 }),
+    ],
+  };
+
+  const hint = () => screen.getByRole("status");
+
+  it.each([
+    ["pending_review", "Pending review", null],
+    ["under_review", "Under review", ME],
+    ["arranged", "Arranged", null],
+    ["cancelled", "Cancelled", null],
+  ])("SCRUM574_AC1_no_row_when_the_request_is_%s", async (status, statusLabel, reviewerId) => {
+    await open(state({ status, statusLabel, reviewerId, lines: OUTCOMES.all }));
+    expect(screen.queryByText(/can now be reserved|No new stock yet/)).not.toBeInTheDocument();
+  });
+
+  it("SCRUM574_AC1_row_shows_when_the_request_cannot_be_fully_arranged", async () => {
+    await open(cannot(OUTCOMES.all));
+    expect(hint()).toBeInTheDocument();
+  });
+
+  it("SCRUM574_AC2_some_names_the_reservable_items_with_quantities", async () => {
+    await open(cannot(OUTCOMES.some));
+    expect(hint()).toHaveTextContent("2 of 3 missing items can now be reserved: Projector \u00D71, Microphone \u00D72.");
+    expect(hint()).not.toHaveTextContent("Cable");
+  });
+
+  it("SCRUM574_AC2_all_says_every_missing_item_can_now_be_reserved", async () => {
+    await open(cannot(OUTCOMES.all));
+    expect(hint()).toHaveTextContent(
+      "All 2 missing items can now be reserved: Projector \u00D72, Microphone \u00D71. Review again to reserve them.",
+    );
+  });
+
+  it("SCRUM574_AC2_none_says_there_is_no_new_stock_yet", async () => {
+    await open(cannot(OUTCOMES.none));
+    expect(hint()).toHaveTextContent("No new stock yet. None of the missing items can now be reserved.");
+  });
+
+  it("SCRUM574_AC2_part_of_one_line_counts_as_some", async () => {
+    await open(cannot([missing({ quantity: 2, available: 1 })]));
+    expect(hint()).toHaveTextContent("1 of 1 missing item can now be reserved: Projector \u00D71 of 2.");
+    expect(screen.getByRole("button", { name: "Review again" })).toHaveClass("er-btn--secondary");
+  });
+
+  it("SCRUM574_AC3_reservable_quantity_is_capped_at_what_is_missing", async () => {
+    await open(cannot([missing({ quantity: 2, available: 50 })]));
+    expect(hint()).toHaveTextContent("The missing item can now be reserved: Projector \u00D72. Review again to reserve it.");
+  });
+
+  it("SCRUM574_AC3_the_events_own_reservations_are_not_counted_as_available", async () => {
+    // 3 asked, 1 held by this event, 2 free by SCRUM-23's figure: only 1 more can be reserved.
+    await open(cannot([missing({ quantity: 3, reserved: 1, available: 2 })]));
+    expect(hint()).toHaveTextContent("Projector \u00D71 of 2");
+  });
+
+  it("SCRUM574_AC3_no_row_when_no_missing_line_has_availability", async () => {
+    await open(cannot([{ ...missing({ quantity: 2, available: 0 }), availability: null }]));
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Review again" })).toBeEnabled();
+  });
+
+  it.each(Object.keys(OUTCOMES))("SCRUM574_AC4_%s_wording_never_promises", async (outcome) => {
+    await open(cannot(OUTCOMES[outcome]));
+    expect(hint()).toHaveTextContent("can now be reserved");
+    expect(hint().textContent).not.toMatch(/will be arranged|available for you/i);
+  });
+
+  it.each([
+    ["some", "er-btn--secondary"],
+    ["all", "er-btn--primary"],
+    ["none", "er-btn--secondary"],
+  ])("SCRUM574_AC5_review_again_works_for_%s_and_is_styled_%s", async (outcome, style) => {
+    await open(cannot(OUTCOMES[outcome]));
+    const button = screen.getByRole("button", { name: "Review again" });
+    expect(button).toBeEnabled();
+    expect(button).toHaveClass(style);
+    startEquipmentReview.mockResolvedValue(underReview());
+    await userEvent.click(button);
+    expect(startEquipmentReview).toHaveBeenCalledWith(EVENT_ID);
+  });
+});

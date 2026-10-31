@@ -17,7 +17,7 @@
 // mocked per role, returning one stable user object, because the provider
 // ties each count reading to that object.
 //
-// Timezone-safe: expected times come from formatTimestamp, never a literal.
+// Timezone-safe: expected times come from formatDateTime, the inbox's own format.
 // No fake timers.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -35,7 +35,7 @@ import * as venueService from "../../src/services/venueService";
 import * as bookingRequestService from "../../src/services/bookingRequestService";
 import * as venueSuitabilityService from "../../src/services/venueSuitabilityService";
 import * as eventEquipmentService from "../../src/services/eventEquipmentService";
-import { formatTimestamp } from "../../src/services/displayFormat";
+import { formatDateTime } from "../../src/services/displayFormat";
 
 vi.mock("../../src/auth/AuthContext", () => ({
   useAuth: vi.fn(),
@@ -442,7 +442,7 @@ describe("SCRUM172 notification inbox flow", () => {
     expect(within(inbox).queryByText(/cannot be displayed yet/)).not.toBeInTheDocument();
     expect(inbox).not.toHaveTextContent(/undefined|unknown/i);
     rows.forEach((row, i) => {
-      expect(row).toHaveTextContent(`Received ${formatTimestamp(seed[i].createdAt)}`);
+      expect(row).toHaveTextContent(`Received ${formatDateTime(seed[i].createdAt)}`);
     });
   });
 

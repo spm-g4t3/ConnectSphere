@@ -64,6 +64,7 @@ import { createBookingRequest } from "../../src/services/bookingRequestService";
 import { getEventVenueSuitability } from "../../src/services/venueSuitabilityService";
 import { cancelFlaggedBooking, getEventFlaggedBookings } from "../../src/services/flaggedBookingService";
 import { httpError } from "../helpers/async.js";
+import { sgTime } from "../helpers/singaporeTime.js";
 
 vi.mock("../../src/auth/AuthContext", () => ({
   useAuth: vi.fn(),
@@ -772,7 +773,7 @@ describe("SCRUM19 statuses with nothing to decide", () => {
     const record = (await screen.findByText("Outcome")).closest("dl");
     expect(within(record).getByText("Rejected")).toBeInTheDocument();
     expect(within(record).getByText("The venue is unavailable that week.")).toBeInTheDocument();
-    expect(within(record).getByText(new Date("2026-01-15T09:00:00+08:00").toLocaleString())).toBeInTheDocument();
+    expect(within(record).getByText(sgTime("2026-01-15T09:00:00+08:00"))).toBeInTheDocument();
     if (userId === ASSIGNED) {
       expect(within(record).getByText("You")).toBeInTheDocument();
     } else {
@@ -1598,5 +1599,25 @@ describe("SCRUM-355 a resubmission's past decisions on the coordinator screen", 
     await screen.findByText("IS212 Industry Night");
     expect(getEventDecisionHistory).not.toHaveBeenCalled();
     expect(screen.queryByText(/This request is a resubmission/)).not.toBeInTheDocument();
+  });
+});
+
+describe("SCRUM-478 link to the registration list", () => {
+  const decided = { status: "completed", decision: "approved", decidedBy: ASSIGNED, decidedAt: past() };
+
+  it("SCRUM478_AC1_shows_the_assigned_coordinator_a_link_to_the_registration_list", () => {
+    renderAs(ASSIGNED, eventRequest(decided));
+    expect(screen.getByRole("link", { name: "View registrations" }))
+      .toHaveAttribute("href", `/events/${REQUEST_ID}/registrations`);
+  });
+
+  it("SCRUM478_AC1_offers_no_link_to_another_coordinator", () => {
+    renderAs(OTHER, eventRequest(decided));
+    expect(screen.queryByRole("link", { name: "View registrations" })).not.toBeInTheDocument();
+  });
+
+  it("SCRUM478_AC6_offers_no_link_while_the_event_is_under_review", () => {
+    renderAs(ASSIGNED, eventRequest({ status: "under_review" }));
+    expect(screen.queryByRole("link", { name: "View registrations" })).not.toBeInTheDocument();
   });
 });

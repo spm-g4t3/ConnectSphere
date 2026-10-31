@@ -18,12 +18,16 @@ import {
   markNotificationRead,
 } from "../services/notificationService";
 import { describeNotification } from "../services/notificationDisplay";
-import { formatTimestamp } from "../services/displayFormat";
+import { formatDateTime } from "../services/displayFormat";
 import { notificationLink } from "../services/notificationLink";
 import { useUnreadCount } from "../notifications/UnreadCountContext";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 import { useAuth } from "../auth/AuthContext";
 import { SESSION_EXPIRED } from "../services/apiErrors";
+import Button from "./ui/Button";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import LoadingText from "./ui/LoadingText";
 
 // Keyed by status, the same shape as ReviewQueue's QUEUE_ERROR_MESSAGES. No
 // 403: the route has no role gate, so a 403 cannot happen. A 500 reads the
@@ -72,7 +76,7 @@ export default function NotificationInbox() {
     } catch (err) {
       setError(
         LIST_ERROR_MESSAGES[err.response?.status] ||
-          "Notifications could not be loaded. Please try again.",
+          "Notifications could not be loaded.",
       );
     } finally {
       setLoading(false);
@@ -138,14 +142,19 @@ export default function NotificationInbox() {
     <section id="notifications" className="notification-inbox" ref={sectionRef}>
       <h2>Notifications{unreadCount > 0 && ` (${unreadCount} unread)`}</h2>
 
-      {loading && <p>Loading...</p>}
+      {loading && <LoadingText />}
+      {/* No Try again for an expired session: only signing in again fixes it. */}
       {error && (
-        <p className="notification-inbox__error" role="alert">
-          {error}
-        </p>
+        <ErrorNotice
+          message={error}
+          onRetry={error === SESSION_EXPIRED ? undefined : fetchNotifications}
+        />
       )}
       {!loading && !error && notifications.length === 0 && (
-        <p>You have no notifications.</p>
+        <EmptyState
+          message="You have no notifications."
+          nextStep="Updates about your events will appear here."
+        />
       )}
 
       {/* Newest first, as the backend orders them; not re-sorted here, for
@@ -189,7 +198,7 @@ export default function NotificationInbox() {
                 </p>
                 <p className="notification-inbox__detail">{detail}</p>
                 <p className="notification-inbox__time">
-                  Received {formatTimestamp(notification.createdAt)}
+                  Received {formatDateTime(notification.createdAt)}
                 </p>
                 {rowError && (
                   <p className="notification-inbox__row-error" role="alert">
@@ -199,12 +208,12 @@ export default function NotificationInbox() {
               </div>
 
               {unread && (
-                <button
+                <Button
                   onClick={() => handleMarkRead(notification.id)}
                   disabled={Boolean(marking[notification.id])}
                 >
                   {marking[notification.id] ? "Marking..." : "Mark as read"}
-                </button>
+                </Button>
               )}
             </li>
           );
