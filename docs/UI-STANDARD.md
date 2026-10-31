@@ -37,6 +37,10 @@ Defined once on `:root` in `frontend/src/index.css`.
 | `--color-warning-soft` | `#fff6e5` | Warning background |
 | `--color-success` | `#17684f` | Success text |
 | `--color-success-soft` | `#e8f7f1` | Success background |
+| `--color-info` | `#2b5285` | In-progress status text |
+| `--color-info-soft` | `#e9f1fb` | In-progress status background |
+| `--color-neutral` | `#42545a` | Neutral status text |
+| `--color-neutral-soft` | `#eef2f1` | Neutral status background |
 | `--shadow-card` | `0 18px 48px rgba(24, 61, 58, 0.09)` | Raised cards |
 | `--space-1` … `--space-6` | `4px`, `8px`, `12px`, `16px`, `24px`, `32px` | Gaps, padding, margins |
 | `--font-family` | `"Avenir Next", "Segoe UI", sans-serif` | All text |
@@ -58,28 +62,34 @@ Defined once on `:root` in `frontend/src/index.css`.
 ## Buttons
 
 - Use `Button` from `src/components/ui/Button.jsx`.
-- Variants: `primary`, `secondary`, `danger`, `link`.
+- Props: `variant` (`primary` by default, `secondary`, `danger`, `link`); defaults to `type="button"`; other props and `className` pass through.
 - A back link is the `link` variant.
 
 ## Status
 
-- Use `StatusBadge` from `src/components/ui/StatusBadge.jsx`. It renders the `.status-badge` class.
+- Use `StatusBadge` from `src/components/ui/StatusBadge.jsx`.
+- Props: `tone` (`neutral` by default, `info`, `warning`, `danger`, `success`, `accent`) and the label as `children`.
+- It renders `ui-status-badge` tones and replaces the per-screen `.status-badge` / `status--*` classes as screens move over.
 
 ## Loading
 
-- Use `LoadingText`. It shows exactly `Loading...` (three full stops, never the ellipsis character).
+- Use `LoadingText` (no props). It shows exactly `Loading...` (three full stops, never the ellipsis character).
 
 ## Empty
 
 - Use `EmptyState`. It says what is missing and what to do next.
+- Props: `message` and `nextStep` (both required), optional `action` (for example a `Button`).
 
 ## Errors
 
 - Use `ErrorNotice` with a `Try again` button. Never "Retry" or other wording.
+- Props: `message`, optional `onRetry` (the `Try again` button shows only when it is given).
 
 ## Confirmations
 
 - Use `ConfirmDialog` (a native `<dialog>`).
+- Props: `open`, `title`, `children` (the message), `confirmLabel`, `cancelLabel` (`Cancel` by default), `danger`, `busy` (disables both buttons), `onConfirm`, `onCancel`.
+- Focus starts on the cancel button; Escape cancels.
 - Never `window.confirm`.
 - Inline two-step confirms move to `ConfirmDialog` as their screens are updated.
 

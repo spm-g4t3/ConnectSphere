@@ -1,0 +1,38 @@
+/* Shared components. Every value comes from the tokens in index.css. */
+
+/* The doubled class outranks App.css's `.dashboard button` (0,1,1) and its
+   :hover/:disabled rules (0,2,1), so a variant looks the same in every scope. */
+.ui-button.ui-button { border-radius: var(--radius-control); font: inherit; padding: 10px var(--space-4); }
+.ui-button.ui-button--primary { background: var(--color-accent); border: 0; color: var(--color-paper); }
+.ui-button.ui-button--primary:hover:not(:disabled) { background: var(--color-accent-dark); }
+.ui-button.ui-button--secondary { background: var(--color-paper); border: 1px solid var(--color-accent-dark); color: var(--color-accent-dark); }
+.ui-button.ui-button--secondary:hover:not(:disabled) { background: var(--color-accent-soft); }
+.ui-button.ui-button--danger { background: var(--color-danger); border: 0; color: var(--color-paper); }
+.ui-button.ui-button--danger:hover:not(:disabled) { background: var(--color-danger); filter: brightness(0.9); }
+.ui-button.ui-button--link { background: none; border: 0; color: var(--color-accent-dark); padding: 0; text-decoration: underline; }
+.ui-button.ui-button--link:hover:not(:disabled) { background: none; color: var(--color-accent); }
+.ui-button.ui-button:disabled { cursor: not-allowed; opacity: 0.65; }
+
+.ui-status-badge { border-radius: var(--radius-pill); display: inline-block; font-size: var(--font-size-xs); font-weight: 700; letter-spacing: 0.06em; padding: 3px 10px; text-transform: uppercase; }
+.ui-status-badge--neutral { background: var(--color-neutral-soft); color: var(--color-neutral); }
+.ui-status-badge--info { background: var(--color-info-soft); color: var(--color-info); }
+.ui-status-badge--warning { background: var(--color-warning-soft); color: var(--color-warning); }
+.ui-status-badge--danger { background: var(--color-danger-soft); color: var(--color-danger); }
+.ui-status-badge--success { background: var(--color-success-soft); color: var(--color-success); }
+.ui-status-badge--accent { background: var(--color-accent-soft); color: var(--color-accent-dark); }
+
+.ui-loading-text.ui-loading-text { color: var(--color-muted); margin: var(--space-4) 0; }
+
+.ui-empty-state { background: var(--color-paper); border: 1px solid var(--color-line); border-radius: var(--radius-card); color: var(--color-muted); padding: var(--space-5); }
+.ui-empty-state .ui-empty-state__message { color: var(--color-ink); font-weight: 600; margin: 0; }
+.ui-empty-state .ui-empty-state__next-step { color: var(--color-muted); margin: var(--space-1) 0 0; }
+.ui-empty-state .ui-empty-state__action { margin-top: var(--space-4); }
+
+.ui-error-notice { align-items: center; background: var(--color-danger-soft); border-radius: var(--radius-control); color: var(--color-danger); display: flex; flex-wrap: wrap; gap: var(--space-3); justify-content: space-between; padding: var(--space-2) var(--space-3); }
+.ui-error-notice .ui-error-notice__message { color: var(--color-danger); margin: 0; }
+
+.ui-confirm-dialog { border: 0; border-radius: var(--radius-card); box-shadow: var(--shadow-card); color: var(--color-ink); max-width: min(480px, calc(100vw - var(--space-6))); padding: var(--space-5); width: 100%; }
+.ui-confirm-dialog::backdrop { background: color-mix(in srgb, var(--color-ink) 50%, transparent); }
+.ui-confirm-dialog .ui-confirm-dialog__title { color: var(--color-ink); font-size: var(--font-size-h2); margin: 0 0 var(--space-3); }
+.ui-confirm-dialog .ui-confirm-dialog__message, .ui-confirm-dialog .ui-confirm-dialog__message p { color: var(--color-ink); }
+.ui-confirm-dialog .ui-confirm-dialog__actions { display: flex; gap: var(--space-2); justify-content: flex-end; margin-top: var(--space-5); }
