@@ -1,9 +1,17 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
 import { createSchemaDb, seedBooking, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
 import { queriesFor } from './helpers/queries.js';
 import { decideBooking } from './helpers/bookingFlow.js';
 import { flagForReason } from './helpers/flaggedBookings.js';
 import { at } from '../fixtures/time.js';
+
+const MIGRATION_042 = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  '../../db/migrations/042_event_change_notification_types.sql',
+);
 
 // The notices 042's functions send when an event is confirmed, moved to
 // another venue or cancelled, against the final schema.
@@ -354,6 +362,28 @@ describe('SCRUM-175: confirmation, venue change and cancellation notices', () =>
       );
       expect(organiserNotice.recipient_id).toBe(organiser);
       expect(organiserNotice.payload.reason).toBe('Speaker moved');
+    });
+
+    // Rows stored before 042 still carry the reason, and the API returns payloads unchanged.
+    it('SCRUM175_AC7_042_strips_the_reason_from_attendee_notices_stored_before_it', async () => {
+      const id = await makeEvent('confirmed');
+      const insert = (recipient, type) => one(
+        `insert into notifications (recipient_id, type, event_request_id, payload)
+         values ($1, $2, $3::uuid, jsonb_build_object('eventRequestId', $3::text, 'reason', 'Speaker moved'))
+         returning id`,
+        [recipient, type, id],
+      );
+      const attendeeRow = await insert(attendees[0], 'event_significant_change_attendee');
+      const organiserRow = await insert(organiser, 'event_significant_change');
+
+      await db.exec(readFileSync(MIGRATION_042, 'utf8'));
+
+      const payloadOf = async (row) => (await one('select payload from notifications where id = $1', [row.id])).payload;
+      const attendeePayload = await payloadOf(attendeeRow);
+      expect(attendeePayload).not.toHaveProperty('reason');
+      expect(attendeePayload.eventRequestId).toBe(id);
+      // The organiser's notice keeps it.
+      expect((await payloadOf(organiserRow)).reason).toBe('Speaker moved');
     });
   });
 });
