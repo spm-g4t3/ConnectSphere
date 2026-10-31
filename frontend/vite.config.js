@@ -141,6 +141,12 @@ const SCRUM284_FILES = [
   'src/services/eventPeriodFormat.js',
 ]
 
+// SCRUM-582 adds the "Reviewed by me" list beside the queue. The service it
+// calls is gated above under SCRUM-284.
+const SCRUM582_FILES = [
+  'src/components/EquipmentReviewedByMe.jsx',
+]
+
 // SCRUM-258 owns the Venue Staff queue and its decision card outright.
 // VenueStaffDashboard.jsx, which mounts the queue, and the shared services
 // it calls (bookingRequestService.js, already gated under SCRUM-254) are not
@@ -296,6 +302,7 @@ export default defineConfig({
         ...SCRUM486_FILES.map((file) => [file, FULL]),
         ...SCRUM487_FILES.map((file) => [file, FULL]),
         ...SCRUM284_FILES.map((file) => [file, FULL]),
+        ...SCRUM582_FILES.map((file) => [file, FULL]),
         ...SCRUM258_FILES.map((file) => [file, FULL]),
         ...SCRUM266_FILES.map((file) => [file, FULL]),
         ...SCRUM495_FILES.map((file) => [file, FULL]),
