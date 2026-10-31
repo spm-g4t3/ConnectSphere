@@ -929,4 +929,47 @@ describe('SCRUM-402: change requests (035, 036)', () => {
       }
     });
   });
+
+  // 050: the role is checked inside the functions too, as the routes' requireRole does.
+  // Each test changes a shared user's role and puts it back, whatever happens.
+  describe('050: the caller\'s role', () => {
+    const withRole = async (userId, role, run) => {
+      const { role: was } = await one('select role::text as role from profiles where id = $1', [userId]);
+      await db.query('update profiles set role = $2 where id = $1', [userId, role]);
+      try {
+        await run();
+      } finally {
+        await db.query('update profiles set role = $2 where id = $1', [userId, was]);
+      }
+    };
+
+    it('SCRUM402_AC2_the_gate_refuses_a_holder_whose_role_is_not_event_coordinator', async () => {
+      // The holder, no longer an Event Coordinator: decline and the preview reach no other role check.
+      const id = await approved();
+      const cr = await groupId(id, [['purpose', 'Alumni networking']]);
+      // Reaching Approved already notified people; the refusals must add nothing to that.
+      const noticesBefore = await rows('select id from notifications where event_request_id = $1 order by id', [id]);
+
+      await withRole(coordinator, 'event_coordinator_lead', async () => {
+        await expectRefused(id, () => preview(cr), '42501');
+        await expectRefused(id, () => accept(cr), '42501');
+        await expectRefused(id, () => decline(cr, 'Not now'), '42501');
+      });
+
+      expect((await requests(id)).map((r) => r.status)).toEqual(['outstanding']);
+      expect(await history(id)).toEqual([]);
+      expect(await rows('select id from notifications where event_request_id = $1 order by id', [id])).toEqual(noticesBefore);
+      expect(await notices(id, 'change_request_decided')).toEqual([]);
+    });
+
+    it('SCRUM402_AC1_create_refuses_an_owner_whose_role_is_not_event_organiser', async () => {
+      const id = await approved();
+
+      await withRole(organiser, 'attendee', async () => {
+        await expectRefused(id, () => group(id, [['purpose', 'New']]), '42501');
+      });
+
+      expect(await requests(id)).toEqual([]);
+    });
+  });
 });

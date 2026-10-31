@@ -2,7 +2,7 @@
 
 **Story:** Process an Event Change Request (E3) — Event Coordinator
 **Subtask:** SCRUM-409 (this document); the backend halves of SCRUM-403 to SCRUM-407
-**Schema:** `035_change_request_cancellation_type.sql` and `036_process_change_requests.sql` (SCRUM-403), with `039_change_request_notice_types_restored.sql` putting back 036's notice types after later restates, on top of 022's `edit_event_request_details`, 028's change-history source check, 013's `cancel_event_request` and the baseline's `apply_significant_event_change`.
+**Schema:** `035_change_request_cancellation_type.sql` and `036_process_change_requests.sql` (SCRUM-403), with `039_change_request_notice_types_restored.sql` putting back 036's notice types after later restates and `050_change_request_role_checks.sql` checking the caller's role inside the gate and the create, on top of 022's `edit_event_request_details`, 028's change-history source check, 013's `cancel_event_request` and the baseline's `apply_significant_event_change`.
 **Written:** 27 October 2026, before the tests and the code.
 **Marked:** 27 October 2026, SCRUM-403 to SCRUM-407 (backend): every case proved. AC5-04 moved from Safety approved to Confirmed, where the order it tests matters (387 allows a name in Safety approved, so the old case could not fail).
 **Marked:** 28 October 2026, SCRUM-404's screen half and SCRUM-408 (brief 2): the screens' cases, each marked **(UI)**, after the backend's in every table, and AC1-11 for My events' count. Every one proved.
@@ -10,6 +10,7 @@
 **Marked:** 27 October 2026, the brief 1 fix-up: the Organiser's note (`organiser_note`, in 036 before it ran anywhere). AC1-08 to AC1-10 and AC7-04 added; AC7-03 reworded as the fallback it now is.
 **Marked:** 30 October 2026, click-through step 23 (a cancellation on an Under review event did nothing visible): AC4-08 to AC4-12 for every review failure shown in its card, AC7-07 to AC7-10 for the cancellation with the live data. AC4-05's `…_with_no_rows_or_impact_still_opens` renamed `…_with_no_invalid_list_or_impact_still_opens`, since a preview with no rows now says it could not be reviewed (AC4-09). Every one proved.
 **Marked:** 30 October 2026, the merge of dev with SCRUM-379 (033, 034) and SCRUM-571 (038): AC10-06 and AC10-07 for 034's `event_completed` on both screens, in 402's words. Three SCRUM-379 tests on those screens (six cases) renamed `SCRUM402_AC10_…`, since the screens are 402's. AC10-01's route test cited by its current name. Every one proved.
+**Marked:** 31 October 2026, migration 050 (review on #95): AC1-18 and AC2-09, the caller's role checked inside `create_change_request_group` and `change_request_gate`. Every one proved.
 
 This document is the written layer between SCRUM-402's acceptance criteria and the
 Vitest files that implement them. The chain is **user story → acceptance criteria
@@ -101,6 +102,7 @@ after: a refusal changes nothing (the rollback cases).
 | AC1-09 | Approved | Submit with no note; with a blank one | `organiser_note` null; no `p_note` sent | Proved (pglite): `SCRUM402_AC1_a_group_with_%s_stores_null` (two); (route) `SCRUM402_AC1_a_group_with_%s_sends_no_p_note` (two) |
 | AC1-10 **(trap)** | Approved | A note of 2,001 characters, through the function; through a direct insert; a blank note inserted directly | 22023 from the function; 23514 from the table's check for both inserts; 2,000 characters accepted | Proved (pglite): `SCRUM402_AC1_a_note_over_2000_characters_is_refused_by_the_function_and_by_the_table`; (validation) `SCRUM402_AC1_a_groups_note_is_trimmed_optional_and_at_most_2000_characters` |
 | AC1-11 | Through the API | The coordinator's `GET /mine` | Each event carries `openChangeRequestCount`, its open submissions counted by group, read in the same query | Proved (route): `SCRUM402_AC1_each_event_carries_how_many_submissions_wait_counted_by_group`; (service, renamed) `SCRUM402_AC1_selects_every_other_reads_columns_plus_the_change_request_count` |
+| AC1-18 | Approved; the owner's profile role changed to `attendee` | The owner submits a group | 42501 from the role check (050), before the owner check; nothing written | Proved (pglite): `SCRUM402_AC1_create_refuses_an_owner_whose_role_is_not_event_organiser` |
 | AC1-12 **(UI)** | The Organiser's form | Three fields, a date among them, and a note; remove a row; add to nine | One group sent, the date as an ISO instant, the note trimmed; a removed row is not sent; "Add another change" stops at nine | Proved (UI, organiser): `SCRUM402_AC1_several_fields_and_a_note_go_as_one_group`, `SCRUM402_AC1_no_note_sends_none_and_a_row_can_be_removed`, `SCRUM402_AC1_at_most_nine_changes` |
 | AC1-13 **(UI)** **(trap)** | The same | Accessibility with "Something else" (both `other`); the same field twice | Refused beside the second row, nothing sent: no 22023 from the server | Proved (UI, organiser): `SCRUM402_AC1_%s_is_refused_in_the_form` (two), `SCRUM402_AC1_accessibility_says_it_travels_as_something_else` |
 | AC1-14 **(UI)** | The same | A blank row; a note over 2,000 characters; a 400 with details; 400, 401, 403, 404, 500 without | Refused before sending; a fault on `changes[i]` beside row i and the rest in a list; otherwise a line keyed on the status, never the server's text | Proved (UI, organiser): `SCRUM402_AC1_a_blank_row_and_a_long_note_are_refused_before_sending`, `SCRUM402_AC1_a_400s_faults_go_beside_their_rows_and_the_rest_in_a_list`, `SCRUM402_AC1_%s_is_said_in_the_forms_own_words` (five) |
@@ -118,6 +120,7 @@ after: a refusal changes nothing (the rollback cases).
 | AC2-04 | A draft (no coordinator), reopened after a rejection; its group was closed by the rejection, as no group can be open on a draft | Anyone accepts | The group is processed as `event_rejected`; 42501: the caller is checked first, as 387's D15 | Proved (pglite): `SCRUM402_AC2_a_reopened_drafts_group_is_closed_by_the_rejection` |
 | AC2-05 | As AC2-01 to AC2-03 | Preview | The same refusals | Proved (pglite): the AC2-01 to AC2-03 tests above, each of which previews too |
 | AC2-06 | Through the API | Any role but a coordinator; no token; a malformed id | 403, 401, 400; nothing queried | Proved (route): `SCRUM402_AC2_%s_is_refused_the_preview_with_403_and_queries_nothing`, `SCRUM402_AC2_%s_is_refused_the_decision_with_403_and_queries_nothing`, `SCRUM402_AC2_the_preview_answers_401_without_a_token_and_400_for_a_malformed_id`, `SCRUM402_AC2_the_functions_%s_is_a_%s`, `SCRUM402_AC3_%s_is_a_400_before_the_database` (a_malformed_id) |
+| AC2-09 **(trap)** | Approved, held; the holder's profile role changed to `event_coordinator_lead` | Preview; accept; decline | 42501 each time from the gate's role check (050): decline and the preview reach no other one. The group stays outstanding; the event, the history and the notifications are unchanged | Proved (pglite): `SCRUM402_AC2_the_gate_refuses_a_holder_whose_role_is_not_event_coordinator` |
 | AC2-07 **(UI)** | The panel | The Lead or another coordinator; the holder on a Submitted, Cancelled, Rejected or Completed event | No buttons; no Review; on Submitted, "Start the review to process change requests." | Proved (UI, panel): `SCRUM402_AC2_the_lead_and_other_coordinators_read_it_with_no_buttons`, `SCRUM402_AC2_an_event_that_is_%s_offers_no_review` (four) |
 | AC2-08 **(UI)** | The panel | Each refusal: the three 402 codes, `EVENT_HOLDS_ARRANGEMENTS`, an unknown 409, 400, 401, 403, 404, 500; a preview refused | Each in the panel's words, keyed on status and code; the server's text never shown | Proved (UI, panel): `SCRUM402_AC2_%s_is_said_in_the_panels_own_words` (nine), `SCRUM402_AC4_a_preview_that_fails_says_so_in_the_panels_words` |
 
@@ -235,13 +238,13 @@ after: a refusal changes nothing (the rollback cases).
 
 ## Tally
 
-90 cases, counted from the tables: **90 proved**; 0 not yet implemented; 0 that
-cannot be written as specified. Twenty-two are traps, five of them on the screen.
+92 cases, counted from the tables: **92 proved**; 0 not yet implemented; 0 that
+cannot be written as specified. Twenty-three are traps, five of them on the screen.
 
 | Section | Backend | UI | Cases |
 |---|---|---|---|
-| AC1 | 11 | 6 | 17 |
-| AC2 | 6 | 2 | 8 |
+| AC1 | 12 | 6 | 18 |
+| AC2 | 7 | 2 | 9 |
 | AC3 | 2 | 1 | 3 |
 | AC4 | 4 | 8 | 12 |
 | AC5 | 10 | 1 | 11 |
@@ -251,4 +254,4 @@ cannot be written as specified. Twenty-two are traps, five of them on the screen
 | AC9, AC10 | 4 | 5 | 9 |
 | AC11, AC12 | 3 | 3 | 6 |
 | Schema | 6 | 0 | 6 |
-| **Total** | **58** | **32** | **90** |
+| **Total** | **60** | **32** | **92** |

@@ -3,13 +3,14 @@
 **Story:** Process an Event Change Request (E3) — Event Coordinator
 **Closing subtask:** SCRUM-410 (this document)
 **Status as of 30 October 2026:** built and tested; all twelve criteria done (section 1). The click-through passed in full, as reported by Calven on 30 October 2026, after the two incidents recorded under Verification.
+**Migrations:** 035, 036 and 039, live; 050, the caller's role checked in SQL after the review of #95, to be applied.
 
 This document is the record of what SCRUM-402 delivered, how each acceptance
 criterion is proved, why the design looks the way it does, and what is still
 missing. The examination chain is **user story → acceptance criterion → test case
 → test class → code**; section 2 walks it end to end for AC5.
 
-The case-by-case mapping is `docs/test-cases/SCRUM-402.md`: 90 cases, 58 backend
+The case-by-case mapping is `docs/test-cases/SCRUM-402.md`: 92 cases, 60 backend
 and 32 on the screen, each naming the tests that prove it. This document cites it
 rather than repeating it.
 
@@ -41,7 +42,7 @@ rather than repeating it.
 
 | Subtask | Delivered | Commit |
 |---|---|---|
-| SCRUM-403 | Migration 035: the `cancellation` change field, on its own. Migration 036: request groups and their trigger, `event_change_history.change_request_id` and its link check, `edit_event_request_details` taking its source from a setting, `change_request_targets()` and `change_request_field_class()`, `create_change_request_group`, `change_request_group_plan`, `change_request_gate`, `preview_change_request`, `process_change_request` restated in place, and the two notice types appended to the live list. The Organiser's note (`organiser_note`). Migration 039: the notice types restored after later restates, 347's rejected-event refusal under the lock, and the trigger that closes a rejected event's open requests | `c01ea68`, `9ea59f9`, `2a77a24` |
+| SCRUM-403 | Migration 035: the `cancellation` change field, on its own. Migration 036: request groups and their trigger, `event_change_history.change_request_id` and its link check, `edit_event_request_details` taking its source from a setting, `change_request_targets()` and `change_request_field_class()`, `create_change_request_group`, `change_request_group_plan`, `change_request_gate`, `preview_change_request`, `process_change_request` restated in place, and the two notice types appended to the live list. The Organiser's note (`organiser_note`). Migration 039: the notice types restored after later restates, 347's rejected-event refusal under the lock, and the trigger that closes a rejected event's open requests. Migration 050: the caller's role checked inside `change_request_gate` and `create_change_request_group` (D18) | `c01ea68`, `9ea59f9`, `2a77a24`, this change |
 | SCRUM-404 | The coordinator's list: `GET /:id/change-requests/review` oldest first with `requestGroupId`, `currentValue` and `organiserNote`; `ChangeRequestReviewPanel.jsx`'s cards, one per submission; My events' `openChangeRequestCount`, counted by group, and its badge | `c01ea68`, `7b74515` |
 | SCRUM-405 | The preview: `preview_change_request` (036) and `GET /change-requests/:id/preview`; the panel's review, with each field's class, invalid values, the revert warning and 395's impact; the check that a preview carries what the review needs | `c01ea68`, `7b74515`, `ea6d510` |
 | SCRUM-406 | Accept: `process_change_request`'s routing by status, `expectedImpact` passed to 395, the cancellation and equipment paths, and the panel's Accept, cancellation confirmation and equipment hand-off | `c01ea68`, `7b74515`, `ea6d510` |
@@ -83,16 +84,16 @@ freed venues (038). Six files conflicted, and each kept both stories:
 | SCRUM-402's gate | `SCRUM402_FILES` in `frontend/vite.config.js` (`:245`): `ChangeRequestReviewPanel.jsx` and `changeRequestDisplay.js` at 100% statements, branches, functions and lines |
 | Gates that held | `notificationDisplay.js` at 100% in SCRUM-17's gate and `notificationLink.js` in SCRUM-172's. `ChangeRequestStatusList.jsx` is at 100% but ungated. The backend's `eventChangeRequestService.js` is ungated, at 79% of lines (section 4) |
 | SCRUM-402's own tests | 252 titles once parametrised cases are expanded, every one named `SCRUM402_ACn_…` or `SCRUM347_AC6_create…`. Backend 135: 71 in `scrum402ProcessChangeRequestDatabase.test.js`, 49 in `scrum402ChangeRequestRoutes.test.js`, 5 in `scrum402ChangeRequestValidation.test.js`, 4 in `eventRequests.test.js`, 3 in `scrum489SafetyReviewSubmissionDatabase.test.js`, 2 in `eventChangeField.test.js`, 1 in `eventRequestService.test.js`. Frontend 117: 56 in `scrum402ChangeRequestReviewPanel.test.jsx`, 22 in `scrum402OrganiserChangeRequests.test.jsx`, 16 in `scrum402ChangeRequestDisplay.test.js`, 10 in `scrum402NotificationDisplay.test.js`, 5 in `scrum379CoordinatorCompletion.test.jsx`, 4 in `scrum347RejectApprovedEvent.test.jsx`, 3 in `scrum402CoordinatorScreens.test.jsx`, 1 in `notificationDisplay.test.js` |
-| PGlite | `scrum402ProcessChangeRequestDatabase.test.js` runs on the full schema (`createSchemaDb()`: the baseline, then every migration, 010 to 039 with 033, 034 and 038 now among them). Statuses are reached through the real workflow functions; only Completed is seeded |
-| Live database | 035 and 036 applied by Calven on 27 October 2026; both checks passed. 039 applied on 29 October 2026; its check returned `true | true | true`. The first paste had evidently not run, and a re-run fixed it. No live script was run by us; the cancellation incident below was read with read-only calls |
-| Test-case document | 90 cases (58 backend, 32 UI): **90 proved**, 0 not yet implemented, 0 that cannot be written as specified. 22 are traps, 5 of them on the screen |
+| PGlite | `scrum402ProcessChangeRequestDatabase.test.js` runs on the full schema (`createSchemaDb()`: the baseline, then every migration, 010 to 050, with 033, 034, 038, and 040 to 043 now among them). Statuses are reached through the real workflow functions; only Completed is seeded |
+| Live database | 035 and 036 applied by Calven on 27 October 2026; both checks passed. 039 applied on 29 October 2026; its check returned `true | true | true`. The first paste had evidently not run, and a re-run fixed it. 050 is to be applied by Calven, with its check query; not yet recorded here. No live script was run by us; the cancellation incident below was read with read-only calls |
+| Test-case document | 92 cases (60 backend, 32 UI): **92 proved**, 0 not yet implemented, 0 that cannot be written as specified. 23 are traps, 5 of them on the screen |
 | Click-through | Passed in full, as reported by Calven on 30 October 2026. The first run (29 October) stopped at the significant-change step: 024, 032 and 037 had restated the notice list whole after 036 ran on live and dropped 402's two types, so every insert of either notice failed; 039 fixed it. On the second run, accepting a cancellation did nothing the first time; live reads, PGlite and a screen replay with the live data all worked, the cause was never reproduced, and after both servers were restarted it worked, so most likely a server was running stale code. `ea6d510` makes any such failure visible in the card |
 
 **Teeth checks**: each test was checked by breaking the line it proves, watching
 it fail, and restoring the file from an in-memory copy (never `git checkout`).
-72 in all: 24 for brief 1 (SCRUM-403 to SCRUM-407), 9 for the Organiser's note,
+74 in all: 24 for brief 1 (SCRUM-403 to SCRUM-407), 9 for the Organiser's note,
 25 for the screens (SCRUM-404 and SCRUM-408), 5 for 039 and its two follow-ups,
-8 for the cancellation fix-up and 1 for this sweep. Each row names the file broken;
+8 for the cancellation fix-up, 1 for the sweep and 2 for 050. Each row names the file broken;
 section 2 gives the lines.
 
 | AC | What was broken | What failed | Round |
@@ -114,6 +115,7 @@ section 2 gives the lines.
 | AC1 | The requested value not through the shared formatter (panel) | 2 panel tests | Screens |
 | AC1 | No count badge on My events (`MyAssignedEvents.jsx`) | 1 screen test | Screens |
 | AC1 | `/mine` counting rows, not groups (`eventRequestService.js`) | 1 route test | Screens |
+| AC1 | 050's role refusal removed from `create_change_request_group` (`050:100–105`) | `SCRUM402_AC1_create_refuses_an_owner_whose_role_is_not_event_organiser` | 050 |
 | AC2 | The gate's caller check removed (036) | 5 PGlite tests | Brief 1 |
 | AC2 | Submitted not asked to start the review (036) | AC2-02 | Brief 1 |
 | AC2 | Rejected allowed (036) | AC2-03 | Brief 1 |
@@ -121,6 +123,7 @@ section 2 gives the lines.
 | AC2 | A status AC2 refuses still offering Review | 4 panel tests | Screens |
 | AC2 | No "start the review" line on a Submitted event | 1 panel test | Screens |
 | AC2 | 039's rejected-event refusal removed (`039:49–52`) | `SCRUM347_AC6_create_change_request_group_refuses_a_rejected_event` | 039, follow-up 1 |
+| AC2 | 050's role condition removed from the gate (`050:38–41`) | `SCRUM402_AC2_the_gate_refuses_a_holder_whose_role_is_not_event_coordinator` | 050 |
 | AC3 | A decline accepted with no reason (036) | 2 PGlite tests | Brief 1 |
 | AC3 | The panel's decline sent with no reason | 1 panel test | Screens |
 | AC4 | The preview without the impact (036) | 3 PGlite tests | Brief 1 |
@@ -198,7 +201,7 @@ rerun.
 
 **Tally:** 12 done, 0 partial, 0 deferred.
 
-**Test cases:** 90 (58 backend, 32 UI); 90 proved.
+**Test cases:** 92 (60 backend, 32 UI); 92 proved.
 
 ### Evidence for each criterion
 
@@ -208,7 +211,7 @@ each row names what the step showed, with its number where the briefs give one.
 | AC | Proved by | Click-through |
 |---|---|---|
 | AC1 | `SCRUM402_AC1_one_submission_is_one_group_of_rows_named_by_the_first` (PGlite); `SCRUM402_AC1_one_card_per_submission_with_current_and_requested_values_the_note_and_the_date` (panel) | Step 4: the Organiser's form with several changes; the coordinator's cards |
-| AC2 | `SCRUM402_AC2_%s_is_refused_with_42501`, `SCRUM402_AC2_a_submitted_event_asks_for_its_review_to_be_started_first` (PGlite) | Review offered to the holder only |
+| AC2 | `SCRUM402_AC2_%s_is_refused_with_42501`, `SCRUM402_AC2_a_submitted_event_asks_for_its_review_to_be_started_first`, `SCRUM402_AC2_the_gate_refuses_a_holder_whose_role_is_not_event_coordinator` (PGlite) | Review offered to the holder only |
 | AC3 | `SCRUM402_AC3_a_decline_records_the_reason_on_every_row_and_changes_nothing_else` (PGlite) | A decline with a reason |
 | AC4 | `SCRUM402_AC4_the_preview_classes_each_row_with_its_current_and_requested_values`, `SCRUM402_AC4_an_impact_that_changed_since_the_preview_refuses_the_accept` (PGlite); `SCRUM402_AC4_tags_each_field_and_shows_the_impact_in_395s_style` (panel) | Review on an Approved event: the tags and the impact |
 | AC5 | `SCRUM402_AC5_while_%s_a_significant_field_goes_through_395_and_the_event_is_approved`, `SCRUM402_AC5_a_confirmed_event_with_ordinary_fields_only_returns_to_approved_first` (PGlite) | An ordinary field plus a date accepted on an Approved event |
@@ -240,7 +243,7 @@ coordinator accepting a description and a later start on an Approved event.
 | Frontend service | `previewCoordinatorChangeRequest` and `processCoordinatorChangeRequest` (`frontend/src/services/eventRequestService.js:157`, `:149`) | `GET /event-requests/change-requests/:id/preview`; `POST …/decision` with `{ decision, decisionNotes, expectedImpact }` | The panel suite, through its mocks |
 | Route | `GET /change-requests/:changeRequestId/preview` (`backend/src/routes/eventRequests.js:1184`); `POST …/decision` (`:1196`), `coordinatorOnly` and SCRUM-382's `guardChangeRequest` | Any role but a coordinator is 403; a Completed or Cancelled event is 409 `EVENT_FINAL` before the function runs | `SCRUM402_AC4_the_preview_is_asked_for_by_the_tokens_coordinator_and_returned_as_is` |
 | Service | `processChangeRequest` (`eventChangeRequestService.js:470`), the rpc (`:489`), `p_expected_impact` only when given (`:494`); PT409 hints become the 409's `code` (`:117`) | `validateProcessChangeRequest` checks the body; one rpc; `translateError` | `SCRUM402_AC4_the_previewed_impact_is_passed_to_the_function`, `SCRUM402_%s_the_decisions_%s_is_a_409_with_its_code` |
-| SQL: who, then status | `change_request_gate` (`036:598`): the caller (`:622`), Submitted (`:627`), the six statuses (`:630–633`), processed once (`:639`) | A stranger is 42501 before any status is read | `SCRUM402_AC2_%s_is_refused_with_42501` |
+| SQL: who, then status | `change_request_gate` (`050:13`, restated from `036:598`): the holder, still an Event Coordinator (`050:36–41`), Submitted (`:47`), the six statuses (`:50–53`), processed once (`:59`) | A stranger, or a holder without the coordinator role, is 42501 before any status is read (D18) | `SCRUM402_AC2_%s_is_refused_with_42501` |
 | SQL: the plan | `change_request_group_plan` (`036:485`); each field's class (`036:346`, venue significant at `:354`); its target (`036:326`, venue to `venueRequirements` at `:339`) | Each row classed and checked against SCRUM-10's rules; a value equal to the stored one dropped | `SCRUM402_AC5_a_venue_request_becomes_the_venue_requirements`, `SCRUM402_AC5_a_value_equal_to_the_stored_one_is_dropped` |
 | SQL: accept | `process_change_request` (`036:703`): faults refused (`:755`); the group marked first (`:761–770`); the history settings (`:773`) | Nothing is applied if any value is refused; the settings label every history row written below | `SCRUM402_AC5_%s_is_refused_naming_the_field_and_the_group_stays_open` |
 | SQL: by status | Cancellation (`036:781`); Under review and Pending clarification through 387 (`:784–792`); planning, safety and Confirmed: the significant part through 395 (`:801`), the Confirmed revert for ordinary-only (`:803`), then the ordinary part through 387 (`:806`) | Here: the start goes through `apply_significant_event_change`, which flags the booking and keeps the event Approved; the description through `edit_event_request_details` | `SCRUM402_AC5_while_%s_a_significant_field_goes_through_395_and_the_event_is_approved`, `SCRUM402_AC5_with_both_parts_395_goes_first_then_387`, `SCRUM402_AC5_a_confirmed_event_with_ordinary_fields_only_returns_to_approved_first` |
@@ -375,14 +378,15 @@ after trimming, stored on every row of the group so any row answers for it. For 
 cancellation it is the reason the coordinator sees pre-filled (`036:558`).
 *Rejected: a note column on a parent row*, which D10 does not have.
 
-### D14. Migrations 035, 036 and 039
+### D14. Migrations 035, 036, 039 and 050
 
 035 adds only the `cancellation` enum value: Postgres cannot use a value in the
 transaction that adds it. 036 is everything else. 030 to 034 were taken when 402
 started (030 and 040 on SCRUM-478's branch, 032 Terence's, 033 and 034 SCRUM-379's),
 and 037 (David's) and 038 (Terence's SCRUM-571) were taken by the time 039 was
-needed. 040 and 041 are on teammates' branches. *Rejected: editing 036 after it
-ran on live*; 039 is a new file.
+needed. 040 and 041 are on teammates' branches. 050 came after the review of #95:
+044 to 049 are on David's SCRUM-177 branch, and 050 was claimed. *Rejected:
+editing 036 or 039 after they ran on live*; 039 and 050 are new files.
 
 ### D15. The Organiser gets two notices when fields are applied
 
@@ -404,6 +408,16 @@ the card it belongs to, beside its buttons (`cardLines`,
 needs says so rather than opening an empty card (`:38`). *Rejected: one line at the
 top of the panel*, which can sit off-screen: it is how the cancellation incident
 went unseen.
+
+### D18. The caller's role is checked in SQL as well as by the route
+
+The caller's role is checked in SQL as well as by the route (AGENTS.md:16), raised
+on review of #95. `change_request_gate` now refuses a holder who is not an Event
+Coordinator (`050:36–41`), and `create_change_request_group` an owner who is not
+an Event Organiser (`050:100–105`). The gate is the only check on decline and
+preview: neither reaches 387 or 395. The Organiser's owner refusal keeps 22023
+(`050:106`), so the existing 400 is unchanged. *Rejected: relying on the routes'
+`requireRole` alone.*
 
 ---
 
@@ -427,8 +441,9 @@ went unseen.
 - **`backend/src/routes/eventRequests.js` and `eventChangeRequestService.js` stay
   ungated**, as they always were.
 - **The backend has no lint script.** The frontend's 24 warnings are not 402's.
-- **Restate from 039:** `create_change_request_group` is now defined in 039, so
-  anyone who changes it must restate it from 039, not 036.
+- **Restate from 050:** `create_change_request_group` and `change_request_gate` are
+  now defined in 050, so anyone who changes either must restate it from 050, not
+  036 or 039.
 
 ### Process notes
 
@@ -448,8 +463,9 @@ went unseen.
   keep `change_request_decided` and `change_request_significant_submitted`, or
   better, append to the live list as 036 and 039 do. 033, 034 and 038 do not touch
   it (checked 30 October 2026); 037 was the last whole restate.
-- **`create_change_request_group`.** Any restate must start from 039, which adds
-  the rejected-event refusal to 036's.
+- **`create_change_request_group` and `change_request_gate`.** Any restate must
+  start from 050, which adds the role checks (D18) to 039's create, with its
+  rejected-event refusal, and to 036's gate.
 
 ---
 
