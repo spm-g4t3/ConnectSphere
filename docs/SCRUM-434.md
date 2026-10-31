@@ -29,13 +29,19 @@ No migration and no new route. The one change to who can write is the Organiser-
 ## 2. Descoped: AC1, the organisation-wide view
 
 AC1 reads: the Organiser "views all event requests from their organisation, but
-changes only their own". Nothing in the project requirements asks for organisation
-scoping; the Week 1 briefing only limits what an Organiser may see. Building it
-would need an organisation on the profile, a new query and a new screen, for a
-rule nobody has asked us to meet. Decision: not built.
+changes only their own". The requirements treat organisation as a limit, not a
+grant: Week 1 says an Organiser should not see unrelated clients' events, and
+`docs/requirements.md` says Organisers see only their own organisation's events.
+Neither asks that colleagues in one organisation see each other's events. The
+database also holds no organisation data: `profiles` has an id, a role and a name,
+and the word does not appear in `backend/db` or `backend/src`. Building the view
+would need an organisation on the profile, seed data, a new query and a new screen.
+Decision: not built. An Organiser sees only their own events, which meets the limit
+and is stricter than the story's wording.
 
 The second half ("changes only their own") already holds and is tested (AC8).
-Subtask SCRUM-435 (the organisation-scoped query) is closed as not needed.
+Subtask SCRUM-435 (the organisation-scoped query) is not needed; its Jira status
+still has to be closed to match.
 
 ## 3. Acceptance criteria and the tests that prove them
 
@@ -64,9 +70,29 @@ Test names follow the repo convention `SCRUM434_AC<n>_<behaviour>`.
 - **Every coordinator reads a submitted event's clarification history**, not only the
   assigned one. This is deliberate (the coordinators share one queue, SCRUM-486) and
   is pinned in the access matrix so a change to it is visible.
-- **`submit_event_request` does not check the caller owns the event.** The route does,
-  first, by reading the event through `getEventRequestForOrganiser`. The route test
-  covers it. Anything that calls the function from somewhere else must do the same.
+- **Role gates sit in Express; the SQL functions behind them do not all repeat them.**
+  `migrations/AGENTS.md` asks for the role check inside the function too. For the
+  Organiser write routes this story adds, the position is:
+  - `submit_event_request` checks neither role nor owner. The route does both
+    (`organiserOnly`, then `guardOwnEvent`). Anything that calls the function from
+    somewhere else must do the same.
+  - `reply_to_event_clarification_with_amendments` checks the owner, not the role.
+  - `create_change_request_group` (SCRUM-402, PR 95, not on dev yet) checks the owner,
+    not the role. Its role check belongs with that PR or a follow-up after it merges.
+  - `POST /` and `PATCH /:id` write the `event_requests` table directly. There is no
+    SQL function to put a check in, and adding one is a refactor outside this story.
+  - The gap is not reachable from a client: migration 011 revokes execute on every
+    function from the client roles, so only the API, as service_role, can call them,
+    and the API is now gated. A SQL role check is defence in depth, left for a
+    follow-up so this story stays migration-free.
+- **Reads and writes refuse differently.** A non-Organiser calling an Organiser write
+  gets 403. The same account calling an Organiser read (`GET /:id`, `/status`,
+  `/change-requests`, the histories) gets 404, because those reads are scoped to the
+  caller's own events and a stranger and a missing id look the same. This is on
+  purpose: a 403 on a read would confirm that the event exists.
+- **A waitlisted attendee gets 404 on the attendee event page.** The page reads
+  registered attendees only, which matches AC5 ("events they're registered for").
+  SCRUM-175 notifies waitlisted attendees of a cancellation instead.
 - **The Organiser never receives handover notes.** `GET /:id/assignments` reads with
   `includeNotes: false`; the notes belong to `/assignments/review`, which refuses an
   Organiser. Pinned in the access matrix.

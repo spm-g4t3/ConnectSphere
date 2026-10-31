@@ -33,11 +33,33 @@ describe("SCRUM-434 AC5: a cancelled event for an attendee", () => {
     vi.mocked(getAttendeeEvent).mockResolvedValue(cancelled());
     renderPage();
 
-    const status = await screen.findByText("This event has been cancelled.");
-    const box = status.closest("[role='status']");
+    const line = await screen.findByText("This event has been cancelled.");
+    const box = line.closest(".attendee-event-information__cancelled");
     expect(within(box).getByRole("heading", { name: "Message from the coordinator" })).toBeInTheDocument();
     expect(within(box).getByText("We are sorry. The venue is no longer available.")).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 1, name: "Open day" })).toBeInTheDocument();
+  });
+
+  it("SCRUM434_AC5_only_the_cancellation_line_is_the_live_region_not_the_whole_panel", async () => {
+    vi.mocked(getAttendeeEvent).mockResolvedValue(cancelled());
+    renderPage();
+
+    const line = await screen.findByText("This event has been cancelled.");
+    expect(line).toHaveAttribute("role", "status");
+    // Exactly one live region on the screen, and the message sits outside it.
+    expect(screen.getAllByRole("status")).toEqual([line]);
+    const message = screen.getByText("We are sorry. The venue is no longer available.");
+    expect(line.contains(message)).toBe(false);
+    expect(message.closest("[role='status']")).toBeNull();
+    expect(screen.getByRole("heading", { name: "Message from the coordinator" }).closest("[role='status']")).toBeNull();
+  });
+
+  it("SCRUM434_AC5_with_no_message_the_cancellation_line_is_still_the_only_live_region", async () => {
+    vi.mocked(getAttendeeEvent).mockResolvedValue(cancelled({ message: null }));
+    renderPage();
+
+    const line = await screen.findByText("This event has been cancelled.");
+    expect(screen.getAllByRole("status")).toEqual([line]);
   });
 
   it.each([null, undefined, ""])("SCRUM434_AC5_with_no_message_%j_only_the_cancellation_is_shown", async (message) => {
@@ -135,5 +157,44 @@ describe("SCRUM-434 AC5: a cancelled event for an attendee", () => {
     renderPage();
 
     expect(await screen.findByRole("region", { name: "Withdraw registration" })).toBeInTheDocument();
+  });
+
+  it("SCRUM434_AC5_a_state_the_screen_does_not_know_reads_as_not_confirmed_and_keeps_the_withdrawal", async () => {
+    vi.mocked(getAttendeeEvent).mockResolvedValue({ eventRequestId: "e1", registrationId: "r1", state: "completed", eventName: "Open day" });
+    renderPage();
+
+    expect(await screen.findByText("Event details are not currently confirmed.")).toBeInTheDocument();
+    expect(screen.queryByText("This event has been cancelled.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Confirmed arrangements" })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Withdraw registration" })).toBeInTheDocument();
+  });
+
+  it("SCRUM434_AC5_a_reply_without_a_state_reads_as_not_confirmed", async () => {
+    vi.mocked(getAttendeeEvent).mockResolvedValue({ eventRequestId: "e1", registrationId: "r1", eventName: "Open day" });
+    renderPage();
+
+    expect(await screen.findByText("Event details are not currently confirmed.")).toBeInTheDocument();
+    expect(screen.queryByText("This event has been cancelled.")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM434_AC5_a_cancelled_reply_for_another_event_is_not_shown_on_this_route", async () => {
+    // The screen trusts a reply only when it names this route's event.
+    vi.mocked(getAttendeeEvent).mockResolvedValue(cancelled({ eventRequestId: "other", message: "OTHER_EVENT_MESSAGE" }));
+    renderPage();
+
+    expect(await screen.findByText("Event details are not currently confirmed.")).toBeInTheDocument();
+    expect(screen.queryByText("This event has been cancelled.")).not.toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent("OTHER_EVENT_MESSAGE");
+    expect(screen.queryByRole("region", { name: "Withdraw registration" })).not.toBeInTheDocument();
+  });
+
+  it("SCRUM434_AC5_a_confirmed_event_with_no_venues_says_so", async () => {
+    vi.mocked(getAttendeeEvent).mockResolvedValue({
+      eventRequestId: "e1", registrationId: "r1", state: "confirmed", eventName: "Open day",
+      startsAt: "2030-05-06T01:00:00Z", endsAt: "2030-05-06T03:00:00Z", venues: [],
+    });
+    renderPage();
+
+    expect(await screen.findByText("No confirmed venue information is available.")).toBeInTheDocument();
   });
 });

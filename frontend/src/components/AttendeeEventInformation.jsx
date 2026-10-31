@@ -15,6 +15,50 @@ const MESSAGES = {
 };
 const FALLBACK = "Event information could not be loaded. Please try again.";
 
+const BODY_STATES = ["cancelled", "confirmed"];
+const bodyState = (current) => (BODY_STATES.includes(current?.state) ? current.state : "unconfirmed");
+
+function EventBody({ state, current }) {
+  switch (state) {
+    case "cancelled":
+      // SCRUM-434 AC5: the coordinator's optional message only; the internal reason never reaches this screen.
+      // Only the cancellation line is a live region, so a screen reader announces it and not the whole panel.
+      return (
+        <div className="attendee-event-information__cancelled">
+          <p role="status">This event has been cancelled.</p>
+          {current.message && (
+            <>
+              <h2>Message from the coordinator</h2>
+              <p className="attendee-event-information__message">{current.message}</p>
+            </>
+          )}
+        </div>
+      );
+    case "confirmed":
+      return (
+        <>
+          <h2>Confirmed arrangements</h2>
+          <p>{EVENT_TIME_NOTE}</p>
+          <dl className="browse-event-details__facts">
+            <div><dt>Date</dt><dd>{formatEventDate(current.startsAt)}</dd></div>
+            <div><dt>Start time</dt><dd>{formatEventStartTime(current.startsAt)}</dd></div>
+            <div><dt>End time</dt><dd>{formatEventEndTime(current.startsAt, current.endsAt)}</dd></div>
+          </dl>
+          <h2 id="attendee-confirmed-venues-heading">Venues</h2>
+          {current.venues.length ? <ul aria-labelledby="attendee-confirmed-venues-heading">{current.venues.map(venue => (
+            <li key={venue.bookingId}>
+              <strong>{venue.name?.trim() || "Venue name unavailable"}</strong>
+              <p className="attendee-event-information__location">{venue.location?.trim() || "Location unavailable"}</p>
+              {venue.underReview === true && <p>This venue is being reviewed and may change.</p>}
+            </li>
+          ))}</ul> : <p>No confirmed venue information is available.</p>}
+        </>
+      );
+    default:
+      return <p role="status">Event details are not currently confirmed.</p>;
+  }
+}
+
 function EventInformation({ eventId }) {
   const fetchEvent = useCallback(() => getAttendeeEvent(eventId), [eventId]);
   const { data, loading, notFound, error, load } = useOpenEventRead(fetchEvent, {
@@ -36,6 +80,9 @@ function EventInformation({ eventId }) {
   // Only while the server shows no active registration; a later read that
   // shows one again (registered anew) must not sit beside a withdrawn notice.
   const withdrawn = withdrawal && !current ? withdrawal : null;
+  // One state decides the body: cancelled, confirmed, or anything else (not confirmed).
+  // A reply for another event, or a state this screen does not know, reads as not confirmed.
+  const view = !loading && !error && data ? bodyState(current) : null;
   return (
     <>
       <h1>{current?.eventName?.trim() || withdrawn?.eventName?.trim() || "Event information"}</h1>
@@ -58,39 +105,9 @@ function EventInformation({ eventId }) {
             <button type="button" onClick={load}>Try again</button>
           </div>
         )}
-        {/* SCRUM-434 AC5: the coordinator's optional message only; the internal reason never reaches this screen. */}
-        {!loading && !error && current?.state === "cancelled" && (
-          <div role="status" className="attendee-event-information__cancelled">
-            <p>This event has been cancelled.</p>
-            {current.message && (
-              <>
-                <h2>Message from the coordinator</h2>
-                <p className="attendee-event-information__message">{current.message}</p>
-              </>
-            )}
-          </div>
-        )}
-        {!loading && !error && data && current?.state !== "cancelled" && (!current || current.state !== "confirmed"
-          ? <p role="status">Event details are not currently confirmed.</p>
-          : <>
-            <h2>Confirmed arrangements</h2>
-            <p>{EVENT_TIME_NOTE}</p>
-            <dl className="browse-event-details__facts">
-              <div><dt>Date</dt><dd>{formatEventDate(data.startsAt)}</dd></div>
-              <div><dt>Start time</dt><dd>{formatEventStartTime(data.startsAt)}</dd></div>
-              <div><dt>End time</dt><dd>{formatEventEndTime(data.startsAt, data.endsAt)}</dd></div>
-            </dl>
-            <h2 id="attendee-confirmed-venues-heading">Venues</h2>
-            {data.venues.length ? <ul aria-labelledby="attendee-confirmed-venues-heading">{data.venues.map(venue => (
-              <li key={venue.bookingId}>
-                <strong>{venue.name?.trim() || "Venue name unavailable"}</strong>
-                <p className="attendee-event-information__location">{venue.location?.trim() || "Location unavailable"}</p>
-                {venue.underReview === true && <p>This venue is being reviewed and may change.</p>}
-              </li>
-            ))}</ul> : <p>No confirmed venue information is available.</p>}
-          </>)}
+        {view && <EventBody state={view} current={current} />}
         {/* SCRUM-434 AC5: a cancelled event shows the cancellation and the message only, so no withdrawal is offered. */}
-        {!loading && !error && current?.registrationId && current.state !== "cancelled" && (
+        {!loading && !error && current?.registrationId && view !== "cancelled" && (
           <WithdrawRegistration
             registrationId={current.registrationId}
             refusal={refusal?.registrationId === current.registrationId ? refusal.message : null}
