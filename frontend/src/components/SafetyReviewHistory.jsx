@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   getSafetyReview,
@@ -15,6 +15,9 @@ export default function SafetyReviewHistory() {
   const [selectedId, setSelectedId] = useState(null);
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const rowButtons = useRef(new Map());
+  const listHeadingRef = useRef(null);
+  const returnFocusId = useRef(null);
 
   useEffect(() => {
     let active = true;
@@ -34,6 +37,15 @@ export default function SafetyReviewHistory() {
       active = false;
     };
   }, []);
+
+  // Back returns focus to the row that was opened, or to the list heading if
+  // that row is no longer listed.
+  useEffect(() => {
+    if (selectedId || loading || returnFocusId.current === null) return;
+    const target = rowButtons.current.get(returnFocusId.current) ?? listHeadingRef.current;
+    returnFocusId.current = null;
+    target?.focus();
+  }, [selectedId, loading]);
 
   async function openDetail(id) {
     setSelectedId(id);
@@ -59,6 +71,7 @@ export default function SafetyReviewHistory() {
             className="safety-review__back"
             type="button"
             onClick={() => {
+              returnFocusId.current = selectedId;
               setSelectedId(null);
               setDetail(null);
               setError(null);
@@ -82,6 +95,7 @@ export default function SafetyReviewHistory() {
         </section>
       ) : (
         <section>
+          <h2 ref={listHeadingRef} tabIndex={-1}>Reviewed events</h2>
           {loading && <p>Loading...</p>}
           {error && <p className="safety-review__error" role="alert">{error}</p>}
           {!loading && !error && history.length === 0 && <p>No events have been reviewed yet.</p>}
@@ -96,7 +110,16 @@ export default function SafetyReviewHistory() {
                   <p>Reviewed by: {event.safetyOfficerName ?? "Not recorded"}</p>
                   <p>Reviewed: {formatTimestamp(event.respondedAt)}</p>
                 </div>
-                <button type="button" onClick={() => openDetail(event.id)}>View details</button>
+                <button
+                  type="button"
+                  ref={(node) => {
+                    if (node) rowButtons.current.set(event.id, node);
+                    else rowButtons.current.delete(event.id);
+                  }}
+                  onClick={() => openDetail(event.id)}
+                >
+                  View details
+                </button>
               </li>
             ))}
           </ul>

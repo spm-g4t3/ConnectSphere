@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { submitSafetyReviewResponse } from "../services/safetyReviewService";
 import { formatRange, formatTimestamp } from "../services/displayFormat";
 import { OUTCOME_LABELS } from "./safetyReviewLabels";
@@ -13,8 +13,15 @@ export function SafetyReviewDetail({ detail, onSubmitted, onError, readOnly = fa
   const [affectedBookingIds, setAffectedBookingIds] = useState([]);
   const [equipmentAffected, setEquipmentAffected] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const headingRef = useRef(null);
 
   const { event, venues, equipment, history } = detail;
+
+  // Opening an event moves focus to its name so screen readers start there.
+  // Keyed on the id: a refresh of the same event after a response keeps focus put.
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, [event.id]);
   const canMarkArrangements = outcome !== "approved";
   const responseAllowed = event.status === "safety_review";
 
@@ -52,7 +59,7 @@ export function SafetyReviewDetail({ detail, onSubmitted, onError, readOnly = fa
 
   return (
     <section className="safety-review__detail" aria-label="Safety review details">
-      <h2>{event.eventName}</h2>
+      <h2 ref={headingRef} tabIndex={-1}>{event.eventName}</h2>
       <dl className="safety-review__facts">
         <dt>Expected attendance</dt>
         <dd>{event.expectedAttendance ?? "Not recorded"}</dd>

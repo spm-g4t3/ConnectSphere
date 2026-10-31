@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   getSafetyReview,
   getSafetyReviewQueue,
@@ -25,6 +25,9 @@ export default function SafetyOfficerDashboard({ user }) {
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState(null);
   const [message, setMessage] = useState(null);
+  const rowButtons = useRef(new Map());
+  const listHeadingRef = useRef(null);
+  const returnFocusId = useRef(null);
 
   const refreshQueue = useCallback(async () => {
     setLoading(true);
@@ -41,6 +44,15 @@ export default function SafetyOfficerDashboard({ user }) {
   useEffect(() => {
     refreshQueue();
   }, [refreshQueue]);
+
+  // Back returns focus to the row that was opened; a reviewed event has left
+  // the queue, so the list heading takes focus instead.
+  useEffect(() => {
+    if (selectedId || loading || returnFocusId.current === null) return;
+    const target = rowButtons.current.get(returnFocusId.current) ?? listHeadingRef.current;
+    returnFocusId.current = null;
+    target?.focus();
+  }, [selectedId, loading]);
 
   async function openReview(id) {
     setSelectedId(id);
@@ -87,7 +99,7 @@ export default function SafetyOfficerDashboard({ user }) {
 
   return (
     <div className="dashboard dashboard--safety-officer">
-      <h1>Safety Officer</h1>
+      <h1>Safety review</h1>
       <p>Signed in as {user.name ?? user.email}.</p>
 
       {selectedId ? (
@@ -96,6 +108,7 @@ export default function SafetyOfficerDashboard({ user }) {
             className="safety-review__back"
             type="button"
             onClick={() => {
+              returnFocusId.current = selectedId;
               setSelectedId(null);
               setDetail(null);
               setError(null);
@@ -117,7 +130,7 @@ export default function SafetyOfficerDashboard({ user }) {
         </section>
       ) : (
         <section>
-          <h2>Safety review</h2>
+          <h2 ref={listHeadingRef} tabIndex={-1}>Waiting for review</h2>
           {loading && <p>Loading...</p>}
           {error && <p className="safety-review__error" role="alert">{error}</p>}
           {!loading && !error && queue.length === 0 && <p>No events are waiting for a safety review.</p>}
@@ -132,7 +145,16 @@ export default function SafetyOfficerDashboard({ user }) {
                   <p>Coordinator: {event.coordinatorName ?? "Not recorded"}</p>
                   <p>Waiting: {waitingLabel(event.waitingSeconds)}</p>
                 </div>
-                <button type="button" onClick={() => openReview(event.id)}>Review event</button>
+                <button
+                  type="button"
+                  ref={(node) => {
+                    if (node) rowButtons.current.set(event.id, node);
+                    else rowButtons.current.delete(event.id);
+                  }}
+                  onClick={() => openReview(event.id)}
+                >
+                  Review event
+                </button>
               </li>
             ))}
           </ul>

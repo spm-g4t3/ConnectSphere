@@ -51,7 +51,7 @@ beforeEach(() => {
 describe("SCRUM485_AC3 login sends each new role to its own dashboard", () => {
   it.each([
     ["event_coordinator_lead", "lead@connectsphere.com", "Event Coordinator Lead"],
-    ["safety_officer", "safety@connectsphere.com", "Safety Officer"],
+    ["safety_officer", "safety@connectsphere.com", "Safety review"],
   ])("SCRUM485_AC3_logging_in_as_%s_goes_to_the_dashboard", async (role, email, heading) => {
     // AC3-03. The emails are the two accounts made for these roles on
     // 10 October; here they are only strings, no real login happens.

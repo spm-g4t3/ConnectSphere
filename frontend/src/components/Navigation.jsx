@@ -92,8 +92,9 @@ const NAV_LINKS_BY_ROLE = {
     { to: "/assigned-events", label: "Assigned Events" },
   ],
   SAFETY_OFFICER: [
+    // /safety-review still routes to the same queue for old links, so the
+    // Dashboard link alone is enough to reach it.
     { to: "/dashboard", label: "Dashboard" },
-    { to: "/safety-review", label: "Safety review" },
     { to: "/safety-review/history", label: "Review history" },
   ],
 };
@@ -124,7 +125,7 @@ export default function Navigation() {
           <li key={link.to}>
             <NavLink
               to={link.to}
-              end={link.to === "/dashboard" || link.to === "/safety-review"}
+              end={link.to === "/dashboard"}
               className={({ isActive }) => isActive ? "app-nav__link app-nav__link--active" : "app-nav__link"}
             >
               {link.label}
