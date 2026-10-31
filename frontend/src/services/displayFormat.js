@@ -4,6 +4,8 @@
 // VenueDetail.jsx unchanged by SCRUM-125, when BlockConflictList needed the
 // same identifier and timestamp rendering.
 
+import { VENUE_TIME_ZONE } from "./datetimeFormat";
+
 /** A list response as an array; anything else reads as an empty list. */
 export function asList(data) {
   return Array.isArray(data) ? data : [];
@@ -15,7 +17,8 @@ export function shortId(id) {
 }
 
 /**
- * A timestamp in the reader's locale, or the raw string if it will not parse.
+ * A timestamp as Singapore time in the reader's locale format, or the raw
+ * string if it will not parse. Pinned so every device shows the same time.
  *
  * `fallback` is what a missing value reads as. It defaults to "unknown", which
  * is exactly what VenueDetail has always shown.
@@ -23,7 +26,18 @@ export function shortId(id) {
 export function formatTimestamp(value, fallback = "unknown") {
   if (!value) return fallback;
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+  return Number.isNaN(date.getTime())
+    ? String(value)
+    : date.toLocaleString(undefined, { timeZone: VENUE_TIME_ZONE });
+}
+
+/** As formatTimestamp, but the Singapore calendar date only. */
+export function formatDate(value, fallback = "unknown") {
+  if (!value) return fallback;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? String(value)
+    : date.toLocaleDateString(undefined, { timeZone: VENUE_TIME_ZONE });
 }
 
 /**
@@ -33,14 +47,17 @@ export function formatTimestamp(value, fallback = "unknown") {
 export function formatEventDate(value, fallback = "Date not set") {
   if (!value) return fallback;
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+  return Number.isNaN(date.getTime())
+    ? value
+    : date.toLocaleString(undefined, { timeZone: VENUE_TIME_ZONE });
 }
 
-/** A parsed Date as a medium date and short time in the reader's locale. */
+/** A parsed Date as a medium date and short time, Singapore time in the reader's locale format. */
 export function formatMediumDateTime(date) {
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium",
     timeStyle: "short",
+    timeZone: VENUE_TIME_ZONE,
   }).format(date);
 }
 

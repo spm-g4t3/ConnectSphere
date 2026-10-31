@@ -5,7 +5,7 @@
 // the Coordinator reads that notification and marks it read.
 //
 // The notification service is mocked, so nothing touches the network.
-// Timezone-safe: every expected time is built with toLocaleString (or the
+// Timezone-safe: every expected time is built as Singapore time with sgTime (or the
 // module's own describeNotification) from fixtures that carry +08:00 offsets.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -26,6 +26,7 @@ import { describeNotification } from "../../src/services/notificationDisplay";
 import { deferred, httpError } from "../helpers/async.js";
 import { setVisibility } from "../helpers/visibility.js";
 import { PAYLOAD, SETUP_PAYLOAD } from "../fixtures/notifications.js";
+import { sgTime } from "../helpers/singaporeTime.js";
 
 vi.mock("../../src/services/notificationService", () => ({
   getUnreadCount: vi.fn(),
@@ -210,7 +211,7 @@ describe("SCRUM17_AC3 rows", () => {
 
     await screen.findByText("Tech Talk at Hall A needs review");
     expect(
-      screen.getByText(`Received ${new Date(UNREAD.createdAt).toLocaleString()}`),
+      screen.getByText(`Received ${sgTime(UNREAD.createdAt)}`),
     ).toBeInTheDocument();
   });
 

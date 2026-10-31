@@ -14,6 +14,7 @@ import { describeNotification } from "../../src/services/notificationDisplay.js"
 import { formatRange, formatTimestamp } from "../../src/services/displayFormat.js";
 import { formatOccupiedPeriod } from "../../src/services/occupiedPeriodDisplay.js";
 import { PAYLOAD, SETUP_PAYLOAD } from "../fixtures/notifications.js";
+import { sgTime } from "../helpers/singaporeTime.js";
 
 function flagged(payload = PAYLOAD) {
   return { id: "n1", type: "booking_flagged", payload };
@@ -35,8 +36,8 @@ describe("describeNotification: booking_flagged", () => {
 
   it("formats the times in the reader's locale", () => {
     const { detail } = describeNotification(flagged());
-    expect(detail).toContain(new Date(PAYLOAD.startsAt).toLocaleString());
-    expect(detail).toContain(new Date(PAYLOAD.blockEndsAt).toLocaleString());
+    expect(detail).toContain(sgTime(PAYLOAD.startsAt));
+    expect(detail).toContain(sgTime(PAYLOAD.blockEndsAt));
     expect(detail).not.toContain("+08:00");
   });
 

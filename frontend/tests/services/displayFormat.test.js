@@ -2,14 +2,16 @@
 //
 // SCRUM-125 (part of SCRUM-17). The display helpers moved out of
 // VenueDetail.jsx, plus the new formatRange. Timezone-safe: every expected
-// string is computed here with toLocaleString, from fixtures that carry
+// string is computed here as Singapore time, from fixtures that carry
 // offsets, so the suite passes in any zone and locale.
 
 import { describe, it, expect } from "vitest";
 
 import {
   asList,
+  formatDate,
   formatEventDate,
+  formatMediumDateTime,
   formatMediumTimestamp,
   formatRange,
   formatTimestamp,
@@ -17,6 +19,7 @@ import {
   pluralise,
   shortId,
 } from "../../src/services/displayFormat.js";
+import { sgTime, sgMediumTime } from "../helpers/singaporeTime.js";
 
 const START = "2026-10-01T09:00:00+08:00";
 const END = "2026-10-01T17:30:00+08:00";
@@ -56,20 +59,20 @@ describe("formatTimestamp", () => {
   });
 
   it("matches toLocaleString for a real timestamp", () => {
-    expect(formatTimestamp(START)).toBe(new Date(START).toLocaleString());
+    expect(formatTimestamp(START)).toBe(sgTime(START));
   });
 });
 
 describe("formatRange", () => {
   it("joins both ends with a spaced en dash", () => {
     expect(formatRange(START, END)).toBe(
-      `${new Date(START).toLocaleString()} – ${new Date(END).toLocaleString()}`,
+      `${sgTime(START)} – ${sgTime(END)}`,
     );
   });
 
   it("applies the fallback to a missing end", () => {
     expect(formatRange(START, null, "open-ended")).toBe(
-      `${new Date(START).toLocaleString()} – open-ended`,
+      `${sgTime(START)} – open-ended`,
     );
   });
 
@@ -92,7 +95,7 @@ describe("formatEventDate", () => {
   });
 
   it("matches toLocaleString for a real timestamp", () => {
-    expect(formatEventDate(START)).toBe(new Date(START).toLocaleString());
+    expect(formatEventDate(START)).toBe(sgTime(START));
   });
 });
 
@@ -107,9 +110,52 @@ describe("formatMediumTimestamp", () => {
   });
 
   it("formats a real timestamp as a medium date and short time", () => {
-    const expected = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" })
-      .format(new Date(START));
-    expect(formatMediumTimestamp(START, "-")).toBe(expected);
+    expect(formatMediumTimestamp(START, "-")).toBe(sgMediumTime(START));
+  });
+});
+
+// Singapore is UTC+8 with no daylight saving. 01:00Z is 9:00 am there on the same
+// day; 17:30Z is 1:30 am the next day, so a device-zone formatter fails in UTC too.
+describe("Singapore time on every device", () => {
+  const MORNING = "2026-01-15T01:00:00Z";
+  const PAST_MIDNIGHT = "2026-01-15T17:30:00Z";
+
+  it("SCRUM584_AC6_formatTimestamp_shows_the_singapore_hour_and_day", () => {
+    expect(formatTimestamp(MORNING)).toBe(sgTime(MORNING));
+    expect(formatTimestamp(MORNING)).toMatch(/\b15\b/);
+    expect(formatTimestamp(MORNING)).toMatch(/\b0?9:00/);
+    expect(formatTimestamp(PAST_MIDNIGHT)).toMatch(/\b16\b/);
+    expect(formatTimestamp(PAST_MIDNIGHT)).not.toMatch(/\b15\b/);
+  });
+
+  it("SCRUM584_AC6_formatEventDate_shows_the_singapore_hour_and_day", () => {
+    expect(formatEventDate(MORNING)).toBe(sgTime(MORNING));
+    expect(formatEventDate(MORNING)).toMatch(/\b0?9:00/);
+    expect(formatEventDate(PAST_MIDNIGHT)).toMatch(/\b16\b/);
+    expect(formatEventDate(PAST_MIDNIGHT)).not.toMatch(/\b15\b/);
+  });
+
+  it("SCRUM584_AC6_formatMediumDateTime_shows_the_singapore_hour_and_day", () => {
+    expect(formatMediumDateTime(new Date(MORNING))).toBe(sgMediumTime(MORNING));
+    expect(formatMediumDateTime(new Date(MORNING))).toMatch(/\b0?9:00/);
+    expect(formatMediumDateTime(new Date(PAST_MIDNIGHT))).toMatch(/\b16\b/);
+    expect(formatMediumDateTime(new Date(PAST_MIDNIGHT))).not.toMatch(/\b15\b/);
+  });
+
+  it("SCRUM584_AC6_formatRange_shows_both_ends_in_singapore_time", () => {
+    expect(formatRange(MORNING, PAST_MIDNIGHT)).toBe(`${sgTime(MORNING)} – ${sgTime(PAST_MIDNIGHT)}`);
+  });
+
+  it("SCRUM584_AC6_formatDate_gives_the_singapore_calendar_day", () => {
+    expect(formatDate(PAST_MIDNIGHT)).toMatch(/\b16\b/);
+    expect(formatDate(PAST_MIDNIGHT)).not.toMatch(/\b15\b/);
+    expect(formatDate(PAST_MIDNIGHT)).not.toMatch(/:/);
+  });
+
+  it("SCRUM584_AC6_formatDate_keeps_the_missing_and_unparseable_behaviour", () => {
+    expect(formatDate(null)).toBe("unknown");
+    expect(formatDate(undefined, "-")).toBe("-");
+    expect(formatDate("not a date")).toBe("not a date");
   });
 });
 

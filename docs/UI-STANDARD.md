@@ -95,12 +95,11 @@ Defined once on `:root` in `frontend/src/index.css`.
 
 ## Dates and times
 
-All displayed dates and times are Singapore time (`Asia/Singapore`).
+All displayed dates and times are Singapore time, on every device. The zone is defined once, as `VENUE_TIME_ZONE` in `src/services/datetimeFormat.js`.
 
-- Format them only through `src/services/datetimeFormat.js`:
-  - `formatVenueTimestamp` for one instant, with the zone note.
-  - `formatVenuePeriod` for a start and end, with the zone note.
-  - `formatVenueRange` for a start and end without the note, when several ranges share one line; end the line with `VENUE_TIME_NOTE` once.
+- Format them only through the shared helpers, which are pinned to that zone:
+  - General display, in the reader's locale format: `formatTimestamp`, `formatRange`, `formatEventDate`, `formatMediumTimestamp`, `formatDate` in `src/services/displayFormat.js`.
+  - Venue periods that carry the "(Singapore time)" note, in `datetimeFormat.js`: `formatVenueTimestamp` for one instant, `formatVenuePeriod` for a start and end, and `formatVenueRange` for a start and end without the note, when several ranges share one line; end the line with `VENUE_TIME_NOTE` once.
 - Never call `toLocaleString` or `toLocaleDateString` on a date directly.
 - Form inputs are the exception: they take the device's time zone, are labelled with `deviceTimeZoneLabel()`, and are sent with `toOffsetIsoString`. The coordinator venue finder is the one form that takes Singapore time, sent with `toVenueOffsetIsoString`.
 
