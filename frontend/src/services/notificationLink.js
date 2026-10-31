@@ -24,6 +24,12 @@ const TECH_SUPPORT_REVIEW_TYPES = new Set([
   "equipment_request_changed",
 ]);
 
+const ATTENDEE_EVENT_PAGE_TYPES = new Set([
+  "registration_promoted",
+  "event_confirmed",
+  "event_venue_changed",
+]);
+
 // One entry per role, so a later story adds a line rather than a branch.
 const LINKS_BY_ROLE = {
   // The review page lets any coordinator or Lead read any submitted event;
@@ -52,8 +58,9 @@ const LINKS_BY_ROLE = {
   VENUE_STAFF: (type) => VENUE_STAFF_PAGES[type] ?? null,
   // No safety review page yet (SCRUM-490).
   SAFETY_OFFICER: () => null,
-  // A promotion opens the event's registered-attendee page.
-  ATTENDEE: (type, id) => (type === "registration_promoted" ? { to: attendeeEventPath(id) } : null),
+  // These open the event's registered-attendee page. A cancellation opens
+  // nothing: that page only shows a confirmed event.
+  ATTENDEE: (type, id) => (ATTENDEE_EVENT_PAGE_TYPES.has(type) ? { to: attendeeEventPath(id) } : null),
 };
 
 /**

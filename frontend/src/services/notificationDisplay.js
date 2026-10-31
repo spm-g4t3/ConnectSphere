@@ -33,6 +33,15 @@
 //   event_cancelled (047, SCRUM-374): { audience, eventName, reason,
 //     cancelledAt }; audience is organiser, venue_staff,
 //     technical_support_staff or safety_officer
+//   event_cancelled (042, SCRUM-175): { audience, eventRequestId, eventName,
+//     message, cancelledAt } for audience attendee; message is the
+//     coordinator's attendee message, may be null, and there is no reason
+//   event_confirmed (042, SCRUM-175): { audience, eventRequestId, eventName,
+//     startsAt, endsAt, confirmedAt, reconfirmed }, plus venues: [{ venueName,
+//     startsAt, endsAt }] for audience organiser or venueNames: [] for
+//     audience attendee
+//   event_venue_changed (042, SCRUM-175): { audience, eventRequestId,
+//     eventName, previousVenueName, venueName }; audience is attendee
 //   event_rejected (024, SCRUM-347): { audience, eventName }, plus reason and
 //     rejectedAt for the organiser, outcome (withdrawn or cancelled, 027),
 //     venueId, venueName, startsAt and endsAt for venue_staff, and
@@ -74,7 +83,7 @@
 //   event_significant_change (096): { eventRequestId, eventName, reason,
 //     changedFields, statusBefore, statusAfter }
 //   event_significant_change_attendee (096): { eventRequestId, eventName,
-//     startsAt, endsAt, reason }
+//     startsAt, endsAt }; rows from before 042 may carry a reason, never shown
 //   event_details_changed (022, SCRUM-387): { eventRequestId, eventName,
 //     reason, changedFields, status }; changedFields are the camelCase names
 //     in eventDetailFields.js, and eventName is the name after the edit
@@ -285,6 +294,19 @@ const REGISTRATION_DATE_LABELS = {
 /** "a", "a and b", "a, b and c". */
 function joinWords(words) {
   return words.length > 1 ? `${words.slice(0, -1).join(", ")} and ${words.at(-1)}` : words[0];
+}
+
+/**
+ * " It runs <range> at A and B." for a confirmed event, leaving out the period
+ * or the venues when the payload lacks them.
+ */
+function confirmedSchedule(payload, venueNames) {
+  const names = venueNames.filter(Boolean);
+  const period = isInstant(payload.startsAt) && isInstant(payload.endsAt)
+    ? ` ${formatRange(payload.startsAt, payload.endsAt)}`
+    : "";
+  const at = names.length > 0 ? ` at ${joinWords(names)}` : "";
+  return period || at ? ` It runs${period}${at}.` : "";
 }
 
 function describeClarification(payload, _names, type) {
@@ -568,7 +590,52 @@ const DESCRIBERS = {
         detail: "The equipment request was cancelled and its active reservations were released.",
       };
     }
+    // The internal reason stays with the organiser and staff; an attendee is
+    // shown only the message the coordinator wrote for them.
+    if (payload.audience === "attendee") {
+      return {
+        headline: `${eventName} was cancelled`,
+        detail: payload.message ? `Message from the organisers: ${asSentence(payload.message)}` : "",
+      };
+    }
     return undefined;
+  },
+
+  // Sent to the Organiser, and to registered attendees when a changed event
+  // is confirmed again. An unknown audience reads as the generic notification.
+  event_confirmed(payload, { eventName }) {
+    if (payload.audience === "organiser") {
+      const venues = Array.isArray(payload.venues) ? payload.venues.map((venue) => venue?.venueName) : [];
+      return {
+        headline: `${eventName} is confirmed`,
+        detail: `Its fields are now locked; changes go through a change request.${confirmedSchedule(payload, venues)}`,
+      };
+    }
+    if (payload.audience === "attendee") {
+      const venues = Array.isArray(payload.venueNames) ? payload.venueNames : [];
+      const schedule = confirmedSchedule(payload, venues).trim();
+      if (payload.reconfirmed) {
+        return {
+          headline: `An event you registered for is confirmed again: ${eventName}`,
+          detail: `It was re-confirmed after a change.${schedule ? ` ${schedule}` : ""}`,
+        };
+      }
+      return {
+        headline: `An event you registered for is confirmed: ${eventName}`,
+        detail: schedule,
+      };
+    }
+    return undefined;
+  },
+
+  // Sent to registered attendees; the Organiser hears of the same change
+  // through flagged_booking_resolved. An unknown audience reads as generic.
+  event_venue_changed(payload, { eventName, venueName }) {
+    if (payload.audience !== "attendee") return undefined;
+    return {
+      headline: `The venue for ${eventName} changed`,
+      detail: `Now at ${venueName} (was ${payload.previousVenueName || UNKNOWN_VENUE}).`,
+    };
   },
 
   // SCRUM-347. Venue Staff get one per released booking, so theirs names the venue.
@@ -770,13 +837,14 @@ const DESCRIBERS = {
     };
   },
 
+  // The reason is internal, as with cancellation, so it is never shown here,
+  // even on older rows that still carry it.
   event_significant_change_attendee(payload, { eventName }) {
-    const period = payload.startsAt && payload.endsAt
-      ? ` The event now runs ${formatRange(payload.startsAt, payload.endsAt)}.`
-      : "";
     return {
       headline: `An event you registered for has changed: ${eventName}`,
-      detail: `Reason: ${payload.reason || NO_REASON}.${period}`,
+      detail: payload.startsAt && payload.endsAt
+        ? `The event now runs ${formatRange(payload.startsAt, payload.endsAt)}.`
+        : "Check the event for its latest details.",
     };
   },
 

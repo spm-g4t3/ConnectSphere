@@ -871,7 +871,8 @@ describe('SCRUM-489: readiness and submission for the safety check', () => {
         equipment: (await db.query('select * from equipment_requests where event_request_id = $1', [id])).rows,
         registrations: (await db.query('select * from event_registrations where event_request_id = $1', [id])).rows,
         settings: await one('select registration_enabled, registration_capacity, registration_opens_at, registration_closes_at, registration_withdrawal_deadline from event_requests where id = $1', [id]),
-        notices: (await db.query('select * from notifications where event_request_id = $1 order by id', [id])).rows,
+        // Confirming adds its own event_confirmed notice (SCRUM-175); every other notice stays as it was.
+        notices: (await db.query("select * from notifications where event_request_id = $1 and type <> 'event_confirmed' order by id", [id])).rows,
       });
       const before = await snapshot();
       await confirm(id);
