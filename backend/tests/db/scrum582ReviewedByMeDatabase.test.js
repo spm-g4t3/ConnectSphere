@@ -115,6 +115,40 @@ describe('SCRUM-582: requests I have reviewed before, in Postgres', () => {
       expect((await mine()).requests.filter((r) => r.event_request_id === event)).toHaveLength(1);
     });
 
+    it('SCRUM582_AC1_every_row_carries_its_own_request_id', async () => {
+      const { event, requestId } = await eventWithRequest();
+      await start(event, tech);
+
+      expect(entry(await mine(), event).request_id).toBe(requestId);
+    });
+
+    it('SCRUM582_AC1_a_cancelled_request_and_its_replacement_for_one_event_are_two_rows_with_different_request_ids', async () => {
+      const first = await eventWithRequest();
+      await start(first.event, tech);
+      await setStatus(first.requestId, 'cancelled');
+      const replacement = await add(first.event, projector, 1);
+      await start(first.event, tech);
+
+      const rowsForEvent = (await mine()).requests.filter((r) => r.event_request_id === first.event);
+      expect(rowsForEvent).toHaveLength(2);
+      expect(replacement.request.id).not.toBe(first.requestId);
+      expect(rowsForEvent.map((r) => r.request_id).sort()).toEqual([first.requestId, replacement.request.id].sort());
+      expect(new Set(rowsForEvent.map((r) => r.request_id)).size).toBe(2);
+      expect(rowsForEvent.map((r) => r.status).sort()).toEqual(['cancelled', 'under_review']);
+    });
+
+    it('SCRUM582_AC5_a_request_for_the_same_event_that_only_someone_else_reviewed_is_not_listed_for_me', async () => {
+      const first = await eventWithRequest();
+      await start(first.event, tech);
+      await setStatus(first.requestId, 'cancelled');
+      await add(first.event, projector, 1);
+      await start(first.event, other);
+
+      const mineForEvent = (await mine()).requests.filter((r) => r.event_request_id === first.event);
+      expect(mineForEvent).toHaveLength(1);
+      expect(mineForEvent[0].request_id).toBe(first.requestId);
+    });
+
     it('SCRUM582_AC2_carries_the_event_name_period_and_request_status', async () => {
       const { event } = await eventWithRequest('Annual Dinner');
       await start(event, tech);

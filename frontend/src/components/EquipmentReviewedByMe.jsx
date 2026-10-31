@@ -89,7 +89,7 @@ export default function EquipmentReviewedByMe() {
       {list && list.requests.length > 0 && (
         <ul>
           {list.requests.map((row) => (
-            <ReviewedRow key={row.eventRequestId} row={row} />
+            <ReviewedRow key={row.requestId} row={row} />
           ))}
         </ul>
       )}

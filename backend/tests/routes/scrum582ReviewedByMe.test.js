@@ -20,7 +20,10 @@ const EVENT_ID = '11111111-1111-4111-8111-111111111111';
 const USER_ID = '66666666-6666-4666-8666-666666666666';
 const URL = '/api/equipment-requests/reviewed-by-me';
 
+const REQUEST_ID = '77777777-7777-4777-8777-777777777777';
+
 const reviewedRow = {
+  request_id: REQUEST_ID,
   event_request_id: EVENT_ID,
   event_name: 'Annual Dinner',
   proposed_start: '2030-01-10T10:00:00+00:00',
@@ -88,6 +91,7 @@ describe('AC1, AC2 and AC4: what comes back', () => {
     expect(res.body).toEqual({
       requests: [
         {
+          requestId: REQUEST_ID,
           eventRequestId: EVENT_ID,
           eventName: 'Annual Dinner',
           proposedStart: '2030-01-10T10:00:00+00:00',

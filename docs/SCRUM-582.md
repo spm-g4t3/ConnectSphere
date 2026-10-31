@@ -20,6 +20,7 @@ show it. No new table, no change to who is notified, nothing is assigned or lock
 | Area | Change |
 |---|---|
 | `db/migrations/041_equipment_reviewed_by_me.sql` | New function `equipment_reviewed_by_me(p_caller, p_limit)`. Stable (so it cannot write), checks the caller's role itself, execute revoked from `public`, `anon` and `authenticated`. |
+| `db/migrations/043_equipment_reviewed_by_me_request_id.sql` | Same function, now returning each row's `request_id` (041 removed it). One event can have a cancelled request and a new one, so the event id alone repeats; the frontend keys each row by the request id. |
 | `routes/equipmentQueue.js` | New `GET /api/equipment-requests/reviewed-by-me`, Technical Support only, `Cache-Control: no-store`. The existing `GET /` is unchanged. |
 | `services/equipmentQueueService.js` (backend) | `getRequestsReviewedByMe` and `toReviewedRow`: camelCase, status label, 42501 becomes a 403. |
 | `services/equipmentQueueService.js` (frontend) | `getReviewedByMe()`. |
@@ -27,7 +28,7 @@ show it. No new table, no change to who is notified, nothing is assigned or lock
 | `vite.config.js` | `EquipmentReviewedByMe.jsx` gated at 100% coverage. |
 
 The migration must be applied on the shared Supabase database before the route works.
-It is 041: above the highest number on dev and above 040, which an open PR (#90) uses.
+It is 041, with 043 replacing the function to keep the request id. 043 is a full `create or replace`, so applying 043 alone gives the same function whether or not 041 was applied.
 
 ## 2. Acceptance criteria and the tests that prove them
 

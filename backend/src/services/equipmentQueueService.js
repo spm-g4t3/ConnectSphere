@@ -111,6 +111,9 @@ export async function getEquipmentRequestQueue(query, { callerId, client } = {})
 /** One "reviewed by me" row, in camelCase. */
 export function toReviewedRow(row) {
   return {
+    // An event can have more than one equipment request (one cancelled, a new
+    // one made), so the request id is what tells two rows for it apart.
+    requestId: row.request_id,
     eventRequestId: row.event_request_id,
     eventName: row.event_name,
     proposedStart: row.proposed_start ?? null,

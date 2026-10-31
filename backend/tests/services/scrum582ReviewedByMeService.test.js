@@ -28,6 +28,7 @@ describe('toReviewedRow', () => {
   it('SCRUM582_AC2_a_row_with_no_interruption_has_null_reason_and_time', () => {
     expect(
       toReviewedRow({
+        request_id: 'r1',
         event_request_id: 'e1',
         event_name: 'Dinner',
         status: 'under_review',
@@ -37,6 +38,8 @@ describe('toReviewedRow', () => {
         interrupted_at: null,
       }),
     ).toMatchObject({
+      requestId: 'r1',
+      eventRequestId: 'e1',
       statusLabel: 'Under review',
       returnedToPending: false,
       interruptedReason: null,
@@ -44,6 +47,14 @@ describe('toReviewedRow', () => {
       proposedStart: null,
       proposedEnd: null,
     });
+  });
+
+  it('SCRUM582_AC1_two_requests_for_one_event_keep_their_own_request_ids', () => {
+    const first = toReviewedRow({ request_id: 'r1', event_request_id: 'e1', status: 'cancelled' });
+    const second = toReviewedRow({ request_id: 'r2', event_request_id: 'e1', status: 'under_review' });
+    expect(first.eventRequestId).toBe(second.eventRequestId);
+    expect(first.requestId).toBe('r1');
+    expect(second.requestId).toBe('r2');
   });
 
   it('SCRUM582_AC3_returnedToPending_is_true_only_for_an_actual_true', () => {
@@ -69,13 +80,13 @@ describe('getRequestsReviewedByMe', () => {
 
   it('SCRUM582_AC1_reshapes_the_answer_and_keeps_the_total_and_the_cut_flag', async () => {
     const client = fakeClient(
-      ok({ requests: [{ event_request_id: 'e1', event_name: 'Dinner', status: 'arranged' }], total: '3', truncated: true }),
+      ok({ requests: [{ request_id: 'r1', event_request_id: 'e1', event_name: 'Dinner', status: 'arranged' }], total: '3', truncated: true }),
     );
     const result = await getRequestsReviewedByMe({ callerId: CALLER_ID, client });
     expect(result.total).toBe(3);
     expect(result.truncated).toBe(true);
     expect(result.requests).toHaveLength(1);
-    expect(result.requests[0]).toMatchObject({ eventRequestId: 'e1', statusLabel: 'Arranged' });
+    expect(result.requests[0]).toMatchObject({ requestId: 'r1', eventRequestId: 'e1', statusLabel: 'Arranged' });
   });
 
   it('SCRUM582_AC5_a_42501_from_the_database_is_a_ForbiddenError', async () => {

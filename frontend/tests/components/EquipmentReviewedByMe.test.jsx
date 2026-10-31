@@ -20,8 +20,12 @@ vi.mock("../../src/services/equipmentQueueService", () => ({
 
 const EVENT_A = "11111111-1111-4111-8111-111111111111";
 const EVENT_B = "22222222-2222-4222-8222-222222222222";
+const REQUEST_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const REQUEST_A2 = "a2a2a2a2-a2a2-4a2a-8a2a-a2a2a2a2a2a2";
+const REQUEST_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 
 const row = (overrides = {}) => ({
+  requestId: REQUEST_A,
   eventRequestId: EVENT_A,
   eventName: "Annual Dinner",
   proposedStart: "2030-01-10T10:00:00+00:00",
@@ -65,7 +69,7 @@ describe("what the list shows", () => {
   });
 
   it("SCRUM582_AC1_each_request_opens_its_review_screen", async () => {
-    vi.mocked(getReviewedByMe).mockResolvedValue(answer([row(), row({ eventRequestId: EVENT_B, eventName: "Gala" })]));
+    vi.mocked(getReviewedByMe).mockResolvedValue(answer([row(), row({ requestId: REQUEST_B, eventRequestId: EVENT_B, eventName: "Gala" })]));
     renderList();
 
     expect(await screen.findByRole("link", { name: "Open Annual Dinner" })).toHaveAttribute(
@@ -73,6 +77,26 @@ describe("what the list shows", () => {
       `/equipment-review/${EVENT_A}`,
     );
     expect(screen.getByRole("link", { name: "Open Gala" })).toHaveAttribute("href", `/equipment-review/${EVENT_B}`);
+  });
+
+  it("SCRUM582_AC1_a_cancelled_request_and_its_replacement_for_one_event_are_two_rows_and_React_has_no_key_warning", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(getReviewedByMe).mockResolvedValue(
+      answer([
+        row({ requestId: REQUEST_A2, status: "under_review", statusLabel: "Under review" }),
+        row({ requestId: REQUEST_A, status: "cancelled", statusLabel: "Cancelled" }),
+      ]),
+    );
+    renderList();
+
+    await screen.findAllByText("Annual Dinner");
+    expect(screen.getAllByText("Annual Dinner")).toHaveLength(2);
+    expect(screen.getAllByRole("link", { name: "Open Annual Dinner" })).toHaveLength(2);
+    expect(screen.getByText("Under review")).toBeInTheDocument();
+    expect(screen.getByText("Cancelled")).toBeInTheDocument();
+    const keyWarnings = errors.mock.calls.filter((call) => /same key|unique "key"/i.test(String(call[0])));
+    expect(keyWarnings).toEqual([]);
+    errors.mockRestore();
   });
 
   it("SCRUM582_AC1_asks_once_and_with_no_filters", async () => {
@@ -111,7 +135,7 @@ describe("what the list shows", () => {
 describe("a view only", () => {
   it("SCRUM582_AC4_offers_only_links_to_the_review_screen_and_never_a_start_or_take_over", async () => {
     vi.mocked(getReviewedByMe).mockResolvedValue(
-      answer([row(), row({ eventRequestId: EVENT_B, eventName: "Gala", status: "pending_review", statusLabel: "Pending review" })]),
+      answer([row(), row({ requestId: REQUEST_B, eventRequestId: EVENT_B, eventName: "Gala", status: "pending_review", statusLabel: "Pending review" })]),
     );
     renderList();
     await screen.findByText("Annual Dinner");
