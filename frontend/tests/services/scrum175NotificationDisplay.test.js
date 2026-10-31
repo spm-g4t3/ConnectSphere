@@ -1,20 +1,19 @@
 // scrum175NotificationDisplay.test.js
 //
 // SCRUM-175: the wording and links of the notices about a confirmed event's
-// changes (042). Times are built with the module's own formatRange, so the
-// suite passes in any zone and locale.
+// changes (042). The display format is fixed Singapore text, so the expected
+// times are literals and the suite passes in any zone and locale.
 
 import { describe, it, expect } from "vitest";
 
 import { describeNotification } from "../../src/services/notificationDisplay.js";
 import { notificationLink } from "../../src/services/notificationLink.js";
 import { attendeeEventPath } from "../../src/services/attendeeEventRoutes.js";
-import { formatRange } from "../../src/services/displayFormat.js";
 
 const EVENT = "22222222-2222-4222-8222-222222222222";
 const STARTS = "2026-11-11T13:00:00+08:00";
 const ENDS = "2026-11-11T17:00:00+08:00";
-const RANGE = formatRange(STARTS, ENDS);
+const RANGE = "11 Nov 2026, 1:00 pm – 5:00 pm";
 // A venue booking's own period, which includes setup and turnaround.
 const BOOKED_FROM = "2026-11-11T12:00:00+08:00";
 const BOOKED_TO = "2026-11-11T18:00:00+08:00";
@@ -214,7 +213,7 @@ describe("SCRUM175_AC7 notices expose nothing the reader may not see", () => {
 
     expect(text).toContain("Hall A");
     expect(text).not.toContain("Backstage Store");
-    expect(text).not.toContain(formatRange(BOOKED_FROM, BOOKED_TO));
+    expect(text).not.toContain("12:00 pm – 6:00 pm");
     expect(text).not.toMatch(/change request|locked/i);
   });
 });

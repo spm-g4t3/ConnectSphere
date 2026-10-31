@@ -10,6 +10,9 @@ import { describe, it, expect } from "vitest";
 import {
   asList,
   formatDate,
+  formatDateTime,
+  formatDateTimeRange,
+  formatDay,
   formatEventDate,
   formatMediumDateTime,
   formatMediumTimestamp,
@@ -156,6 +159,53 @@ describe("Singapore time on every device", () => {
     expect(formatDate(null)).toBe("unknown");
     expect(formatDate(undefined, "-")).toBe("-");
     expect(formatDate("not a date")).toBe("not a date");
+  });
+});
+
+// One fixed locale as well as the zone, so the text is identical on every device
+// and the expected values can be literals.
+describe("the display format", () => {
+  const MORNING = "2026-01-15T01:00:00Z";
+  const LATE_MORNING = "2026-01-15T03:00:00Z";
+  const PAST_MIDNIGHT = "2026-01-15T17:30:00Z";
+
+  it("SCRUM584_AC6_formatDateTime_is_the_fixed_singapore_text", () => {
+    expect(formatDateTime(MORNING)).toBe("15 Jan 2026, 9:00 am");
+    expect(formatDateTime(PAST_MIDNIGHT)).toBe("16 Jan 2026, 1:30 am");
+  });
+
+  it("SCRUM584_AC6_formatDay_is_the_fixed_singapore_day", () => {
+    expect(formatDay(MORNING)).toBe("15 Jan 2026");
+    expect(formatDay(PAST_MIDNIGHT)).toBe("16 Jan 2026");
+  });
+
+  it("SCRUM584_AC6_a_range_within_one_singapore_day_gives_the_date_once", () => {
+    expect(formatDateTimeRange(MORNING, LATE_MORNING)).toBe("15 Jan 2026, 9:00 am – 11:00 am");
+  });
+
+  it("SCRUM584_AC6_a_range_across_singapore_midnight_gives_both_dates", () => {
+    // One UTC day (14:00Z to 17:00Z), two Singapore days.
+    expect(formatDateTimeRange("2026-01-15T14:00:00Z", "2026-01-15T17:00:00Z")).toBe(
+      "15 Jan 2026, 10:00 pm – 16 Jan 2026, 1:00 am",
+    );
+  });
+
+  it("SCRUM584_AC6_a_range_across_utc_midnight_only_is_one_singapore_day", () => {
+    // Two UTC days (23:00Z to 01:00Z), one Singapore day.
+    expect(formatDateTimeRange("2026-01-15T23:00:00Z", "2026-01-16T01:00:00Z")).toBe(
+      "16 Jan 2026, 7:00 am – 9:00 am",
+    );
+  });
+
+  it("SCRUM584_AC6_missing_and_unparseable_values_read_as_the_older_helpers", () => {
+    expect(formatDateTime(null)).toBe("unknown");
+    expect(formatDateTime(undefined, "-")).toBe("-");
+    expect(formatDateTime("not a date")).toBe("not a date");
+    expect(formatDay("")).toBe("unknown");
+    expect(formatDay("not a date")).toBe("not a date");
+    expect(formatDateTimeRange(null, undefined)).toBe("unknown – unknown");
+    expect(formatDateTimeRange(null, MORNING, "-")).toBe("- – 15 Jan 2026, 9:00 am");
+    expect(formatDateTimeRange("soon", LATE_MORNING)).toBe("soon – 15 Jan 2026, 11:00 am");
   });
 });
 

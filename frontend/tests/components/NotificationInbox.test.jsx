@@ -5,8 +5,9 @@
 // the Coordinator reads that notification and marks it read.
 //
 // The notification service is mocked, so nothing touches the network.
-// Timezone-safe: every expected time is built as Singapore time with sgTime (or the
-// module's own describeNotification) from fixtures that carry +08:00 offsets.
+// Timezone-safe: an expected time is the fixed Singapore display text, as a
+// literal or from the module's own describeNotification, from fixtures that
+// carry +08:00 offsets.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
@@ -26,7 +27,6 @@ import { describeNotification } from "../../src/services/notificationDisplay";
 import { deferred, httpError } from "../helpers/async.js";
 import { setVisibility } from "../helpers/visibility.js";
 import { PAYLOAD, SETUP_PAYLOAD } from "../fixtures/notifications.js";
-import { sgTime } from "../helpers/singaporeTime.js";
 
 vi.mock("../../src/services/notificationService", () => ({
   getUnreadCount: vi.fn(),
@@ -134,16 +134,25 @@ describe("SCRUM17_AC3 loading and empty states", () => {
     expect(screen.queryAllByRole("listitem")).toHaveLength(0);
     expect(listNotifications).toHaveBeenCalledTimes(1);
   });
+
+  it("SCRUM584_AC5_empty_inbox_says_what_is_missing_and_what_comes_next", async () => {
+    vi.mocked(listNotifications).mockResolvedValue([]);
+
+    render(<NotificationInbox />, { wrapper: MemoryRouter });
+
+    expect(await screen.findByText("You have no notifications.")).toBeInTheDocument();
+    expect(screen.getByText("Updates about your events will appear here.")).toBeInTheDocument();
+  });
 });
 
 
 describe("SCRUM17_AC3 list errors", () => {
   it.each([
     ["a 401", httpError(401), "Your session has expired. Please sign in again."],
-    ["a 500", httpError(500), "Notifications could not be loaded. Please try again."],
-    ["a 403", httpError(403), "Notifications could not be loaded. Please try again."],
-    ["a 503", httpError(503), "Notifications could not be loaded. Please try again."],
-    ["a network error with no response", new Error("Network Error"), "Notifications could not be loaded. Please try again."],
+    ["a 500", httpError(500), "Notifications could not be loaded."],
+    ["a 403", httpError(403), "Notifications could not be loaded."],
+    ["a 503", httpError(503), "Notifications could not be loaded."],
+    ["a network error with no response", new Error("Network Error"), "Notifications could not be loaded."],
   ])("%s shows its message as an alert", async (_label, error, message) => {
     vi.mocked(listNotifications).mockRejectedValue(error);
 
@@ -168,6 +177,35 @@ describe("SCRUM17_AC3 list errors", () => {
     expect(await screen.findByText("Tech Talk at Hall A needs review")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
+
+  it("SCRUM584_AC5_Try_again_shows_Loading_then_the_list", async () => {
+    const retry = deferred();
+    vi.mocked(listNotifications)
+      .mockRejectedValueOnce(httpError(500))
+      .mockReturnValueOnce(retry.promise);
+
+    render(<NotificationInbox />, { wrapper: MemoryRouter });
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/^Notifications could not be loaded\.Try again$/);
+
+    await userEvent.click(within(alert).getByRole("button", { name: "Try again" }));
+    expect(screen.getByText("Loading...")).toBeInTheDocument();
+
+    await act(async () => retry.resolve([UNREAD]));
+    expect(screen.getByText("Tech Talk at Hall A needs review")).toBeInTheDocument();
+    expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(listNotifications).toHaveBeenCalledTimes(2);
+  });
+
+  it("SCRUM584_AC5_an_expired_session_offers_no_Try_again", async () => {
+    vi.mocked(listNotifications).mockRejectedValue(httpError(401));
+
+    render(<NotificationInbox />, { wrapper: MemoryRouter });
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Your session has expired. Please sign in again.");
+    expect(within(alert).queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+  });
 });
 
 
@@ -181,6 +219,16 @@ describe("SCRUM17_AC3 rows", () => {
     expect(within(row).getByText("New")).toBeInTheDocument();
     expect(within(row).getByRole("button", { name: "Mark as read" })).toBeEnabled();
     expect(row).toHaveClass("notification-inbox__item--unread");
+  });
+
+  it("SCRUM584_AC7_mark_as_read_is_the_shared_primary_button", async () => {
+    vi.mocked(listNotifications).mockResolvedValue([UNREAD]);
+
+    render(<NotificationInbox />, { wrapper: MemoryRouter });
+
+    const button = await screen.findByRole("button", { name: "Mark as read" });
+    expect(button).toHaveClass("ui-button", "ui-button--primary");
+    expect(button).toHaveAttribute("type", "button");
   });
 
   it("SCRUM17_AC3_read_row_has_neither", async () => {
@@ -204,15 +252,13 @@ describe("SCRUM17_AC3 rows", () => {
     expect(screen.getByText(detail)).toBeInTheDocument();
   });
 
-  it("SCRUM17_AC3_createdAt_is_rendered_in_the_readers_locale", async () => {
+  it("SCRUM584_AC6_received_time_is_the_fixed_singapore_format", async () => {
     vi.mocked(listNotifications).mockResolvedValue([UNREAD]);
 
     render(<NotificationInbox />, { wrapper: MemoryRouter });
 
     await screen.findByText("Tech Talk at Hall A needs review");
-    expect(
-      screen.getByText(`Received ${sgTime(UNREAD.createdAt)}`),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Received 26 Sept 2026, 11:00 am")).toBeInTheDocument();
   });
 
   it("a missing createdAt reads as unknown", async () => {

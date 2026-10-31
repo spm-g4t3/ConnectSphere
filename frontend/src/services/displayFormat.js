@@ -73,6 +73,62 @@ export function formatRange(startsAt, endsAt, fallback) {
   return `${formatTimestamp(startsAt, fallback)} – ${formatTimestamp(endsAt, fallback)}`;
 }
 
+// The display format: a fixed locale as well as a fixed zone, so every device
+// shows identical text. The helpers above follow the device's format.
+const dayFormat = new Intl.DateTimeFormat("en-SG", {
+  timeZone: VENUE_TIME_ZONE,
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+});
+const timeFormat = new Intl.DateTimeFormat("en-SG", {
+  timeZone: VENUE_TIME_ZONE,
+  hour: "numeric",
+  minute: "2-digit",
+});
+const dateTimeFormat = new Intl.DateTimeFormat("en-SG", {
+  timeZone: VENUE_TIME_ZONE,
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+});
+
+/** A parsed Date, or null for a missing or unparseable value. */
+function toDate(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/** "15 Jan 2026, 9:00 am"; missing and unparseable as formatTimestamp. */
+export function formatDateTime(value, fallback = "unknown") {
+  if (!value) return fallback;
+  const date = toDate(value);
+  return date ? dateTimeFormat.format(date) : String(value);
+}
+
+/** "15 Jan 2026"; missing and unparseable as formatDate. */
+export function formatDay(value, fallback = "unknown") {
+  if (!value) return fallback;
+  const date = toDate(value);
+  return date ? dayFormat.format(date) : String(value);
+}
+
+/**
+ * "15 Jan 2026, 9:00 am – 11:00 am" within one Singapore day, both ends in
+ * full across days. An end that is missing or unparseable reads as formatRange.
+ */
+export function formatDateTimeRange(startsAt, endsAt, fallback) {
+  const from = toDate(startsAt);
+  const to = toDate(endsAt);
+  if (from && to && dayFormat.format(from) === dayFormat.format(to)) {
+    return `${dateTimeFormat.format(from)} – ${timeFormat.format(to)}`;
+  }
+  return `${formatDateTime(startsAt, fallback)} – ${formatDateTime(endsAt, fallback)}`;
+}
+
 /** "1 minute" / "15 minutes", "1 active event" / "3 active events". */
 export function pluralise(count, unit) {
   return `${count} ${unit}${count === 1 ? "" : "s"}`;

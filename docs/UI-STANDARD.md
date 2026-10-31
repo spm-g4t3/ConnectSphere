@@ -97,9 +97,12 @@ Defined once on `:root` in `frontend/src/index.css`.
 
 All displayed dates and times are Singapore time, on every device. The zone is defined once, as `VENUE_TIME_ZONE` in `src/services/datetimeFormat.js`.
 
-- Format them only through the shared helpers, which are pinned to that zone:
-  - General display, in the reader's locale format: `formatTimestamp`, `formatRange`, `formatEventDate`, `formatMediumTimestamp`, `formatDate` in `src/services/displayFormat.js`.
-  - Venue periods that carry the "(Singapore time)" note, in `datetimeFormat.js`: `formatVenueTimestamp` for one instant, `formatVenuePeriod` for a start and end, and `formatVenueRange` for a start and end without the note, when several ranges share one line; end the line with `VENUE_TIME_NOTE` once.
+- The display format is these helpers in `src/services/displayFormat.js`. They use a fixed `en-SG` format, so every device shows identical text:
+  - `formatDateTime`: "15 Jan 2026, 9:00 am"
+  - `formatDay`: "15 Jan 2026"
+  - `formatDateTimeRange`: "15 Jan 2026, 9:00 am – 11:00 am" within one Singapore day, otherwise "15 Jan 2026, 10:00 pm – 16 Jan 2026, 1:00 am"
+- The older helpers in that file (`formatTimestamp`, `formatEventDate`, `formatRange`, `formatMediumTimestamp`, `formatMediumDateTime`, `formatDate`) are pinned to Singapore time but follow the device's format. They are being replaced screen by screen; new code must not use them.
+- Venue periods that carry the "(Singapore time)" note stay on `datetimeFormat.js`: `formatVenueTimestamp` for one instant, `formatVenuePeriod` for a start and end, and `formatVenueRange` for a start and end without the note, when several ranges share one line; end the line with `VENUE_TIME_NOTE` once.
 - Never call `toLocaleString` or `toLocaleDateString` on a date directly.
 - Form inputs are the exception: they take the device's time zone, are labelled with `deviceTimeZoneLabel()`, and are sent with `toOffsetIsoString`. The coordinator venue finder is the one form that takes Singapore time, sent with `toVenueOffsetIsoString`.
 
