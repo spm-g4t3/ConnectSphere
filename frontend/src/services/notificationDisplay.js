@@ -103,7 +103,7 @@
 // wrote it, and a missing name should read as "Unknown venue", not as
 // "undefined".
 
-import { formatRange, formatTimestamp } from "./displayFormat";
+import { formatDateTime, formatDateTimeRange } from "./displayFormat";
 import { reasonLabel } from "./venueBlockReasons";
 import { formatOccupiedPeriod } from "./occupiedPeriodDisplay";
 import { formatVenuePeriod, formatVenueTimestamp } from "./datetimeFormat";
@@ -142,11 +142,11 @@ function setupChangePeriod(payload) {
       endsAt: payload.endsAt,
       occupiedStartsAt: payload.occupiedStartsAt,
       occupiedEndsAt: payload.occupiedEndsAt,
-    });
+    }, formatDateTimeRange);
     return ` It now occupies ${period}.`;
   }
   if (isInstant(payload.occupiedStartsAt) && isInstant(payload.occupiedEndsAt)) {
-    return ` It now occupies ${formatRange(payload.occupiedStartsAt, payload.occupiedEndsAt)}.`;
+    return ` It now occupies ${formatDateTimeRange(payload.occupiedStartsAt, payload.occupiedEndsAt)}.`;
   }
   return "";
 }
@@ -240,7 +240,7 @@ function describeEquipmentNotification(notification) {
       if (payload.change === "event_period") {
         const period =
           isInstant(payload.startsAt) && isInstant(payload.endsAt)
-            ? `The event is now ${formatRange(payload.startsAt, payload.endsAt)}. `
+            ? `The event is now ${formatDateTimeRange(payload.startsAt, payload.endsAt)}. `
             : "";
         return {
           headline: `The date or time of ${eventName} changed`,
@@ -271,13 +271,13 @@ function asSentence(text) {
 
 /** "Booked <range>. ", the start of a flagged booking's detail. */
 function bookedFor(payload) {
-  return `Booked ${formatRange(payload.startsAt, payload.endsAt)}. `;
+  return `Booked ${formatDateTimeRange(payload.startsAt, payload.endsAt)}. `;
 }
 
 /** "The venue is blocked for <reason>, <range>.", from a block's payload. */
 function blockedFor(payload) {
   const reason = payload.reason ? reasonLabel(payload.reason) : "unspecified reason";
-  return `The venue is blocked for ${reason}, ${formatRange(payload.blockStartsAt, payload.blockEndsAt)}.`;
+  return `The venue is blocked for ${reason}, ${formatDateTimeRange(payload.blockStartsAt, payload.blockEndsAt)}.`;
 }
 
 /**
@@ -303,7 +303,7 @@ function joinWords(words) {
 function confirmedSchedule(payload, venueNames) {
   const names = venueNames.filter(Boolean);
   const period = isInstant(payload.startsAt) && isInstant(payload.endsAt)
-    ? ` ${formatRange(payload.startsAt, payload.endsAt)}`
+    ? ` ${formatDateTimeRange(payload.startsAt, payload.endsAt)}`
     : "";
   const at = names.length > 0 ? ` at ${joinWords(names)}` : "";
   return period || at ? ` It runs${period}${at}.` : "";
@@ -356,7 +356,7 @@ const DESCRIBERS = {
     return {
       headline: `${venueName} is unavailable for your request for ${eventName}`,
       detail:
-        `Requested ${formatRange(payload.startsAt, payload.endsAt)}. ` +
+        `Requested ${formatDateTimeRange(payload.startsAt, payload.endsAt)}. ` +
         causes[payload.cause](payload) +
         " The request is still open; you may want to request another venue.",
     };
@@ -395,7 +395,7 @@ const DESCRIBERS = {
     return {
       headline: `The hold on ${venueName} for ${eventName} has expired`,
       detail:
-        `It expired ${formatTimestamp(payload.expiresAt)}. ` +
+        `It expired ${formatDateTime(payload.expiresAt)}. ` +
         "The venue is no longer held for this event; a hold is not a booking.",
     };
   },
@@ -433,7 +433,7 @@ const DESCRIBERS = {
     return {
       headline: `The request for ${eventName} at ${venueName} was withdrawn`,
       detail:
-        `It was for ${formatRange(payload.startsAt, payload.endsAt)}. ` +
+        `It was for ${formatDateTimeRange(payload.startsAt, payload.endsAt)}. ` +
         "It no longer needs a decision.",
     };
   },
@@ -444,7 +444,7 @@ const DESCRIBERS = {
   booking_request_submitted(payload, { eventName, venueName }) {
     return {
       headline: `New request: ${eventName} at ${venueName}`,
-      detail: `It is for ${formatRange(payload.startsAt, payload.endsAt)}. It needs a decision.`,
+      detail: `It is for ${formatDateTimeRange(payload.startsAt, payload.endsAt)}. It needs a decision.`,
       needsAction: true,
     };
   },
@@ -454,7 +454,7 @@ const DESCRIBERS = {
   booking_request_approved(payload, { eventName, venueName }) {
     return {
       headline: `${venueName} was approved for ${eventName}`,
-      detail: `It is booked for ${formatRange(payload.startsAt, payload.endsAt)}.`,
+      detail: `It is booked for ${formatDateTimeRange(payload.startsAt, payload.endsAt)}.`,
     };
   },
 
@@ -481,7 +481,7 @@ const DESCRIBERS = {
     return {
       headline: `Your request for ${venueName} for ${eventName} now clashes with ${approvedEventName}`,
       detail:
-        `${approvedEventName} was approved for ${formatRange(payload.approvedStartsAt, payload.approvedEndsAt)}. ` +
+        `${approvedEventName} was approved for ${formatDateTimeRange(payload.approvedStartsAt, payload.approvedEndsAt)}. ` +
         "Your request is still open; you can withdraw it or wait for Venue Staff.",
     };
   },
@@ -494,7 +494,7 @@ const DESCRIBERS = {
     return {
       headline: `${venueName} was released for ${eventName}`,
       detail:
-        `It is free again for ${formatRange(payload.startsAt, payload.endsAt)}, released by ${by}. ` +
+        `It is free again for ${formatDateTimeRange(payload.startsAt, payload.endsAt)}, released by ${by}. ` +
         `Reason: ${asSentence(payload.reason || NO_REASON)}`,
     };
   },
@@ -509,7 +509,7 @@ const DESCRIBERS = {
       headline: `Your request for ${venueName} for ${eventName} no longer clashes`,
       detail:
         `${releasedEventName} no longer holds the venue, so your request for ` +
-        `${formatRange(payload.startsAt, payload.endsAt)} is pending again and waits for Venue Staff.`,
+        `${formatDateTimeRange(payload.startsAt, payload.endsAt)} is pending again and waits for Venue Staff.`,
     };
   },
 
@@ -525,7 +525,7 @@ const DESCRIBERS = {
     if (payload.outcome === "reinstated") {
       return {
         headline: `${venueName} for ${eventName} was reinstated`,
-        detail: `It is booked again for ${formatRange(payload.startsAt, payload.endsAt)}. ${reason}`,
+        detail: `It is booked again for ${formatDateTimeRange(payload.startsAt, payload.endsAt)}. ${reason}`,
       };
     }
     if (payload.outcome === "cancelled") {
@@ -548,7 +548,7 @@ const DESCRIBERS = {
       return {
         headline: `${venueName} for ${eventName} was replaced by ${replacement}`,
         detail:
-          `${replacement} is booked for ${formatRange(payload.replacementStartsAt, payload.replacementEndsAt)}. ` +
+          `${replacement} is booked for ${formatDateTimeRange(payload.replacementStartsAt, payload.replacementEndsAt)}. ` +
           reason,
       };
     }
@@ -561,7 +561,7 @@ const DESCRIBERS = {
     if (payload.audience === "organiser") {
       const reason = payload.reason || NO_REASON;
       const cancelledAt = payload.cancelledAt
-        ? ` Cancelled ${formatTimestamp(payload.cancelledAt)}.`
+        ? ` Cancelled ${formatDateTime(payload.cancelledAt)}.`
         : "";
       return {
         headline: `${eventName} was cancelled`,
@@ -571,7 +571,7 @@ const DESCRIBERS = {
     if (payload.audience === "safety_officer") {
       const reason = payload.reason || NO_REASON;
       const cancelledAt = payload.cancelledAt
-        ? ` Cancelled ${formatTimestamp(payload.cancelledAt)}.`
+        ? ` Cancelled ${formatDateTime(payload.cancelledAt)}.`
         : "";
       return {
         headline: `${eventName} was cancelled`,
@@ -641,7 +641,7 @@ const DESCRIBERS = {
   // SCRUM-347. Venue Staff get one per released booking, so theirs names the venue.
   event_rejected(payload, { eventName, venueName }) {
     if (payload.audience === "organiser") {
-      const rejectedAt = payload.rejectedAt ? ` Rejected ${formatTimestamp(payload.rejectedAt)}.` : "";
+      const rejectedAt = payload.rejectedAt ? ` Rejected ${formatDateTime(payload.rejectedAt)}.` : "";
       return {
         headline: `${eventName} was rejected`,
         detail: `Reason: ${asSentence(payload.reason || NO_REASON)}${rejectedAt} You can revise and resubmit it.`,
@@ -651,13 +651,13 @@ const DESCRIBERS = {
     if (payload.audience === "venue_staff" && payload.outcome === "withdrawn") {
       return {
         headline: `The request for ${venueName} for ${eventName} was withdrawn`,
-        detail: `The event was rejected, so its request for ${formatRange(payload.startsAt, payload.endsAt)} no longer needs a decision.`,
+        detail: `The event was rejected, so its request for ${formatDateTimeRange(payload.startsAt, payload.endsAt)} no longer needs a decision.`,
       };
     }
     if (payload.audience === "venue_staff") {
       return {
         headline: `${venueName} was released for ${eventName}`,
-        detail: `The event was rejected, so its booking for ${formatRange(payload.startsAt, payload.endsAt)} no longer holds the venue.`,
+        detail: `The event was rejected, so its booking for ${formatDateTimeRange(payload.startsAt, payload.endsAt)} no longer holds the venue.`,
       };
     }
     if (payload.audience === "technical_support_staff") {
@@ -674,7 +674,7 @@ const DESCRIBERS = {
   event_submitted_for_safety_review(payload, { eventName }) {
     const coordinatorName = payload.coordinatorName || "its coordinator";
     const startsAt = isInstant(payload.startsAt)
-      ? ` It starts ${formatTimestamp(payload.startsAt)}.`
+      ? ` It starts ${formatDateTime(payload.startsAt)}.`
       : "";
 
     return {
@@ -691,7 +691,7 @@ const DESCRIBERS = {
   // queue until a Lead picks a coordinator.
   event_request_awaiting_assignment(payload, { eventName }) {
     const submittedAt = isInstant(payload.submittedAt)
-      ? `Submitted ${formatTimestamp(payload.submittedAt)}. `
+      ? `Submitted ${formatDateTime(payload.submittedAt)}. `
       : "";
 
     return {
@@ -793,7 +793,7 @@ const DESCRIBERS = {
   registration_schedule_conflict(payload, { eventName }) {
     const fields = Array.isArray(payload.fields) ? payload.fields : [];
     const labels = fields.map((field) => REGISTRATION_DATE_LABELS[field]).filter(Boolean);
-    const newStart = isInstant(payload.newStart) ? ` (${formatTimestamp(payload.newStart)})` : "";
+    const newStart = isInstant(payload.newStart) ? ` (${formatDateTime(payload.newStart)})` : "";
     const clash = labels.length
       ? `is earlier than the ${joinWords(labels)}`
       : "clashes with the registration dates";
@@ -843,7 +843,7 @@ const DESCRIBERS = {
     return {
       headline: `An event you registered for has changed: ${eventName}`,
       detail: payload.startsAt && payload.endsAt
-        ? `The event now runs ${formatRange(payload.startsAt, payload.endsAt)}.`
+        ? `The event now runs ${formatDateTimeRange(payload.startsAt, payload.endsAt)}.`
         : "Check the event for its latest details.",
     };
   },
@@ -860,8 +860,8 @@ const DESCRIBERS = {
     return {
       headline: `${eventName} moved; a pending request is for the old time`,
       detail:
-        `The request for ${venueName} is for ${formatRange(payload.startsAt, payload.endsAt)}. ` +
-        `The event now runs ${formatRange(payload.newStartsAt, payload.newEndsAt)}. ` +
+        `The request for ${venueName} is for ${formatDateTimeRange(payload.startsAt, payload.endsAt)}. ` +
+        `The event now runs ${formatDateTimeRange(payload.newStartsAt, payload.newEndsAt)}. ` +
         `Coordinator's reason: ${payload.reason || NO_REASON}.`,
     };
   },

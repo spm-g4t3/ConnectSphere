@@ -7,7 +7,6 @@ import { describe, it, expect } from "vitest";
 
 import { describeNotification } from "../../src/services/notificationDisplay.js";
 import { notificationLink } from "../../src/services/notificationLink.js";
-import { formatRange } from "../../src/services/displayFormat.js";
 
 const EVENT_ID = "11111111-1111-4111-8111-111111111111";
 
@@ -210,7 +209,7 @@ describe("SCRUM-176 AC5: equipment_request_changed", () => {
 
     expect(headline).toBe("The date or time of Tech Talk changed");
     expect(detail).toBe(
-      `The event is now ${formatRange(startsAt, endsAt)}. Any reserved equipment is flagged for review.`,
+      "The event is now 5 Dec 2026, 2:00 pm – 4:00 pm. Any reserved equipment is flagged for review.",
     );
   });
 

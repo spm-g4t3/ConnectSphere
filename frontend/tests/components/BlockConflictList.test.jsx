@@ -4,7 +4,7 @@
 // the Venue Staff member, who must either choose a non-overlapping period or
 // explicitly confirm the override."
 //
-// Timezone-safe: expected ranges are computed with toLocaleString from
+// Timezone-safe: expected ranges are computed as Singapore time (sgTime) from
 // fixtures that carry offsets.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -12,6 +12,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import BlockConflictList from "../../src/components/BlockConflictList.jsx";
+import { sgTime } from "../helpers/singaporeTime.js";
 
 const CONFLICT_A = {
   bookingId: "a1b2c3d4-0000-4000-8000-000000000001",
@@ -38,7 +39,7 @@ const CONFLICT_C = {
 };
 
 function range(startsAt, endsAt) {
-  return `${new Date(startsAt).toLocaleString()} – ${new Date(endsAt).toLocaleString()}`;
+  return `${sgTime(startsAt)} – ${sgTime(endsAt)}`;
 }
 
 function renderList(props = {}) {

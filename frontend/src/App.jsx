@@ -6,6 +6,8 @@ import Navigation from "./components/Navigation";
 import { UnreadCountProvider } from "./notifications/UnreadCountContext";
 import Dashboard from "./components/Dashboard";
 import LoginForm from "./components/LoginForm";
+import NotAvailablePage from "./components/NotAvailablePage";
+import LoadingText from "./components/ui/LoadingText";
 import MyEventRequests from "./components/MyEventRequests";
 import VenueSearch from "./components/VenueSearch";
 import VenueCatalogue from "./components/VenueCatalogue";
@@ -39,15 +41,9 @@ import { BROWSE_OPEN_EVENTS_PATH, OPEN_EVENT_DETAILS_ROUTE } from "./services/op
 import "./App.css";
 
 function LoadingScreen() {
-  return <main className="loading-screen">Loading ConnectSphere...</main>;
-}
-
-function PagePlaceholder({ title, description }) {
   return (
-    <main className="placeholder-page">
-      <span className="eyebrow">ConnectSphere workspace</span>
-      <h1>{title}</h1>
-      <p>{description}</p>
+    <main className="loading-screen">
+      <LoadingText />
     </main>
   );
 }
@@ -365,7 +361,7 @@ function AppRoutes() {
             Deliberately unprotected: a signed-out user never reaches it, because
             ProtectedRoute's `!user` branch redirects to /login before the role
             check runs. Wrapping it would only risk a redirect loop. */}
-        <Route path="/unauthorized" element={<PagePlaceholder title="Not available to your role" description="Your account does not have access to that page. If you think it should, ask an administrator to check your role." />} />
+        <Route path="/unauthorized" element={<NotAvailablePage />} />
         {/* SCRUM-258: Venue Staff's queue of open booking requests, the same
             component the Venue Staff dashboard shows, so the nav link and the
             dashboard are two ways into one screen. Gated and wrapped as

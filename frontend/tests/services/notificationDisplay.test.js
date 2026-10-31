@@ -1,9 +1,9 @@
 // notificationDisplay.test.js
 //
 // SCRUM-128 (part of SCRUM-17, AC3). The wording of a notification on the
-// Coordinator dashboard. Timezone-safe: every expected time is built here
-// with the same formatRange the module uses, from fixtures that carry +08:00
-// offsets, so the suite passes in any zone and locale.
+// Coordinator dashboard. The display format is fixed Singapore text, so an
+// expected time is a literal or built with the helper the module uses, from
+// fixtures that carry +08:00 offsets; the suite passes in any zone and locale.
 
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 
 import { describeNotification } from "../../src/services/notificationDisplay.js";
-import { formatRange, formatTimestamp } from "../../src/services/displayFormat.js";
+import { formatDateTime, formatDateTimeRange } from "../../src/services/displayFormat.js";
 import { formatOccupiedPeriod } from "../../src/services/occupiedPeriodDisplay.js";
 import { PAYLOAD, SETUP_PAYLOAD } from "../fixtures/notifications.js";
 
@@ -19,8 +19,8 @@ function flagged(payload = PAYLOAD) {
   return { id: "n1", type: "booking_flagged", payload };
 }
 
-const BOOKED = formatRange(PAYLOAD.startsAt, PAYLOAD.endsAt);
-const BLOCKED = formatRange(PAYLOAD.blockStartsAt, PAYLOAD.blockEndsAt);
+const BOOKED = "1 Oct 2026, 10:00 am – 12:00 pm";
+const BLOCKED = "1 Oct 2026, 9:00 am – 5:00 pm";
 
 describe("describeNotification: booking_flagged", () => {
   it("SCRUM17_AC3_names_the_event_and_venue_in_the_headline", () => {
@@ -33,10 +33,10 @@ describe("describeNotification: booking_flagged", () => {
     );
   });
 
-  it("formats the times in the reader's locale", () => {
+  it("formats the times as the fixed Singapore display text", () => {
     const { detail } = describeNotification(flagged());
-    expect(detail).toContain(new Date(PAYLOAD.startsAt).toLocaleString());
-    expect(detail).toContain(new Date(PAYLOAD.blockEndsAt).toLocaleString());
+    expect(detail).toContain("Booked 1 Oct 2026, 10:00 am – 12:00 pm.");
+    expect(detail).toContain("Maintenance, 1 Oct 2026, 9:00 am – 5:00 pm.");
     expect(detail).not.toContain("+08:00");
   });
 
@@ -123,15 +123,15 @@ describe("describeNotification: booking_flagged_setup_change (SCRUM-484 AC8)", (
 
     expect(headline).toBe("Orientation at Harbour Room needs review");
     expect(detail).toBe(
-      `Setup or turnaround time changed. It now occupies ${formatOccupiedPeriod(SETUP_PAYLOAD)}. Alternative arrangements are required.`,
+      `Setup or turnaround time changed. It now occupies ${formatOccupiedPeriod(SETUP_PAYLOAD, formatDateTimeRange)}. Alternative arrangements are required.`,
     );
     // The parts, each from the same instants.
     expect(detail).toContain(
-      `Setup ${formatRange(SETUP_PAYLOAD.occupiedStartsAt, SETUP_PAYLOAD.startsAt)}`,
+      `Setup ${formatDateTimeRange(SETUP_PAYLOAD.occupiedStartsAt, SETUP_PAYLOAD.startsAt)}`,
     );
-    expect(detail).toContain(`Event ${formatRange(SETUP_PAYLOAD.startsAt, SETUP_PAYLOAD.endsAt)}`);
+    expect(detail).toContain(`Event ${formatDateTimeRange(SETUP_PAYLOAD.startsAt, SETUP_PAYLOAD.endsAt)}`);
     expect(detail).toContain(
-      `Turnaround ${formatRange(SETUP_PAYLOAD.endsAt, SETUP_PAYLOAD.occupiedEndsAt)}`,
+      `Turnaround ${formatDateTimeRange(SETUP_PAYLOAD.endsAt, SETUP_PAYLOAD.occupiedEndsAt)}`,
     );
     expect(headline).not.toBe("New notification");
   });
@@ -162,7 +162,7 @@ describe("describeNotification: booking_flagged_setup_change (SCRUM-484 AC8)", (
       };
       const { headline, detail } = describeNotification(notification);
       expect(headline).toBe("An event you registered for has changed: Tech Talk");
-      expect(detail).toBe(`The event now runs ${formatRange(PAYLOAD.startsAt, PAYLOAD.endsAt)}.`);
+      expect(detail).toBe(`The event now runs ${formatDateTimeRange(PAYLOAD.startsAt, PAYLOAD.endsAt)}.`);
     });
 
     it("SCRUM395_AC9_explains_a_venue_booking_flag", () => {
@@ -199,8 +199,8 @@ describe("describeNotification: booking_flagged_setup_change (SCRUM-484 AC8)", (
       expect(describeNotification(notification)).toEqual({
         headline: "Tech Talk moved; a pending request is for the old time",
         detail:
-          `The request for Hall A is for ${formatRange(PAYLOAD.startsAt, PAYLOAD.endsAt)}. ` +
-          `The event now runs ${formatRange("2040-12-02T10:00:00+08:00", "2040-12-02T12:00:00+08:00")}. ` +
+          `The request for Hall A is for ${formatDateTimeRange(PAYLOAD.startsAt, PAYLOAD.endsAt)}. ` +
+          `The event now runs ${formatDateTimeRange("2040-12-02T10:00:00+08:00", "2040-12-02T12:00:00+08:00")}. ` +
           "Coordinator's reason: Updated schedule.",
       });
     });
@@ -224,7 +224,7 @@ describe("describeNotification: booking_flagged_setup_change (SCRUM-484 AC8)", (
       setupChange({ ...SETUP_PAYLOAD, startsAt: undefined, endsAt: undefined }),
     );
     expect(detail).toBe(
-      `Setup or turnaround time changed. It now occupies ${formatRange(SETUP_PAYLOAD.occupiedStartsAt, SETUP_PAYLOAD.occupiedEndsAt)}. Alternative arrangements are required.`,
+      `Setup or turnaround time changed. It now occupies ${formatDateTimeRange(SETUP_PAYLOAD.occupiedStartsAt, SETUP_PAYLOAD.occupiedEndsAt)}. Alternative arrangements are required.`,
     );
     expect(detail).not.toContain("unknown");
     expect(detail).not.toContain("Setup 0");
@@ -251,7 +251,7 @@ describe("describeNotification: booking_flagged_setup_change (SCRUM-484 AC8)", (
   ])("SCRUM484_AC8_%s_fall_back_to_the_plain_range", (_label, overrides) => {
     const { detail } = describeNotification(setupChange({ ...SETUP_PAYLOAD, ...overrides }));
     expect(detail).toBe(
-      `Setup or turnaround time changed. It now occupies ${formatRange(SETUP_PAYLOAD.startsAt, SETUP_PAYLOAD.endsAt)}. Alternative arrangements are required.`,
+      `Setup or turnaround time changed. It now occupies ${formatDateTimeRange(SETUP_PAYLOAD.startsAt, SETUP_PAYLOAD.endsAt)}. Alternative arrangements are required.`,
     );
     expect(detail).not.toContain("·");
     expect(detail).not.toContain("Turnaround ");
@@ -278,7 +278,7 @@ describe("describeNotification: booking_request_withdrawn", () => {
     expect(describeNotification(withdrawn())).toEqual({
       headline: "The request for Tech Talk at Hall A was withdrawn",
       detail:
-        `It was for ${formatRange(WITHDRAWN_PAYLOAD.startsAt, WITHDRAWN_PAYLOAD.endsAt)}. ` +
+        `It was for ${formatDateTimeRange(WITHDRAWN_PAYLOAD.startsAt, WITHDRAWN_PAYLOAD.endsAt)}. ` +
         "It no longer needs a decision.",
     });
   });
@@ -291,7 +291,7 @@ describe("describeNotification: booking_request_submitted", () => {
     expect(describeNotification(submitted)).toEqual({
       headline: "New request: Tech Talk at Hall A",
       detail:
-        `It is for ${formatRange(WITHDRAWN_PAYLOAD.startsAt, WITHDRAWN_PAYLOAD.endsAt)}. ` +
+        `It is for ${formatDateTimeRange(WITHDRAWN_PAYLOAD.startsAt, WITHDRAWN_PAYLOAD.endsAt)}. ` +
         "It needs a decision.",
       needsAction: true,
     });
@@ -312,7 +312,7 @@ describe("describeNotification: event_cancelled (SCRUM-374)", () => {
 
     expect(result.headline).toBe("Tech Talk was cancelled");
     expect(result.detail).toBe(
-      `Reason: Venue unavailable. Cancelled ${formatTimestamp("2026-10-01T10:00:00+08:00")}.`,
+      `Reason: Venue unavailable. Cancelled ${formatDateTime("2026-10-01T10:00:00+08:00")}.`,
     );
   });
 
@@ -337,7 +337,7 @@ describe("describeNotification: event_cancelled (SCRUM-374)", () => {
       },
     })).toEqual({
       headline: "Tech Talk was cancelled",
-      detail: `It no longer needs a safety review. Reason: Venue unavailable. Cancelled ${formatTimestamp("2026-10-01T10:00:00+08:00")}.`,
+      detail: `It no longer needs a safety review. Reason: Venue unavailable. Cancelled ${formatDateTime("2026-10-01T10:00:00+08:00")}.`,
     });
   });
 
@@ -453,7 +453,7 @@ describe("describeNotification: venue_hold_expired (SCRUM-491 AC8)", () => {
     );
 
     expect(headline).toBe("The hold on Hall A for Product Launch has expired");
-    expect(detail).toContain(`It expired ${formatTimestamp(EXPIRES)}.`);
+    expect(detail).toContain(`It expired ${formatDateTime(EXPIRES)}.`);
   });
 
   it("SCRUM491_AC7_says_the_hold_was_never_a_booking", () => {
@@ -486,7 +486,7 @@ describe("describeNotification: Venue Staff decisions (SCRUM-258 AC6)", () => {
   it("SCRUM258_AC6_approved_names_the_venue_event_and_period", () => {
     expect(of("booking_request_approved", DECISION)).toEqual({
       headline: "Hall A was approved for Tech Talk",
-      detail: `It is booked for ${formatRange(DECISION.startsAt, DECISION.endsAt)}.`,
+      detail: `It is booked for ${formatDateTimeRange(DECISION.startsAt, DECISION.endsAt)}.`,
     });
   });
 
@@ -529,7 +529,7 @@ describe("describeNotification: Venue Staff decisions (SCRUM-258 AC6)", () => {
     });
     expect(headline).toBe("Your request for Hall A for Tech Talk now clashes with Gala Dinner");
     expect(detail).toContain(
-      `Gala Dinner was approved for ${formatRange("2026-10-01T11:00:00+08:00", "2026-10-01T14:00:00+08:00")}.`,
+      `Gala Dinner was approved for ${formatDateTimeRange("2026-10-01T11:00:00+08:00", "2026-10-01T14:00:00+08:00")}.`,
     );
     expect(detail).toMatch(/still open/);
   });
@@ -553,7 +553,7 @@ describe("describeNotification: event_request_awaiting_assignment (SCRUM-172 AC6
       submittedAt: SUBMITTED,
     })).toEqual({
       headline: "Tech Talk is waiting for a coordinator",
-      detail: `Submitted ${formatTimestamp(SUBMITTED)}. Assign it from the unassigned queue.`,
+      detail: `Submitted ${formatDateTime(SUBMITTED)}. Assign it from the unassigned queue.`,
     });
   });
 
@@ -739,7 +739,7 @@ const UNAVAILABLE_PAYLOAD = {
   blockEndsAt: PAYLOAD.blockEndsAt,
 };
 const RETIRED_PAYLOAD = { ...WITHDRAWN_PAYLOAD, retiredAt: "2026-09-20T09:00:00+08:00" };
-const REQUESTED = `Requested ${formatRange(WITHDRAWN_PAYLOAD.startsAt, WITHDRAWN_PAYLOAD.endsAt)}.`;
+const REQUESTED = `Requested ${formatDateTimeRange(WITHDRAWN_PAYLOAD.startsAt, WITHDRAWN_PAYLOAD.endsAt)}.`;
 const STILL_OPEN = "The request is still open; you may want to request another venue.";
 const unavailable = (overrides = {}) => describeNotification({
   id: "n13",
@@ -784,7 +784,7 @@ describe("describeNotification: booking_flagged_venue_retired (SCRUM-174 AC6)", 
     expect(describeNotification({ id: "n14", type: "booking_flagged_venue_retired", payload: RETIRED_PAYLOAD })).toEqual({
       headline: "Tech Talk at Hall A needs review",
       detail:
-        `Booked ${formatRange(RETIRED_PAYLOAD.startsAt, RETIRED_PAYLOAD.endsAt)}. ` +
+        `Booked ${formatDateTimeRange(RETIRED_PAYLOAD.startsAt, RETIRED_PAYLOAD.endsAt)}. ` +
         "The venue has been retired. Alternative arrangements are required.",
     });
   });
@@ -820,8 +820,8 @@ const resolved = (overrides = {}) => describeNotification({
   type: "flagged_booking_resolved",
   payload: { ...RESOLVED_PAYLOAD, ...overrides },
 });
-const RESOLVED_RANGE = formatRange(RESOLVED_PAYLOAD.startsAt, RESOLVED_PAYLOAD.endsAt);
-const REPLACED_RANGE = formatRange(REPLACED.replacementStartsAt, REPLACED.replacementEndsAt);
+const RESOLVED_RANGE = formatDateTimeRange(RESOLVED_PAYLOAD.startsAt, RESOLVED_PAYLOAD.endsAt);
+const REPLACED_RANGE = formatDateTimeRange(REPLACED.replacementStartsAt, REPLACED.replacementEndsAt);
 
 describe("describeNotification: flagged_booking_resolved (SCRUM-266 AC6)", () => {
   it.each(["coordinator", "organiser"])("SCRUM266_AC6_reinstated_tells_the_%s_it_is_booked_again", (audience) => {
@@ -950,7 +950,7 @@ const FALLBACKS = [
     nameless(SETUP_PAYLOAD, value),
     {
       headline: "Unnamed event at Unknown venue needs review",
-      detail: `Setup or turnaround time changed. It now occupies ${formatOccupiedPeriod(SETUP_PAYLOAD)}. Alternative arrangements are required.`,
+      detail: `Setup or turnaround time changed. It now occupies ${formatOccupiedPeriod(SETUP_PAYLOAD, formatDateTimeRange)}. Alternative arrangements are required.`,
     },
   ]),
   ...[["null", null], ["undefined", undefined]].map(([label, payload]) => [
@@ -966,7 +966,7 @@ const FALLBACKS = [
     {
       headline: "The request for Unnamed event at Unknown venue was withdrawn",
       detail:
-        `It was for ${formatRange(WITHDRAWN_PAYLOAD.startsAt, WITHDRAWN_PAYLOAD.endsAt)}. ` +
+        `It was for ${formatDateTimeRange(WITHDRAWN_PAYLOAD.startsAt, WITHDRAWN_PAYLOAD.endsAt)}. ` +
         "It no longer needs a decision.",
     },
   ]),
@@ -1064,7 +1064,7 @@ describe("describeNotification: registration_schedule_conflict (SCRUM-494 AC7)",
 
     expect(described).toEqual({
       headline: "Registration dates for Industry Night need updating",
-      detail: `The new start (${formatTimestamp(NEW_START)}) is earlier than the closing time and withdrawal deadline.`,
+      detail: `The new start (${formatDateTime(NEW_START)}) is earlier than the closing time and withdrawal deadline.`,
     });
     expect(described.detail).not.toMatch(/registration[A-Z]/);
   });
@@ -1081,7 +1081,7 @@ describe("describeNotification: registration_schedule_conflict (SCRUM-494 AC7)",
     });
 
     expect(detail).toBe(
-      `The new start (${formatTimestamp(NEW_START)}) is earlier than the opening time, closing time and withdrawal deadline.`,
+      `The new start (${formatDateTime(NEW_START)}) is earlier than the opening time, closing time and withdrawal deadline.`,
     );
   });
 

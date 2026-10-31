@@ -26,6 +26,7 @@ import {
   getMyEventRequests,
   getConfirmedArrangements,
 } from "../../src/services/eventRequestService";
+import { sgTime, sgMediumTime } from "../helpers/singaporeTime.js";
 
 vi.mock("../../src/auth/AuthContext", () => ({
   useAuth: vi.fn(),
@@ -208,10 +209,7 @@ describe("SCRUM19_AC10 the Organiser's view of a decision", () => {
     const item = row.closest("li");
     expect(within(item).getByText("Event cancelled")).toBeInTheDocument();
     expect(within(item).getByText("Organiser withdrew")).toBeInTheDocument();
-    expect(within(item).getByText(
-      new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" })
-        .format(new Date("2026-06-01T09:00:00Z")),
-    )).toBeInTheDocument();
+    expect(within(item).getByText(sgMediumTime("2026-06-01T09:00:00Z"))).toBeInTheDocument();
     expect(within(item).queryByRole("button", { name: "Request a change" })).not.toBeInTheDocument();
   });
 
@@ -235,7 +233,7 @@ describe("SCRUM19_AC10 the Organiser's view of a decision", () => {
     // decidedBy; the event itself carries only the id.
     expect(await within(record).findByText("Priya Nair")).toBeInTheDocument();
     expect(getAssignmentHistory).toHaveBeenCalledWith("22222222-2222-4222-8222-222222222222");
-    expect(within(record).getByText(new Date("2026-01-15T09:00:00+08:00").toLocaleString())).toBeInTheDocument();
+    expect(within(record).getByText(sgTime("2026-01-15T09:00:00+08:00"))).toBeInTheDocument();
   });
 
   it("SCRUM19_AC10_an_approval_shows_its_note_and_who_decided", async () => {

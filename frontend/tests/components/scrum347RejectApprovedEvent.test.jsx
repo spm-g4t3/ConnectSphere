@@ -357,6 +357,22 @@ describe("SCRUM379 AC4 change request outcome styling", () => {
   });
 });
 
+describe("SCRUM584 AC6 change request date", () => {
+  // 17:30Z is 1:30 am on 21 October in Singapore, so a device-zone date fails in UTC too.
+  it("SCRUM584_AC6_the_request_date_is_the_singapore_day", async () => {
+    vi.mocked(getChangeRequests).mockResolvedValue([{
+      id: "c1", fieldLabel: "Venue", details: "A larger room", status: "outstanding", decision: null, decisionNotes: null,
+      createdAt: "2026-10-20T17:30:00Z",
+    }]);
+
+    render(<ChangeRequestStatusList eventRequestId={REQUEST_ID} />);
+
+    const requested = await screen.findByText(/^Requested /);
+    expect(requested).toHaveTextContent(/\b21\b/);
+    expect(requested).not.toHaveTextContent(/\b20\b/);
+  });
+});
+
 describe("SCRUM347 the Organiser's rejected event", () => {
   it("SCRUM347_AC5_shows_the_outcome_reason_coordinator_and_the_approval_before_it", async () => {
     vi.mocked(useAuth).mockReturnValue({ user: { id: ORGANISER, role: "event_organiser" } });

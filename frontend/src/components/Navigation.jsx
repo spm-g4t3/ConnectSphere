@@ -8,6 +8,8 @@ import { useUnreadCount } from "../notifications/UnreadCountContext";
 import { normaliseRole } from "../auth/normaliseRole";
 import { BROWSE_OPEN_EVENTS_PATH } from "../services/openEventRoutes";
 import { REGISTERED_EVENTS_PATH } from "../services/attendeeEventRoutes";
+import Button from "./ui/Button";
+import ErrorNotice from "./ui/ErrorNotice";
 
 const NAV_LINKS_BY_ROLE = {
   EVENT_ORGANISER: [
@@ -145,11 +147,11 @@ export default function Navigation() {
           </Link>
         )}
         <span>{user.name} ({user.role})</span>
-        <button onClick={handleLogout} disabled={loggingOut}>
+        <Button onClick={handleLogout} disabled={loggingOut}>
           {loggingOut ? "Logging out..." : "Log out"}
-        </button>
+        </Button>
       </div>
-      {logoutError && <p className="app-nav__error" role="alert">{logoutError}</p>}
+      {logoutError && <ErrorNotice message={logoutError} onRetry={handleLogout} />}
     </nav>
   );
 }

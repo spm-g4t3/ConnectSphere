@@ -261,6 +261,16 @@ const SCRUM478_FILES = [
   'src/components/EventRegistrationList.jsx',
 ]
 
+// SCRUM-584: the shared ui components, new files only this story owns.
+const SCRUM584_FILES = [
+  'src/components/ui/Button.jsx',
+  'src/components/ui/StatusBadge.jsx',
+  'src/components/ui/LoadingText.jsx',
+  'src/components/ui/EmptyState.jsx',
+  'src/components/ui/ErrorNotice.jsx',
+  'src/components/ui/ConfirmDialog.jsx',
+]
+
 // https://vite.dev/config/
 //
 // defineConfig comes from vitest/config rather than vite so the `test` block
@@ -317,6 +327,7 @@ export default defineConfig({
         ...SCRUM387_FILES.map((file) => [file, FULL]),
         ...SCRUM347_FILES.map((file) => [file, FULL]),
         ...SCRUM478_FILES.map((file) => [file, FULL]),
+        ...SCRUM584_FILES.map((file) => [file, FULL]),
       ]),
     },
   },

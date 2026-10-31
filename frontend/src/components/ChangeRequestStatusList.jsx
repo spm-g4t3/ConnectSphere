@@ -6,6 +6,7 @@
 import { getChangeRequests } from "../services/changeRequestService";
 import { useEffect, useState, useCallback } from "react";
 import { changeRequestOutcomeLabel } from "../services/changeRequestOutcome";
+import { formatDate } from "../services/displayFormat";
 
 const POLL_INTERVAL_MS = 15000;
 
@@ -98,7 +99,7 @@ export default function ChangeRequestStatusList({ eventRequestId }) {
               </p>
             )}
             <span className="change-request-status-list__date">
-              Requested {new Date(req.createdAt).toLocaleDateString()}
+              Requested {formatDate(req.createdAt)}
             </span>
           </li>
         );
