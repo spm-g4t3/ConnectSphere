@@ -943,14 +943,20 @@ describe('SCRUM-402: change requests (035, 036)', () => {
       }
     };
 
-    it('SCRUM402_AC2_the_gate_refuses_a_holder_whose_role_is_not_event_coordinator', async () => {
+    // Every user_role but the one each function accepts; the guard below keeps them complete.
+    const NOT_COORDINATOR = ['event_organiser', 'venue_staff', 'technical_support_staff', 'attendee',
+      'safety_officer', 'event_coordinator_lead', 'technical_support'];
+    const NOT_ORGANISER = ['event_coordinator', 'event_coordinator_lead', 'venue_staff',
+      'technical_support_staff', 'attendee', 'safety_officer', 'technical_support'];
+
+    it.each(NOT_COORDINATOR)('SCRUM402_AC2_the_gate_refuses_a_holder_whose_role_is_%s', async (role) => {
       // The holder, no longer an Event Coordinator: decline and the preview reach no other role check.
       const id = await approved();
       const cr = await groupId(id, [['purpose', 'Alumni networking']]);
       // Reaching Approved already notified people; the refusals must add nothing to that.
       const noticesBefore = await rows('select id from notifications where event_request_id = $1 order by id', [id]);
 
-      await withRole(coordinator, 'event_coordinator_lead', async () => {
+      await withRole(coordinator, role, async () => {
         await expectRefused(id, () => preview(cr), '42501');
         await expectRefused(id, () => accept(cr), '42501');
         await expectRefused(id, () => decline(cr, 'Not now'), '42501');
@@ -962,12 +968,32 @@ describe('SCRUM-402: change requests (035, 036)', () => {
       expect(await notices(id, 'change_request_decided')).toEqual([]);
     });
 
-    it('SCRUM402_AC1_create_refuses_an_owner_whose_role_is_not_event_organiser', async () => {
+    it.each(NOT_ORGANISER)('SCRUM402_AC1_create_refuses_an_owner_whose_role_is_%s', async (role) => {
       const id = await approved();
 
-      await withRole(organiser, 'attendee', async () => {
+      await withRole(organiser, role, async () => {
         await expectRefused(id, () => group(id, [['purpose', 'New']]), '42501');
       });
+
+      expect(await requests(id)).toEqual([]);
+    });
+
+    it('SCRUM402_AC1_the_role_lists_cover_every_other_user_role', async () => {
+      // A role added to user_role later must be added to a list, or this fails.
+      const all = (await rows('select unnest(enum_range(null::user_role))::text as role')).map((r) => r.role);
+
+      expect([...NOT_COORDINATOR].sort()).toEqual(all.filter((r) => r !== 'event_coordinator').sort());
+      expect([...NOT_ORGANISER].sort()).toEqual(all.filter((r) => r !== 'event_organiser').sort());
+    });
+
+    it('SCRUM402_AC1_create_refuses_a_null_caller_with_42501', async () => {
+      // The role check comes before the owner check, so no caller is 42501, not the owner's 22023.
+      const id = await approved();
+
+      await expectRefused(id, () => db.query(
+        'select * from create_change_request_group($1, $2, $3::jsonb, $4)',
+        [id, null, JSON.stringify([{ changeField: 'purpose', requestedChange: 'New' }]), null],
+      ), '42501');
 
       expect(await requests(id)).toEqual([]);
     });
