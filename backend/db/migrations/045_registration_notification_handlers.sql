@@ -1,33 +1,52 @@
--- Migration 041: who receives registration notices (SCRUM-177, SCRUM-238).
--- Every registration notice, promotion included, now finds its recipients in
--- registration_notification_recipients, from the event row and its
--- registrations; no caller ever supplies a user id. One person is told once
--- per notice whatever roles they hold, and the person who made a change can be
--- left out by id. The rules are in docs/SCRUM-177.md, section 5.
+-- Migration 045: when the registration notices of 044 are sent (SCRUM-177).
+-- Two handlers decide whether a registration change is a transition worth a
+-- notice, and send it through notify_registration_change. The opening/closing
+-- job and the registration flows will both call these; nothing does yet.
+--
+-- Each handler compares the event's state now with the state last announced,
+-- kept in registration_notice_state. Only a difference sends anything, so a
+-- refused operation (which rolls back or changes nothing), an unchanged save
+-- and a repeated call all send nothing. The rules are in docs/SCRUM-177.md.
 --
 -- Re-runnable.
 
--- The audience list gains registrant, and the signature gains the
--- registrations it names and the actor to leave out.
-drop function if exists registration_notification_recipients(uuid, text[]);
+-- What was last announced for each event. Kept off event_requests so that
+-- recording it fires none of that table's triggers. Built once: a re-run must
+-- not overwrite it, or a transition not yet announced would be lost.
+do $$
+begin
+  if to_regclass('public.registration_notice_state') is null then
+    create table registration_notice_state (
+      event_request_id uuid primary key references event_requests(id) on delete cascade,
+      open_announced boolean not null default false,
+      full_announced boolean not null default false
+    );
+    -- Today's state counts as announced, so going live sends no burst of
+    -- notices about events that opened or filled before this migration.
+    insert into registration_notice_state (event_request_id, open_announced, full_announced)
+    select e.id,
+           registration_closed_reason(e, now()) is null,
+           e.registration_capacity is not null and (
+             select count(*) from event_registrations r
+              where r.event_request_id = e.id and r.status = 'registered'
+           ) >= e.registration_capacity
+      from event_requests e;
+  end if;
+end;
+$$;
+alter table registration_notice_state enable row level security;
+revoke all on registration_notice_state from public, anon, authenticated;
 
--- Audiences:
+-- Recipient resolution (SCRUM-238 builds on this). Only the named audiences of
+-- this event: there is no broadcast and no fallback, and an audience it does
+-- not know is refused rather than ignored.
 --   organiser   the event's organiser
---   coordinator the event's assigned coordinator now
---   waitlisted  the event's attendees on its waiting list now
---   registrant  the attendee of each of p_registration_ids, whatever their
---               status now: the person a change was about, still told after
---               it moved them (a promotion takes them off the queue)
--- One row per person: someone in several audiences is told once, as the first
--- of organiser, coordinator, registrant, waitlisted. Nobody outside the event
--- is ever returned, and an unknown audience, or a registration that is not
--- this event's, is refused rather than skipped.
+--   coordinator the assigned coordinator, unless also the organiser
+--   waitlisted  attendees on the event's waiting list now
 
 create or replace function registration_notification_recipients(
   p_event_request_id uuid,
-  p_audiences text[],
-  p_registration_ids uuid[] default null,
-  p_exclude_recipient_id uuid default null
+  p_audiences text[]
 )
 returns table (recipient_id uuid, audience text)
 language plpgsql
@@ -37,11 +56,8 @@ declare
   v_event event_requests;
 begin
   if p_audiences is null
-     or not (p_audiences <@ array['organiser', 'coordinator', 'waitlisted', 'registrant']) then
+     or not (p_audiences <@ array['organiser', 'coordinator', 'waitlisted']) then
     raise exception 'Unknown registration notification audience in %', p_audiences using errcode = '22023';
-  end if;
-  if 'registrant' = any (p_audiences) and coalesce(cardinality(p_registration_ids), 0) = 0 then
-    raise exception 'The registrant audience needs the registrations it is about' using errcode = '22023';
   end if;
 
   select * into v_event from event_requests where id = p_event_request_id;
@@ -49,50 +65,32 @@ begin
     raise exception 'Event not found' using errcode = 'P0002';
   end if;
 
-  if 'registrant' = any (p_audiences) and exists (
-    select 1 from unnest(p_registration_ids) as wanted(id)
-     where not exists (select 1 from event_registrations r
-                        where r.id = wanted.id and r.event_request_id = p_event_request_id)
-  ) then
-    raise exception 'A registration is not one of this event''s' using errcode = '22023';
-  end if;
-
   return query
-    select distinct on (c.recipient_id) c.recipient_id, c.audience
-      from (
-        select v_event.organiser_id as recipient_id, 'organiser'::text as audience, 1 as rank
-         where 'organiser' = any (p_audiences)
-        union all
-        select v_event.assigned_coordinator_id, 'coordinator'::text, 2
-         where 'coordinator' = any (p_audiences)
-        union all
-        select r.attendee_id, 'registrant'::text, 3
-          from event_registrations r
-         where 'registrant' = any (p_audiences)
-           and r.event_request_id = p_event_request_id and r.id = any (p_registration_ids)
-        union all
-        select r.attendee_id, 'waitlisted'::text, 4
-          from event_registrations r
-         where 'waitlisted' = any (p_audiences)
-           and r.event_request_id = p_event_request_id and r.status = 'waitlisted'
-      ) c
-     where c.recipient_id is not null
-       and c.recipient_id is distinct from p_exclude_recipient_id
-     order by c.recipient_id, c.rank;
+    select v_event.organiser_id, 'organiser'::text
+     where 'organiser' = any (p_audiences) and v_event.organiser_id is not null
+    union all
+    select v_event.assigned_coordinator_id, 'coordinator'::text
+     where 'coordinator' = any (p_audiences)
+       and v_event.assigned_coordinator_id is not null
+       and v_event.assigned_coordinator_id is distinct from v_event.organiser_id
+    union all
+    select r.attendee_id, 'waitlisted'::text
+      from event_registrations r
+     where 'waitlisted' = any (p_audiences)
+       and r.event_request_id = p_event_request_id and r.status = 'waitlisted';
 end;
 $$;
-revoke execute on function registration_notification_recipients(uuid, text[], uuid[], uuid) from public, anon, authenticated;
+revoke execute on function registration_notification_recipients(uuid, text[]) from public, anon, authenticated;
 
--- 040's writer, now able to leave out the person who made the change.
-drop function if exists notify_registration_change(uuid, text, text[], text, jsonb);
+-- 044's writer, now resolving recipients above, and with settings_changed as a
+-- closing cause (an opening time moved later closes an open window).
 
 create or replace function notify_registration_change(
   p_event_request_id uuid,
   p_type text,
   p_audiences text[],
   p_occurrence_key text,
-  p_details jsonb default '{}',
-  p_exclude_recipient_id uuid default null
+  p_details jsonb default '{}'
 )
 returns integer
 language plpgsql
@@ -141,8 +139,7 @@ begin
              'eventRequestId', p_event_request_id,
              'eventName', v_event_name,
              'occurrenceKey', p_occurrence_key)
-      from registration_notification_recipients(
-             p_event_request_id, p_audiences, null, p_exclude_recipient_id) r
+      from registration_notification_recipients(p_event_request_id, p_audiences) r
     on conflict (recipient_id, event_request_id, type, (payload->>'occurrenceKey'))
       where type in ('registration_opened', 'registration_closed',
                      'registration_capacity_reached', 'registration_place_released')
@@ -154,11 +151,33 @@ begin
   return v_inserted;
 end;
 $$;
-revoke execute on function notify_registration_change(uuid, text, text[], text, jsonb, uuid) from public, anon, authenticated;
+revoke execute on function notify_registration_change(uuid, text, text[], text, jsonb) from public, anon, authenticated;
 
--- 040's handlers, unchanged except that a settings save leaves out the
--- Organiser as a person, so an Organiser who is also on the queue is not told
--- of their own change either.
+-- UTC text for keys and payload times, as 037 does, so neither depends on the
+-- session's TimeZone.
+create or replace function registration_notice_instant(p_at timestamptz)
+returns text
+language sql
+immutable
+as $$
+  select to_char(p_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"');
+$$;
+revoke execute on function registration_notice_instant(timestamptz) from public, anon, authenticated;
+
+-- Opening and closing. Open means registration_closed_reason finds nothing, the
+-- rule registering and promotion already use. p_cause names what the caller
+-- changed: settings_changed (the Organiser saved settings), event_confirmed
+-- (the event returned to Confirmed), or null when only time has passed.
+--
+-- Rules:
+-- - same as announced: nothing.
+-- - opened: staff and the waiting list, cause opening_time unless named.
+-- - closed: staff and the waiting list, cause from the closing reason.
+--   An event that started is not reopening, so its queue is not told it is
+--   paused. A cancelled event sends nothing; its cancellation is the notice.
+-- - settings_changed: the Organiser made the change, so is not told of it.
+-- Call it after any promotion, so a queued attendee who just got a place is
+-- told that, not that the queue moves. Returns how many notices were sent.
 
 create or replace function announce_registration_window(
   p_event_request_id uuid,
@@ -229,17 +248,34 @@ begin
         else v_now end));
   end if;
 
+  if p_cause = 'settings_changed' then
+    v_audiences := array_remove(v_audiences, 'organiser');
+  end if;
+
   return notify_registration_change(
     p_event_request_id,
     case when v_open then 'registration_opened' else 'registration_closed' end,
     v_audiences,
     case when v_open then 'opened:' else 'closed:' end || registration_notice_instant(v_now),
-    v_details,
-    -- Only the Organiser saves registration settings.
-    case when p_cause = 'settings_changed' then v_event.organiser_id end);
+    v_details);
 end;
 $$;
 revoke execute on function announce_registration_window(uuid, text) from public, anon, authenticated;
+
+-- Capacity. Full means a capacity is set and the registered count has reached
+-- it. p_cause names the change the caller made: registration, promotion,
+-- withdrawal or settings_changed.
+--
+-- Rules:
+-- - same as announced: nothing.
+-- - became full: staff are told (capacity_reached).
+-- - stopped being full through a withdrawal: staff are told a place is free
+--   (place_released). Call it after the withdrawal's promotion, so a place a
+--   queued attendee took is not reported as free.
+-- - stopped being full any other way (a raised or removed capacity): nothing;
+--   the Organiser made that change.
+-- - settings_changed: the Organiser is not told of their own change.
+-- Returns how many notices were sent.
 
 create or replace function announce_registration_capacity(
   p_event_request_id uuid,
@@ -254,7 +290,7 @@ declare
   v_registered bigint;
   v_full boolean;
   v_announced boolean;
-  v_actor uuid;
+  v_audiences text[] := array['organiser', 'coordinator'];
 begin
   if p_cause is null or p_cause not in ('registration', 'promotion', 'withdrawal', 'settings_changed') then
     raise exception 'Unknown registration capacity cause %', p_cause using errcode = '22023';
@@ -284,95 +320,20 @@ begin
     return 0;
   end if;
   if p_cause = 'settings_changed' then
-    v_actor := v_event.organiser_id;
+    v_audiences := array_remove(v_audiences, 'organiser');
   end if;
 
   if v_full then
     return notify_registration_change(
-      p_event_request_id, 'registration_capacity_reached', array['organiser', 'coordinator'],
+      p_event_request_id, 'registration_capacity_reached', v_audiences,
       'full:' || registration_notice_instant(v_now),
-      jsonb_build_object('capacity', v_event.registration_capacity, 'registeredCount', v_registered),
-      v_actor);
+      jsonb_build_object('capacity', v_event.registration_capacity, 'registeredCount', v_registered));
   end if;
   return notify_registration_change(
-    p_event_request_id, 'registration_place_released', array['organiser', 'coordinator'],
+    p_event_request_id, 'registration_place_released', v_audiences,
     'released:' || registration_notice_instant(v_now),
     jsonb_build_object('cause', 'withdrawal',
-                       'capacity', v_event.registration_capacity, 'registeredCount', v_registered),
-    v_actor);
+                       'capacity', v_event.registration_capacity, 'registeredCount', v_registered));
 end;
 $$;
 revoke execute on function announce_registration_capacity(uuid, text) from public, anon, authenticated;
-
--- 037's promotion, unchanged except that the notice goes to the registrant the
--- resolver finds for each promoted registration. That is the attendee who
--- queued: managers are not told of a promotion (no rule asks for it). The
--- resolver reads the statement's snapshot, where the row is still queued; the
--- registrant audience does not depend on status, so either way it is them.
-
-create or replace function promote_waitlisted_registrations(p_event_request_id uuid)
-returns integer
-language plpgsql
-as $$
-declare
-  v_event event_requests;
-  v_free bigint;
-  v_promoted integer;
-begin
-  select * into v_event
-    from event_requests
-   where id = p_event_request_id
-     for update;
-
-  if not found or registration_closed_reason(v_event, clock_timestamp()) is not null then
-    return 0;
-  end if;
-
-  -- Null capacity means no limit, and a null LIMIT promotes everyone waiting.
-  if v_event.registration_capacity is not null then
-    select v_event.registration_capacity - count(*)
-      into v_free
-      from event_registrations
-     where event_request_id = p_event_request_id and status = 'registered';
-    if v_free <= 0 then
-      return 0;
-    end if;
-  end if;
-
-  -- The notification is a row in the same transaction, so a rollback leaves
-  -- none. One queue entry is identified by its registration and waitlisted_at;
-  -- the unique index makes a second notice for the same promotion impossible.
-  with next_in_line as (
-    select id
-      from event_registrations
-     where event_request_id = p_event_request_id and status = 'waitlisted'
-     order by waitlisted_at, id
-     limit v_free
-       for update
-  ), promoted as (
-    update event_registrations r
-       set status = 'registered', registered_at = clock_timestamp()
-      from next_in_line n
-     where r.id = n.id and r.status = 'waitlisted'
-    returning r.id, r.waitlisted_at
-  ), notified as (
-    insert into notifications (recipient_id, type, event_request_id, payload)
-    select who.recipient_id, 'registration_promoted', p_event_request_id,
-           jsonb_build_object('eventRequestId', p_event_request_id,
-                              'eventName', v_event.event_name,
-                              'registrationId', p.id,
-                              -- UTC text, so the duplicate key does not depend on the session's TimeZone.
-                              'waitlistedAt', registration_notice_instant(p.waitlisted_at))
-      from promoted p
-     cross join lateral registration_notification_recipients(
-             p_event_request_id, array['registrant'], array[p.id]) who
-    on conflict ((payload->>'registrationId'), (payload->>'waitlistedAt'))
-      where type = 'registration_promoted'
-      do nothing
-  )
-  select count(*)::integer into v_promoted from promoted;
-
-  return v_promoted;
-end;
-$$;
-revoke execute on function promote_waitlisted_registrations(uuid) from public, anon, authenticated;

@@ -26,6 +26,7 @@ import {
   getMyEventRequests,
   getConfirmedArrangements,
 } from "../../src/services/eventRequestService";
+import { sgTime, sgMediumTime } from "../helpers/singaporeTime.js";
 
 vi.mock("../../src/auth/AuthContext", () => ({
   useAuth: vi.fn(),
@@ -99,6 +100,41 @@ describe("SCRUM363 confirmed arrangements on the organiser request screen", () =
     },
   );
 
+  it("SCRUM379_AC5_a_completed_event_offers_its_arrangements_and_the_status_Completed", async () => {
+    const completedDisplay = { status: "completed", label: "Completed", group: "COMPLETED", description: "The event has finished." };
+    vi.mocked(getConfirmedArrangements).mockResolvedValue({
+      eventRequestId: "22222222-2222-4222-8222-222222222222", status: "completed", statusDisplay: completedDisplay,
+      startsAt: "2026-11-01T16:00:00Z", endsAt: "2026-11-01T18:00:00Z",
+      venues: [{ bookingId: "b1", name: "Hall A", location: "Level 1" }],
+      equipment: [{ lineId: "l1", name: "Microphone", quantity: 2 }],
+    });
+    renderList([eventRequest({ status: "completed", statusDisplay: completedDisplay })]);
+    expect(await screen.findByText("The event has finished.")).toBeInTheDocument();
+    await userEvent.click(await screen.findByText("Confirmed arrangements"));
+    expect(await screen.findByText("Hall A — Level 1")).toBeInTheDocument();
+    expect(screen.getByText("Microphone: 2")).toBeInTheDocument();
+    expect(getConfirmedArrangements).toHaveBeenCalledWith("22222222-2222-4222-8222-222222222222");
+  });
+
+  it("SCRUM379_AC3_a_completed_event_offers_no_request_a_change_action", async () => {
+    const completedDisplay = { status: "completed", label: "Completed", group: "COMPLETED", description: "The event has finished." };
+    vi.mocked(getConfirmedArrangements).mockResolvedValue({ eventRequestId: "22222222-2222-4222-8222-222222222222", status: "completed", statusDisplay: completedDisplay, startsAt: null, endsAt: null, venues: [], equipment: [] });
+    renderList([eventRequest({ status: "completed", decision: "approved", statusDisplay: completedDisplay })]);
+
+    const item = (await screen.findByText("The event has finished.")).closest("li");
+    expect(within(item).queryByRole("button", { name: "Request a change" })).not.toBeInTheDocument();
+    expect(within(item).queryByRole("button", { name: "Continue editing" })).not.toBeInTheDocument();
+    expect(within(item).queryByRole("button", { name: "Revise and resubmit" })).not.toBeInTheDocument();
+    expect(within(item).queryByRole("button", { name: "Respond to clarification" })).not.toBeInTheDocument();
+  });
+
+  it.each(["confirmed", "approved"])("SCRUM379_AC3_a_%s_event_still_offers_request_a_change", async (status) => {
+    renderList([eventRequest({ status, decision: "approved", statusDisplay: { status, label: status, group: "APPROVED", description: `Event is ${status}.` } })]);
+
+    const item = (await screen.findByText(`Event is ${status}.`)).closest("li");
+    expect(within(item).getByRole("button", { name: "Request a change" })).toBeInTheDocument();
+  });
+
   it("SCRUM363_AC7_normal_request_navigation_hides_planning_arrangements_and_loads_the_reconfirmed_records", async () => {
     const record = eventRequest({ status: "confirmed", statusDisplay: { label: "Confirmed", group: "CONFIRMED", description: "Going ahead." } });
     let current = record;
@@ -138,6 +174,19 @@ describe("SCRUM363 confirmed arrangements on the organiser request screen", () =
 });
 
 describe("SCRUM19_AC10 the Organiser's view of a decision", () => {
+  it("SCRUM478_AC1_links_a_confirmed_event_to_its_registration_list", async () => {
+    renderList([eventRequest({ status: "confirmed" })]);
+    const record = (await screen.findByText("IS212 Industry Night")).closest("li");
+    expect(within(record).getByRole("link", { name: "View registrations" }))
+      .toHaveAttribute("href", `/events/${eventRequest().id}/registrations`);
+  });
+
+  it("SCRUM478_AC6_offers_no_registration_list_for_a_draft", async () => {
+    renderList([eventRequest({ status: "draft" })]);
+    const record = (await screen.findByText("IS212 Industry Night")).closest("li");
+    expect(within(record).queryByRole("link", { name: "View registrations" })).not.toBeInTheDocument();
+  });
+
   it("SCRUM494_AC6_links_an_event_to_its_registration_settings_page", async () => {
     renderList([eventRequest({ status: "approved" })]);
 
@@ -160,10 +209,7 @@ describe("SCRUM19_AC10 the Organiser's view of a decision", () => {
     const item = row.closest("li");
     expect(within(item).getByText("Event cancelled")).toBeInTheDocument();
     expect(within(item).getByText("Organiser withdrew")).toBeInTheDocument();
-    expect(within(item).getByText(
-      new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" })
-        .format(new Date("2026-06-01T09:00:00Z")),
-    )).toBeInTheDocument();
+    expect(within(item).getByText(sgMediumTime("2026-06-01T09:00:00Z"))).toBeInTheDocument();
     expect(within(item).queryByRole("button", { name: "Request a change" })).not.toBeInTheDocument();
   });
 
@@ -187,7 +233,7 @@ describe("SCRUM19_AC10 the Organiser's view of a decision", () => {
     // decidedBy; the event itself carries only the id.
     expect(await within(record).findByText("Priya Nair")).toBeInTheDocument();
     expect(getAssignmentHistory).toHaveBeenCalledWith("22222222-2222-4222-8222-222222222222");
-    expect(within(record).getByText(new Date("2026-01-15T09:00:00+08:00").toLocaleString())).toBeInTheDocument();
+    expect(within(record).getByText(sgTime("2026-01-15T09:00:00+08:00"))).toBeInTheDocument();
   });
 
   it("SCRUM19_AC10_an_approval_shows_its_note_and_who_decided", async () => {

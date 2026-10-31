@@ -5,6 +5,8 @@
 
 import { getChangeRequests } from "../services/changeRequestService";
 import { useEffect, useState, useCallback } from "react";
+import { changeRequestOutcomeLabel } from "../services/changeRequestOutcome";
+import { formatDate } from "../services/displayFormat";
 
 const POLL_INTERVAL_MS = 15000;
 
@@ -16,12 +18,15 @@ const STATUS_CONFIG = {
   processed: { label: "Processed", className: "status--processed" },
 };
 
-const DECISION_CONFIG = {
-  approved: { label: "Approved", className: "change-request-outcome--approved" },
-  rejected: { label: "Rejected", className: "change-request-outcome--rejected" },
+// The label comes from changeRequestOutcomeLabel, shared with the coordinator's panel; only the
+// look is chosen here. An outcome not listed is styled as a plain closure.
+const DECISION_CLASSES = {
+  approved: "change-request-outcome--approved",
+  rejected: "change-request-outcome--rejected",
   // Closed by the system when the whole event was, not decided on their own.
-  event_rejected: { label: "Closed, event rejected", className: "change-request-outcome--rejected" },
-  event_cancelled: { label: "Closed, event cancelled", className: "change-request-outcome--rejected" },
+  event_rejected: "change-request-outcome--rejected",
+  event_cancelled: "change-request-outcome--rejected",
+  event_completed: "change-request-outcome--closed",
 };
 
 function useChangeRequests(eventRequestId) {
@@ -72,7 +77,7 @@ export default function ChangeRequestStatusList({ eventRequestId }) {
           label: req.status,
           className: "status--unknown",
         };
-        const decision = DECISION_CONFIG[req.decision];
+        const decisionLabel = changeRequestOutcomeLabel(req.decision);
 
         return (
           <li key={req.id} className="change-request-status-list__item">
@@ -82,9 +87,9 @@ export default function ChangeRequestStatusList({ eventRequestId }) {
               <span className={`change-request-status-list__badge ${config.className}`}>
                 {config.label}
               </span>
-              {decision && (
-                <span className={`change-request-status-list__badge ${decision.className}`}>
-                  Outcome: {decision.label}
+              {decisionLabel && (
+                <span className={`change-request-status-list__badge ${DECISION_CLASSES[req.decision] ?? "change-request-outcome--closed"}`}>
+                  Outcome: {decisionLabel}
                 </span>
               )}
             </div>
@@ -94,7 +99,7 @@ export default function ChangeRequestStatusList({ eventRequestId }) {
               </p>
             )}
             <span className="change-request-status-list__date">
-              Requested {new Date(req.createdAt).toLocaleDateString()}
+              Requested {formatDate(req.createdAt)}
             </span>
           </li>
         );

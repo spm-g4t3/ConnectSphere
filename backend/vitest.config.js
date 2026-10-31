@@ -110,6 +110,9 @@ export default defineConfig({
         'src/routes/flaggedBookings.js': FULL,
         'src/services/flaggedBookingService.js': FULL,
         'src/validation/flaggedBookingValidation.js': FULL,
+        // SCRUM-478: the registration list service and its labels are new and owned outright.
+        'src/services/registrationListService.js': FULL,
+        'src/domain/registrationEntryStatus.js': FULL,
       },
     },
   },

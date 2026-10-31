@@ -3,7 +3,7 @@
  *
  * SCRUM-177 (AC1), SCRUM-237. Registration opens and closes when a time
  * passes, with no write to notice it. process_registration_window_notices()
- * (042) announces every event whose window is not what was last announced,
+ * (047) announces every event whose window is not what was last announced,
  * through the same handler the registration flows use, so a change already
  * announced by a flow is never announced again here.
  *

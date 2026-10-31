@@ -2,17 +2,16 @@
 //
 // SCRUM-492: what Venue Staff read when a coordinator releases a venue (AC6),
 // and what a coordinator reads when the release frees their request (AC4).
-// The payloads are 089's. Times are built with the module's own formatRange,
-// so the suite passes in any zone and locale.
+// The payloads are 089's. The display format is fixed Singapore text, so the
+// expected times are literals and the suite passes in any zone and locale.
 
 import { describe, it, expect } from "vitest";
 
 import { describeNotification } from "../../src/services/notificationDisplay.js";
-import { formatRange } from "../../src/services/displayFormat.js";
 
 const STARTS = "2026-11-11T13:00:00+08:00";
 const ENDS = "2026-11-11T14:00:00+08:00";
-const RANGE = formatRange(STARTS, ENDS);
+const RANGE = "11 Nov 2026, 1:00 pm – 2:00 pm";
 
 const released = (payload) => ({ id: "n1", type: "booking_released", payload });
 const cleared = (payload) => ({ id: "n2", type: "booking_request_conflict_cleared", payload });
@@ -43,12 +42,12 @@ describe("SCRUM492_AC4 describeNotification: booking_request_conflict_cleared", 
       eventName: "Tech Talk", venueName: "Hall A", startsAt: STARTS, endsAt: ENDS, releasedEventName: "Gala Dinner",
     }))).toEqual({
       headline: "Your request for Hall A for Tech Talk no longer clashes",
-      detail: `Gala Dinner released the venue, so your request for ${RANGE} is pending again and waits for Venue Staff.`,
+      detail: `Gala Dinner no longer holds the venue, so your request for ${RANGE} is pending again and waits for Venue Staff.`,
     });
   });
 
   it("SCRUM492_AC4_with_no_released_event_name_it_says_another_event_instead", () => {
     expect(describeNotification(cleared({ eventName: "Tech Talk", venueName: "Hall A" })).detail)
-      .toMatch(/^Another event released the venue/);
+      .toMatch(/^Another event no longer holds the venue/);
   });
 });

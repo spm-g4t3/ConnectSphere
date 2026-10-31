@@ -2,7 +2,7 @@
  * Tests for the registration opening and closing job.
  *
  * SCRUM-177 (AC1), SCRUM-237. The job calls process_registration_window_notices()
- * (042) once on start and then every interval. What that function announces,
+ * (047) once on start and then every interval. What that function announces,
  * and when, is proved against Postgres in
  * tests/db/scrum237RegistrationWindowJobDatabase.test.js. These tests prove the
  * timer and the logging, with fake timers, a fake client and a fake logger.

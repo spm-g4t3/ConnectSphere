@@ -8,7 +8,7 @@ vi.mock("../../src/services/apiClient", () => ({
 }));
 
 import { apiClient } from "../../src/services/apiClient";
-import { getEquipmentQueue } from "../../src/services/equipmentQueueService";
+import { getEquipmentQueue, getReviewedByMe } from "../../src/services/equipmentQueueService";
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -48,5 +48,14 @@ describe("equipmentQueueService", () => {
     const failure = { response: { status: 403 } };
     apiClient.get.mockRejectedValue(failure);
     await expect(getEquipmentQueue()).rejects.toBe(failure);
+  });
+});
+
+describe("getReviewedByMe", () => {
+  it("SCRUM582_AC1_asks_for_the_callers_own_list_with_no_filters_and_returns_the_body", async () => {
+    apiClient.get.mockResolvedValue({ data: { requests: [], total: 0, truncated: false } });
+
+    await expect(getReviewedByMe()).resolves.toEqual({ requests: [], total: 0, truncated: false });
+    expect(apiClient.get).toHaveBeenCalledWith("/equipment-requests/reviewed-by-me");
   });
 });

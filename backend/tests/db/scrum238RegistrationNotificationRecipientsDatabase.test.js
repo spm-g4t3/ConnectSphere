@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
 
-// Who receives registration notices (041): registration_notification_recipients
+// Who receives registration notices (046): registration_notification_recipients
 // and the handlers and promotion that use it. Recipients come from the event row
 // and its registrations only, and each person is told once.
 const ORGANISER = '11111111-1111-4111-8111-111111111111';

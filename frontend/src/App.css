@@ -1,11 +1,13 @@
+/* Old names, aliased to the tokens in index.css so existing per-screen rules
+   keep working until each screen moves to the new names. */
 :root {
-  --ink: #17242b;
-  --muted: #64757a;
-  --line: #d9e4e0;
-  --paper: #ffffff;
-  --teal: #087f7b;
-  --teal-dark: #075c5a;
-  --shadow: 0 18px 48px rgba(24, 61, 58, 0.09);
+  --ink: var(--color-ink);
+  --muted: var(--color-muted);
+  --line: var(--color-line);
+  --paper: var(--color-paper);
+  --teal: var(--color-accent);
+  --teal-dark: var(--color-accent-dark);
+  --shadow: var(--shadow-card);
 }
 
 * { box-sizing: border-box; }
@@ -32,7 +34,7 @@ button { cursor: pointer; }
    one: cursor: wait is right for a login in flight, but a permanently
    disabled Edit is not-allowed, not a wait. */
 .dashboard button:disabled { cursor: not-allowed; opacity: 0.65; }
-.app-nav__error, .venue-search__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 0; padding: 8px 12px; }
+.venue-search__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 0; padding: 8px 12px; }
 .auth-success { animation: auth-success-fade 3.5s ease-in-out forwards; background: #e8f7f1; border: 1px solid #b9e2d1; border-radius: 6px; color: #17684f; margin: 18px auto 0; max-width: 1080px; padding: 10px 14px; }
 @keyframes auth-success-fade {
   0%, 100% { opacity: 0; transform: translateY(-6px); }
@@ -45,7 +47,6 @@ button { cursor: pointer; }
 .login-form input { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); padding: 12px; }
 .login-form input:focus { border-color: var(--teal); outline: 2px solid rgba(8, 127, 123, 0.16); }
 .login-form button { width: 100%; }
-.login-form__error { background: #fff0ee; border-radius: 6px; color: #a43c32; padding: 10px 12px; }
 .eyebrow { color: var(--teal); font-size: 0.75rem; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; }
 .placeholder-page p, .loading-screen { color: var(--muted); }
 .loading-screen { align-items: center; display: grid; min-height: 100svh; place-items: center; }
@@ -206,8 +207,8 @@ button { cursor: pointer; }
 .dashboard--venue-staff .status--retired { background: #eef2f1; color: var(--muted); }
 /* The rule above makes every .dashboard p muted grey, which would render a
    failed retire in exactly the same voice as the empty-state text. Same
-   colour pair as .app-nav__error. */
-.dashboard .venue-catalogue__error, .dashboard .venue-form__error, .dashboard .venue-detail__error, .dashboard .review-queue__error, .dashboard .unassigned-queue__error, .dashboard .venue-block-form__error, .dashboard .notification-inbox__error, .dashboard .notification-inbox__row-error, .dashboard .venue-blocks__error, .dashboard .venue-hold-form__error, .dashboard .venue-holds__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 6px 0 0; padding: 8px 12px; }
+   colour pair as .venue-search__error. */
+.dashboard .venue-catalogue__error, .dashboard .venue-form__error, .dashboard .venue-detail__error, .dashboard .review-queue__error, .dashboard .unassigned-queue__error, .dashboard .venue-block-form__error, .dashboard .notification-inbox__row-error, .dashboard .venue-blocks__error, .dashboard .venue-hold-form__error, .dashboard .venue-holds__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 6px 0 0; padding: 8px 12px; }
 /* NECESSARY, not cosmetic. .dashboard li above forces flex with
    justify-content: space-between, which on a checkbox row throws the box to
    one edge of the card and its label to the other with the whole width
@@ -434,6 +435,7 @@ button { cursor: pointer; }
 .dashboard .browse-event-details h3 { color: var(--teal-dark); font-size: 1rem; margin: 0 0 8px; }
 .browse-event-details__description { color: var(--ink) !important; overflow-wrap: anywhere; white-space: pre-wrap; }
 .attendee-event-information__location { white-space: pre-wrap; }
+.attendee-event-information__message { white-space: pre-wrap; }
 .browse-event-details__register { align-items: center; display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 18px 0; }
 .browse-event-details__register p { margin: 0; }
 .browse-event-details button:disabled { cursor: not-allowed; opacity: 0.55; }
@@ -506,6 +508,36 @@ button { cursor: pointer; }
 .coordinator-clarification__fields label { align-items: center; display: flex; gap: 8px; }
 .dashboard--coordinator .coordinator-request-detail__cancel { background: #a43c32; margin: 0 0 8px; }
 .dashboard--coordinator .coordinator-request-detail__cancel:hover { background: #842e27; }
+.dashboard--coordinator .coordinator-request-detail__complete { margin: 0 0 8px; }
+.coordinator-request-detail__complete-hint { color: var(--muted); font-size: 0.88rem; margin: 0 0 8px; }
+.coordinator-request-detail__completed-notice { color: #17684f; font-weight: 700; margin: 0 0 8px; }
+.coordinator-request-detail__closing-notes p { margin: 0 0 6px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.coordinator-request-detail__closing-notes .coordinator-request-detail__closing-notes-audience { color: var(--muted); font-size: 0.84rem; white-space: normal; }
+/* SCRUM-384: Needs attention, beside My events. Rows inherit `.dashboard li`, as My events' do. */
+.coordinator-attention__count { color: var(--muted); font-weight: 400; }
+.coordinator-attention__summary { display: grid; gap: 4px; min-width: 0; }
+.coordinator-attention__summary a { color: var(--ink); font-weight: 700; text-decoration: none; }
+.coordinator-attention__summary a:hover { color: var(--teal-dark); text-decoration: underline; }
+.coordinator-attention__reason { background: #fff6e5; border-radius: 6px; color: #8a5a00; font-size: 0.84rem; justify-self: start; padding: 3px 9px; }
+.coordinator-attention__meta { color: var(--muted); display: flex; flex-wrap: wrap; font-size: 0.85rem; gap: 4px 16px; }
+/* SCRUM-384: the Mark as completed panel, laid out as the cancellation panel is. */
+.event-completion-page { display: grid; gap: 18px; }
+.event-completion-page > h1 { color: var(--ink); font-size: clamp(1.8rem, 4vw, 2.7rem); letter-spacing: -0.04em; margin: 0; overflow-wrap: anywhere; }
+.event-completion-page__back { background: transparent !important; color: var(--teal-dark) !important; justify-self: start; padding: 6px 0 !important; text-decoration: underline; }
+.event-completion-page__intro { margin: 0; }
+.event-completion { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); display: grid; gap: 18px; padding: clamp(20px, 4vw, 32px); }
+.event-completion form { display: grid; gap: 12px; }
+.event-completion form > label { color: var(--muted); display: grid; gap: 7px; }
+.event-completion textarea { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; min-height: 110px; padding: 10px 12px; resize: vertical; }
+.event-completion textarea:focus { border-color: var(--teal); outline: 2px solid rgba(8, 127, 123, 0.16); }
+.event-completion__help { color: var(--muted); font-size: 0.86rem; margin: 0; }
+.event-completion__confirmation { display: grid; gap: 12px; }
+.event-completion__confirmation h2 { color: var(--teal-dark); margin: 0; }
+.event-completion__confirmation dl { margin: 0; }
+.event-completion__confirmation dt { color: var(--muted); font-size: 0.8rem; font-weight: 700; margin-bottom: 4px; }
+.event-completion__notes-preview { background: #f7faf9; border-left: 3px solid var(--teal); margin: 0; overflow-wrap: anywhere; padding: 10px 12px; white-space: pre-wrap; }
+.event-completion__actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.event-completion__secondary { background: transparent !important; color: var(--teal-dark) !important; text-decoration: underline; }
 /* SCRUM-489: the safety check submission panel. A table, not a list, so
    .dashboard li's spread-out flex row never reaches it. The badge's word carries
    the meaning; the colours are the approved and action-required pairs above. */
@@ -876,6 +908,7 @@ button.event-registration-page__back { background: none; border: 0; cursor: poin
 .status--unknown { background: #eef2f1; color: var(--muted); }
 .change-request-outcome--approved { background: #e8f7f1; color: #17684f; }
 .change-request-outcome--rejected { background: #fff0ee; color: #a43c32; }
+.change-request-outcome--closed { background: #eef2f1; color: var(--muted); }
 .change-request-status-list__decision-notes { background: #f3f6f4; color: var(--ink); margin: 0; padding: 9px 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .change-request-status-list__date { color: var(--muted); font-size: 0.82rem; }
 /* SCRUM-180: the venue calendar. Unscoped, unlike the dashboard panels above,
@@ -1105,3 +1138,10 @@ button.event-registration-page__back { background: none; border: 0; cursor: poin
 /* SCRUM-315: why an event needs attention, under the event. */
 .needs-attention-reasons { background: #fdecea; border-left: 6px solid #c0362c; border-radius: 8px; list-style: none; margin: 8px 0; padding: 8px 12px; }
 .needs-attention-reasons li { overflow-wrap: anywhere; }
+
+/* SCRUM-478 registration list */
+.registration-list__count { color: var(--ink); font-size: 1.6rem; font-weight: 700; margin: 8px 0 0; }
+.registration-list__filter { margin: 20px 0; }
+.registration-list__table { border-collapse: collapse; width: 100%; }
+.registration-list__table th, .registration-list__table td { border-bottom: 1px solid var(--line); overflow-wrap: anywhere; padding: 10px 8px; text-align: left; }
+.registration-list__table th { color: var(--muted); font-size: 0.8rem; }

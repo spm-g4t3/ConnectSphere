@@ -1,4 +1,4 @@
--- Migration 042: the registration opening/closing job (SCRUM-177, SCRUM-237).
+-- Migration 047: the registration opening/closing job (SCRUM-177, SCRUM-237).
 -- Registration opens and closes when a time passes, with no write to notice it.
 -- process_registration_window_notices, called once a minute by the API's job
 -- (backend/src/jobs/registrationWindowScheduler.js), finds every event whose
@@ -21,7 +21,7 @@
 alter table registration_notice_state
   add column if not exists window_generation integer not null default 0;
 
--- 041's handler, with keys opened:<n> and closed:<n> from window_generation
+-- 046's handler, with keys opened:<n> and closed:<n> from window_generation
 -- instead of the clock.
 
 create or replace function announce_registration_window(

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from
 import { createSchemaDb, seedEvent, rerunMigrationsFrom } from './helpers/schemaDb.js';
 import { withSafetyReviewTransitionGuardDisabled } from '../fixtures/safetyReviewTestHelpers.js';
 
-// The transition rules (040): announce_registration_window and
+// The transition rules (045): announce_registration_window and
 // announce_registration_capacity, and the recipient resolution under them.
 // Times are relative to the real clock: a handler reads clock_timestamp().
 const ORGANISER = '11111111-1111-4111-8111-111111111111';
@@ -169,7 +169,7 @@ describe('announce_registration_window: closing', () => {
   });
 
   it('SCRUM177_AC1_leaving_confirmed_closes_with_event_not_confirmed', async () => {
-    // Since 043 the status change announces it itself, so the handler then finds it settled.
+    // Since 048 the status change announces it itself, so the handler then finds it settled.
     await withSafetyReviewTransitionGuardDisabled(db, () => setEvent({ status: 'approved' }));
 
     expect(await notices('registration_closed')).toHaveLength(3);
@@ -320,10 +320,10 @@ describe('registration_notification_recipients (the SCRUM-238 interface)', () =>
   });
 });
 
-describe('migration 040', () => {
+describe('migration 045', () => {
   it('SCRUM177_AC1_a_rerun_keeps_what_was_already_announced', async () => {
     await window_();
-    await rerunMigrationsFrom(db, '040_registration_notification_handlers.sql');
+    await rerunMigrationsFrom(db, '045_registration_notification_handlers.sql');
 
     expect(await window_()).toBe(0);
   });

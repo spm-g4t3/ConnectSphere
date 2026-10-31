@@ -1,6 +1,6 @@
 /**
  * Registration notification vocabulary (SCRUM-177): the types, audiences and
- * causes notify_registration_change accepts (migration 039). A test asserts
+ * causes notify_registration_change accepts (migration 044). A test asserts
  * the types are in notifications_type_known and the writer agrees on the rest.
  *
  * registration_promoted (037) is the waiting-list status change and keeps its
@@ -42,7 +42,7 @@ export const CAUSES_BY_TYPE = Object.freeze({
   [T.PLACE_RELEASED]: Object.freeze(['withdrawal']),
 });
 
-// What a caller of the handlers (040) says it changed. Null for the window
+// What a caller of the handlers (045) says it changed. Null for the window
 // means only time passed, which is how the opening/closing job calls it.
 export const WINDOW_CHANGE_CAUSES = Object.freeze(['settings_changed', 'event_confirmed']);
 export const CAPACITY_CHANGE_CAUSES = Object.freeze(['registration', 'promotion', 'withdrawal', 'settings_changed']);

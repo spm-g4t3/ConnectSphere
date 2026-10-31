@@ -9,7 +9,7 @@ import {
   CAUSES_BY_TYPE,
 } from '../../src/domain/registrationNotification.js';
 
-// The registration notification contract (039): the types, the row-level
+// The registration notification contract (044): the types, the row-level
 // shape check and notify_registration_change, which no flow calls yet.
 const MIGRATIONS = join(import.meta.dirname, '../../db/migrations');
 const ORGANISER = '11111111-1111-4111-8111-111111111111';
@@ -78,14 +78,24 @@ afterAll(async () => { await db.close(); });
 beforeEach(async () => { await db.exec('begin'); });
 afterEach(async () => { await db.exec('rollback'); });
 
-describe('notification types (039)', () => {
-  it('SCRUM177_AC5_keeps_every_type_037_allowed_and_adds_the_four_registration_types', async () => {
-    const before = [...readFileSync(join(MIGRATIONS, '037_event_waiting_list.sql'), 'utf8')
+describe('notification types (044)', () => {
+  it('SCRUM177_AC5_keeps_every_type_already_allowed_and_adds_the_four_registration_types', async () => {
+    // 037's fixed list, widened by 042 (SCRUM-175); 044 widens it again.
+    const fixed = [...readFileSync(join(MIGRATIONS, '037_event_waiting_list.sql'), 'utf8')
       .split('add constraint notifications_type_known')[1]
       .split(']')[0]
       .matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
-    expect(before).toHaveLength(43);
-    expect(await checkListValues(db, 'notifications_type_known')).toEqual([...before, ...NEW_TYPES]);
+    expect(fixed).toHaveLength(43);
+    expect(await checkListValues(db, 'notifications_type_known'))
+      .toEqual([...fixed, 'event_confirmed', 'event_venue_changed', ...NEW_TYPES]);
+  });
+
+  it('SCRUM177_AC5_rerunning_the_migrations_adds_no_type_twice', async () => {
+    await rerunMigrationsFrom(db, '044_registration_notification_contract.sql');
+
+    const known = await checkListValues(db, 'notifications_type_known');
+    expect(new Set(known).size).toBe(known.length);
+    expect(known.slice(-4)).toEqual(NEW_TYPES);
   });
 
   it('SCRUM177_AC5_the_domain_types_are_all_known_to_the_database', async () => {
@@ -104,7 +114,7 @@ describe('notification types (039)', () => {
     const count = async () => Number((await db.query('select count(*) as n from notifications')).rows[0].n);
     const before = await count();
 
-    await rerunMigrationsFrom(db, '039_registration_notification_contract.sql');
+    await rerunMigrationsFrom(db, '044_registration_notification_contract.sql');
 
     expect(await count()).toBe(before);
   });

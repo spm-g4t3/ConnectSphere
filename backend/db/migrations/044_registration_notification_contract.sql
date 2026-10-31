@@ -1,4 +1,4 @@
--- Migration 039: the registration notification contract (SCRUM-177).
+-- Migration 044: the registration notification contract (SCRUM-177).
 -- Four new types, and the one writer every registration flow will call. Nothing
 -- calls it yet; the flows and the opening/closing job are wired separately.
 -- The matrix of transitions, recipients and destinations is docs/SCRUM-177.md.
@@ -20,58 +20,38 @@
 --
 -- Re-runnable.
 
--- The whole list, restated from 037_event_waiting_list.sql with the new types.
-alter table notifications drop constraint if exists notifications_type_known;
-alter table notifications
-  add constraint notifications_type_known check (type = any (array[
-    'booking_flagged',
-    'booking_request_withdrawn',
-    'clarification_requested',
-    'clarification_replied',
-    'clarification_closed',
-    'booking_flagged_setup_change',
-    'venue_hold_expired',
-    'event_cancelled',
-    'event_details_changed',
-    'event_rejected',
-    'event_request_awaiting_assignment',
-    'event_request_assigned',
-    'event_request_coordinator_assigned',
-    'safety_review_response',
-    'safety_booking_flagged',
-    'safety_equipment_review',
-    'event_submitted_for_safety_review',
-    'booking_request_approved',
-    'booking_request_rejected',
-    'booking_request_conflicting',
-    'flagged_booking_resolved',
-    'booking_request_submitted',
-    'booking_request_venue_unavailable',
-    'booking_flagged_venue_retired',
-    'booking_released',
-    'booking_request_conflict_cleared',
-    'equipment_requested',
-    'equipment_request_changed',
-    'equipment_request_cancelled',
-    'equipment_arranged',
-    'equipment_not_fully_arranged',
-    'equipment_flagged',
-    'registration_schedule_conflict',
-    'event_significant_change',
-    'event_significant_change_attendee',
-    'booking_flagged_event_change',
-    'booking_request_event_change',
-    'booking_flagged_hours_change',
-    'event_request_approved',
-    'event_request_rejected',
-    'venue_hold_placed',
-    'venue_hold_expiring',
-    'registration_promoted',
-    'registration_opened',
-    'registration_closed',
-    'registration_capacity_reached',
-    'registration_place_released'
-  ]));
+-- Several branches add types, so the live list is read back and widened by
+-- what it lacks (042's idiom); restating a fixed list would drop the others'.
+do $notify$
+declare
+  v_def text;
+  v_types text[];
+  v_missing text[];
+  v_check text;
+begin
+  select pg_get_constraintdef(oid) into v_def
+    from pg_constraint
+   where conname = 'notifications_type_known'
+     and conrelid = 'notifications'::regclass;
+  if v_def is null then
+    raise exception 'notifications_type_known is missing; restore it before 044';
+  end if;
+
+  v_types := array(select m[1] from regexp_matches(v_def, '''([a-z_]+)''', 'g') as m);
+  v_missing := array(
+    select t from unnest(array['registration_opened', 'registration_closed', 'registration_capacity_reached', 'registration_place_released']) as t
+     where not (t = any (v_types))
+  );
+  if cardinality(v_missing) > 0 then
+    v_check := format(
+      'check (type = any (array[%s]))',
+      (select string_agg(quote_literal(t), ', ') from unnest(v_types || v_missing) as t)
+    );
+    alter table notifications drop constraint notifications_type_known;
+    execute 'alter table notifications add constraint notifications_type_known ' || v_check;
+  end if;
+end;
+$notify$;
 
 -- Enforced on the row as well as in the writer, so a later direct insert cannot
 -- send a staff-only notice to an attendee or lose its event.

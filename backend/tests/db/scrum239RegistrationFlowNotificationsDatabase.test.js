@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from
 import { createSchemaDb, seedEvent, functionSources } from './helpers/schemaDb.js';
 import { withSafetyReviewTransitionGuardDisabled } from '../fixtures/safetyReviewTestHelpers.js';
 
-// The registration flows sending their notices (043), driven through the real
+// The registration flows sending their notices (048), driven through the real
 // functions the API calls, on an injected clock (test.now). PGlite has one
 // connection, so concurrent releases are run back to back here and the lock
 // order that makes them safe is checked from the sources; the two-session

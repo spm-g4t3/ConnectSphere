@@ -1,5 +1,5 @@
--- Migration 043: the registration flows send their notices (SCRUM-177, SCRUM-239).
--- The 037 flows, restated with calls to the shared handlers (040-042) after
+-- Migration 048: the registration flows send their notices (SCRUM-177, SCRUM-239).
+-- The 037 flows, restated with calls to the shared handlers (045-047) after
 -- their own writes. Nothing else in them changes: the same eligibility, the
 -- same event lock taken first, the same single promotion operation. Each
 -- handler runs in the flow's transaction under the lock it already holds, so

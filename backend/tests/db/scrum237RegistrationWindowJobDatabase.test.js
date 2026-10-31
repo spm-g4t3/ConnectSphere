@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from
 import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
 import { withSafetyReviewTransitionGuardDisabled } from '../fixtures/safetyReviewTestHelpers.js';
 
-// The opening/closing job (042), process_registration_window_notices, on an
+// The opening/closing job (047), process_registration_window_notices, on an
 // injected clock: clock_timestamp() reads test.now, as in the promotion tests.
 const ORGANISER = '11111111-1111-4111-8111-111111111111';
 const COORDINATOR = '22222222-2222-4222-8222-222222222222';
@@ -218,7 +218,7 @@ describe('ineligible events', () => {
     await run();
     await withSafetyReviewTransitionGuardDisabled(db, () => setEvent({ status: 'cancelled' }));
 
-    // Since 043 the cancellation itself settles it, so the job finds nothing due.
+    // Since 048 the cancellation itself settles it, so the job finds nothing due.
     await at(LATER(OPENS, 1));
     expect(await run()).toEqual({ notified: 0, events: 0, failures: [] });
     expect(await notices('registration_closed')).toEqual([]);
