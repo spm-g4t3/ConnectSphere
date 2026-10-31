@@ -173,6 +173,19 @@ describe("SCRUM363 confirmed arrangements on the organiser request screen", () =
 });
 
 describe("SCRUM19_AC10 the Organiser's view of a decision", () => {
+  it("SCRUM478_AC1_links_a_confirmed_event_to_its_registration_list", async () => {
+    renderList([eventRequest({ status: "confirmed" })]);
+    const record = (await screen.findByText("IS212 Industry Night")).closest("li");
+    expect(within(record).getByRole("link", { name: "View registrations" }))
+      .toHaveAttribute("href", `/events/${eventRequest().id}/registrations`);
+  });
+
+  it("SCRUM478_AC6_offers_no_registration_list_for_a_draft", async () => {
+    renderList([eventRequest({ status: "draft" })]);
+    const record = (await screen.findByText("IS212 Industry Night")).closest("li");
+    expect(within(record).queryByRole("link", { name: "View registrations" })).not.toBeInTheDocument();
+  });
+
   it("SCRUM494_AC6_links_an_event_to_its_registration_settings_page", async () => {
     renderList([eventRequest({ status: "approved" })]);
 

@@ -12,7 +12,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { getMyEventRequests, reopenEventRequest } from "../services/eventRequestService";
-import { isRegistrationConfigurable } from "../services/registrationStatuses";
+import { isRegistrationConfigurable, mayHaveRegistrationList } from "../services/registrationStatuses";
 import {
   readStatusDisplay,
   statusClassName,
@@ -457,6 +457,14 @@ export default function MyEventRequests() {
                     to={`/events/${req.id}/registration`}
                   >
                     Registration settings
+                  </Link>
+                )}
+                {mayHaveRegistrationList(req.status) && (
+                  <Link
+                    className="my-event-requests__registration-link"
+                    to={`/events/${req.id}/registrations`}
+                  >
+                    View registrations
                   </Link>
                 )}
                 {req.status === "draft" && (
