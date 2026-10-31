@@ -34,6 +34,21 @@ function checkReadError(error) {
   throw error;
 }
 
+/**
+ * The message the coordinator chose to give attendees when cancelling, or null.
+ * A second read is safe: Cancelled is final, and the message is written once with
+ * the cancellation, so it cannot change between the two reads.
+ */
+async function readCancellationMessage(db, eventId) {
+  const { data, error } = await db.from('event_requests')
+    .select('attendee_message')
+    .eq('id', eventId)
+    .maybeSingle();
+  checkReadError(error);
+  const message = typeof data?.attendee_message === 'string' ? data.attendee_message.trim() : '';
+  return message === '' ? null : message;
+}
+
 /** user is supplied by requireAuth, never by request parameters or the body. */
 export async function getAttendeeEvent({ user, eventRequestId, client } = {}) {
   const attendeeId = attendeeIdentity(user);
@@ -60,6 +75,17 @@ export async function getAttendeeEvent({ user, eventRequestId, client } = {}) {
   const event = data.event_requests;
   // The name is already on the attendee's registered-events list in every state.
   const eventName = event.event_name ?? null;
+  // SCRUM-434 AC5: a cancelled event shows the coordinator's optional message and
+  // nothing else. The internal reason is never selected here.
+  if (event.status === STATUS.CANCELLED) {
+    return {
+      eventRequestId: data.event_request_id,
+      registrationId: data.id,
+      state: 'cancelled',
+      eventName,
+      message: await readCancellationMessage(db, eventId),
+    };
+  }
   if (event.status !== STATUS.CONFIRMED) {
     return { eventRequestId: data.event_request_id, registrationId: data.id, state: 'unavailable', eventName };
   }

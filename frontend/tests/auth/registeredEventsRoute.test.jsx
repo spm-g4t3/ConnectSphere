@@ -44,7 +44,7 @@ describe("SCRUM-51 mocked API response sequences (not lifecycle RPC integration)
   }
 
   it("SCRUM24_AC2_AC3_unavailable_contract_does_not_describe_cancelled_events_as_awaiting_confirmation", async () => {
-    // Approved and Cancelled share this privacy-preserving response. No raw status is supplied to the UI.
+    // Approved and the other unconfirmed statuses share this privacy-preserving response. Cancelled has its own state since SCRUM-434. No raw status is supplied to the UI.
     vi.mocked(getAttendeeEvent).mockResolvedValue(unavailable);
     renderAt("/registered-events/e1");
     const message = await screen.findByText("Event details are not currently confirmed.");

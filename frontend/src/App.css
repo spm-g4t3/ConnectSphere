@@ -435,6 +435,7 @@ button { cursor: pointer; }
 .dashboard .browse-event-details h3 { color: var(--teal-dark); font-size: 1rem; margin: 0 0 8px; }
 .browse-event-details__description { color: var(--ink) !important; overflow-wrap: anywhere; white-space: pre-wrap; }
 .attendee-event-information__location { white-space: pre-wrap; }
+.attendee-event-information__message { white-space: pre-wrap; }
 .browse-event-details__register { align-items: center; display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 18px 0; }
 .browse-event-details__register p { margin: 0; }
 .browse-event-details button:disabled { cursor: not-allowed; opacity: 0.55; }
