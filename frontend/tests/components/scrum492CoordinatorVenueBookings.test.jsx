@@ -120,7 +120,8 @@ describe("SCRUM492_AC1 who is offered Release", () => {
     signIn(ASSIGNED, "event_coordinator");
     renderPage(eventRequest());
 
-    expect(await screen.findByRole("heading", { name: "Venue bookings" })).toBeInTheDocument();
+    // The file's first render is the slow one; under the full parallel run it can outlast findBy's 1s default.
+    expect(await screen.findByRole("heading", { name: "Venue bookings" }, { timeout: 5000 })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Release this venue" })).toBeEnabled();
   });
 

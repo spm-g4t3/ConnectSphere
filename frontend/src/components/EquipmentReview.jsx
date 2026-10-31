@@ -217,6 +217,38 @@ function nextStep({ status, isReviewer, reviewerName, flaggedTotal, unmarkedCoun
   };
 }
 
+/**
+ * Whether stock has come back for the missing items, from reservableNow alone. A
+ * hint, never a promise: the server checks the stock again when units are reserved.
+ * Null when no missing line has availability to go on.
+ */
+function stockBack(lines) {
+  const missing = lines.filter((line) => line.shortBy > 0);
+  if (!missing.some((line) => reservableNow(line) !== null)) return null;
+  const found = missing
+    .map((line) => ({ line, now: reservableNow(line) ?? 0 }))
+    .filter(({ now }) => now > 0);
+  if (found.length === 0) {
+    return { outcome: "none", text: "No new stock yet. None of the missing items can now be reserved." };
+  }
+  const items = found
+    .map(({ line, now }) => `${line.name} ×${now}${now < line.shortBy ? ` of ${line.shortBy}` : ""}`)
+    .join(", ");
+  if (found.length === missing.length && found.every(({ line, now }) => now === line.shortBy)) {
+    return {
+      outcome: "all",
+      text:
+        missing.length === 1
+          ? `The missing item can now be reserved: ${items}. Review again to reserve it.`
+          : `All ${missing.length} missing items can now be reserved: ${items}. Review again to reserve them.`,
+    };
+  }
+  return {
+    outcome: "some",
+    text: `${found.length} of ${missing.length} missing item${missing.length === 1 ? "" : "s"} can now be reserved: ${items}.`,
+  };
+}
+
 export default function EquipmentReview() {
   const { eventId } = useParams();
   const { user } = useAuth();
@@ -485,6 +517,9 @@ export default function EquipmentReview() {
     flaggedTotal,
     unmarkedCount: shortLines.filter((line) => line.outcome !== "cannot_be_provided").length,
   });
+  const stock = status === "cannot_be_fully_arranged" ? stockBack(lines) : null;
+  // Review again stands out only when every missing item can now be reserved.
+  const startClass = status === "cannot_be_fully_arranged" && stock?.outcome !== "all" ? "er-btn--secondary" : "er-btn--primary";
 
   return (
     <div className="dashboard dashboard--tech-support equipment-review">
@@ -519,6 +554,11 @@ export default function EquipmentReview() {
       <section className={`er-next er-next--${next.tone}`} aria-label="Next step">
         <h2>{next.title}</h2>
         <p>{next.text}</p>
+        {stock && (
+          <p className={`er-next__stock er-next__stock--${stock.outcome}`} role="status">
+            {stock.text}
+          </p>
+        )}
         {status === "under_review" && (
           <p className="er-next__who">
             {isReviewer
@@ -531,7 +571,7 @@ export default function EquipmentReview() {
         {(canStart || canTakeOver) && (
           <div className="equipment-review__actions">
             {canStart && (
-              <button type="button" className="er-btn er-btn--primary" disabled={busy} onClick={handleStart}>
+              <button type="button" className={`er-btn ${startClass}`} disabled={busy} onClick={handleStart}>
                 {status === "cannot_be_fully_arranged" ? "Review again" : "Start review"}
               </button>
             )}
