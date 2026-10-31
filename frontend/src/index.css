@@ -1,7 +1,45 @@
+/* Design tokens: the one place the app's colours, spacing, type and shape are
+   defined. New CSS uses these names, not literals. Values match today's look. */
 :root {
-  font-family: "Avenir Next", "Segoe UI", sans-serif;
-  color: #17242b;
-  background: #eef3f1;
+  --color-ink: #17242b;
+  --color-muted: #64757a;
+  --color-line: #d9e4e0;
+  --color-paper: #ffffff;
+  --color-page: #eef3f1;
+  --color-accent: #087f7b;
+  --color-accent-dark: #075c5a;
+  --color-accent-soft: #eef6f3;
+  --color-danger: #a43c32;
+  --color-danger-soft: #fff0ee;
+  --color-warning: #8a5a00;
+  --color-warning-soft: #fff6e5;
+  --color-success: #17684f;
+  --color-success-soft: #e8f7f1;
+
+  --shadow-card: 0 18px 48px rgba(24, 61, 58, 0.09);
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  --font-family: "Avenir Next", "Segoe UI", sans-serif;
+  --font-size-xs: 0.72rem;
+  --font-size-sm: 0.84rem;
+  --font-size-md: 0.9rem;
+  --font-size-base: 1rem;
+  --font-size-h2: 1.2rem;
+  --font-size-h1: clamp(2rem, 4vw, 3.25rem);
+
+  --radius-control: 6px;
+  --radius-card: 8px;
+  --radius-pill: 999px;
+
+  font-family: var(--font-family);
+  color: var(--color-ink);
+  background: var(--color-page);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
