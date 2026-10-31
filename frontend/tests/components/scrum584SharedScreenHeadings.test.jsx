@@ -39,6 +39,7 @@ vi.mock("../../src/components/UnassignedQueue", () => ({ default: () => null }))
 vi.mock("../../src/components/PendingBookingRequests", () => ({ default: () => null }));
 vi.mock("../../src/components/FlaggedBookings", () => ({ default: () => null }));
 vi.mock("../../src/components/VenueCatalogue", () => ({ default: () => null }));
+vi.mock("../../src/components/EquipmentReviewedByMe", () => ({ default: () => null }));
 
 function signIn(role) {
   vi.mocked(useAuth).mockReturnValue({
