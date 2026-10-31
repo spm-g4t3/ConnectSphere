@@ -38,7 +38,7 @@ function resolvedNotice(item, action) {
     : `Cancelled the booking of ${venue} for ${event}.`;
 }
 
-export default function FlaggedBookings() {
+export default function FlaggedBookings({ asPage = false }) {
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -118,9 +118,12 @@ export default function FlaggedBookings() {
     setExpandedId((current) => (current === id ? null : id));
   }
 
+  // Its own route makes it the page title; on the dashboard it is a section.
+  const Heading = asPage ? "h1" : "h2";
+
   return (
     <section className="flagged-bookings">
-      <h2>Flagged bookings</h2>
+      <Heading>Flagged bookings</Heading>
 
       {loading && <p>Loading...</p>}
       {error && (

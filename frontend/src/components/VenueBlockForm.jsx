@@ -34,6 +34,7 @@ import {
 } from "../services/venueBlockValidation";
 import { codePointLength } from "../services/venueSafetyFacts";
 import { fieldErrorWiring } from "./fieldErrors";
+import Button from "./ui/Button";
 
 /** The fields that render their own errors. Anything else goes in the alert. */
 const FIELDS = ["startsAt", "endsAt", "reason", "notes"];
@@ -270,13 +271,13 @@ export default function VenueBlockForm({
         </p>
       )}
 
-      <button type="submit" disabled={submitting}>
+      <Button type="submit" disabled={submitting}>
         {submitting ? "Saving..." : isEdit ? "Save changes" : "Block venue"}
-      </button>
+      </Button>
       {onCancel && (
-        <button type="button" onClick={onCancel} disabled={submitting}>
+        <Button variant="secondary" onClick={onCancel} disabled={submitting}>
           Cancel
-        </button>
+        </Button>
       )}
     </form>
   );

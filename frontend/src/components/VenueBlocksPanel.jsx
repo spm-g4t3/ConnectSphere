@@ -45,6 +45,9 @@ import VenueBlockForm from "./VenueBlockForm";
 import BlockConflictList from "./BlockConflictList";
 import BlockHistory, { BlockActor } from "./BlockHistory";
 import { formatOccupiedPeriod } from "../services/occupiedPeriodDisplay";
+import Button from "./ui/Button";
+import StatusBadge from "./ui/StatusBadge";
+import { BLOCK_PHASE_TONES, toneFor } from "../services/venueStatusTones";
 
 /** "1 booking was" / "3 bookings were". */
 function bookingsWere(count) {
@@ -327,9 +330,9 @@ export default function VenueBlocksPanel({ venue, currentUserId }) {
         <div className="venue-blocks__item-main">
           <strong>{reasonLabel(block.reason)}</strong>
           <span>{formatRange(block.startsAt, block.endsAt)}</span>
-          <span className={`status-badge status--block-${phase}`}>
+          <StatusBadge tone={toneFor(BLOCK_PHASE_TONES, phase)}>
             {BLOCK_PHASE_LABELS[phase]}
-          </span>
+          </StatusBadge>
           {block.notes && <p className="venue-blocks__notes">{block.notes}</p>}
           {renderAudit(block)}
           {clashing && (
@@ -356,41 +359,44 @@ export default function VenueBlocksPanel({ venue, currentUserId }) {
               {/* A change on a retired venue is refused with VENUE_RETIRED,
                   so Edit goes; Remove stays, because removing a block only
                   reduces blocking and the server allows it. */}
-              <button
+              <Button
+                variant="secondary"
                 onClick={() => openForm({ mode: "edit", block })}
                 disabled={rowActionsDisabled || venueRetired}
                 title={venueRetired ? "A retired venue cannot be blocked." : undefined}
               >
                 Edit
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="danger"
                 onClick={() => setConfirmingRemoveId(block.id)}
                 disabled={rowActionsDisabled}
               >
                 Remove
-              </button>
+              </Button>
             </>
           )}
 
           {!ended && confirming && (
             <>
               <span>Remove this block? Bookings it flagged stay flagged for review.</span>
-              <button onClick={() => handleRemove(block)} disabled={removing}>
+              <Button variant="danger" onClick={() => handleRemove(block)} disabled={removing}>
                 {removing ? "Removing..." : "Yes, remove"}
-              </button>
-              <button onClick={() => setConfirmingRemoveId(null)} disabled={removing}>
+              </Button>
+              <Button variant="secondary" onClick={() => setConfirmingRemoveId(null)} disabled={removing}>
                 Cancel
-              </button>
+              </Button>
             </>
           )}
 
-          <button
+          <Button
+            variant="secondary"
             onClick={() => toggleHistory(block.id)}
             aria-expanded={historyOpen}
             aria-controls={historyId}
           >
             {historyOpen ? "Hide history" : "History"}
-          </button>
+          </Button>
         </div>
 
         {/* Keyed by block so a different row's history never inherits this
@@ -424,13 +430,13 @@ export default function VenueBlocksPanel({ venue, currentUserId }) {
       {renderNotice()}
 
       {!formMode && (
-        <button
+        <Button
           onClick={() => openForm({ mode: "create" })}
           disabled={venueRetired}
           title={venueRetired ? "A retired venue cannot be blocked." : undefined}
         >
           + Add a block
-        </button>
+        </Button>
       )}
 
       {formMode && (

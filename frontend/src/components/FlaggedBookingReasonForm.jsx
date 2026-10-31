@@ -5,6 +5,7 @@
 // Checked here as the server checks it, so a refusal shows beside the field.
 
 import { useState } from "react";
+import Button from "./ui/Button";
 import { SERVER_TEXT_MAX_LENGTH } from "../services/textLimits";
 
 /** The reason as sent, or the message to show beside the field instead. */
@@ -18,8 +19,17 @@ function checkReason(reason, verb) {
   return { reason: trimmed };
 }
 
-/** One reason form: a required textarea and its submit button. */
-export default function FlaggedBookingReasonForm({ id, label, verb, busy, sendingLabel, buttonLabel, onSubmit }) {
+/** One reason form: a required textarea and its submit button; a cancel passes the danger variant. */
+export default function FlaggedBookingReasonForm({
+  id,
+  label,
+  verb,
+  busy,
+  sendingLabel,
+  buttonLabel,
+  buttonVariant = "primary",
+  onSubmit,
+}) {
   const [reason, setReason] = useState("");
   const [reasonError, setReasonError] = useState(null);
   const errorId = `${id}-error`;
@@ -48,9 +58,9 @@ export default function FlaggedBookingReasonForm({ id, label, verb, busy, sendin
           {reasonError}
         </p>
       )}
-      <button type="submit" disabled={busy}>
+      <Button type="submit" variant={buttonVariant} disabled={busy}>
         {sendingLabel ?? buttonLabel}
-      </button>
+      </Button>
     </form>
   );
 }

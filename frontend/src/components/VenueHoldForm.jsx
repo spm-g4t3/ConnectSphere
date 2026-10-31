@@ -18,6 +18,7 @@ import { deviceTimeZoneLabel } from "../services/datetimeFormat";
 import { formatRange } from "../services/displayFormat";
 import { toHoldPayload, validateHoldInput } from "../services/venueHoldValidation";
 import { fieldErrorWiring } from "./fieldErrors";
+import Button from "./ui/Button";
 
 /** The fields that render their own errors. Anything else goes in the alert. */
 const FIELDS = ["eventRequestId", "expiresAt"];
@@ -167,13 +168,13 @@ export default function VenueHoldForm({
         passes, the hold ends on its own and the venue is free again.
       </p>
 
-      <button type="submit" disabled={submitting}>
+      <Button type="submit" disabled={submitting}>
         {submitting ? "Placing..." : "Place hold"}
-      </button>
+      </Button>
       {onCancel && (
-        <button type="button" onClick={onCancel} disabled={submitting}>
+        <Button variant="secondary" onClick={onCancel} disabled={submitting}>
           Cancel
-        </button>
+        </Button>
       )}
     </form>
   );

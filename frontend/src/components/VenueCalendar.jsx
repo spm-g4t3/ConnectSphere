@@ -39,6 +39,9 @@ import { calendarEntryDisplay } from "../services/calendarEntryDisplay";
 import { formatRange } from "../services/displayFormat";
 import { formatOccupiedPeriod } from "../services/occupiedPeriodDisplay";
 import { SESSION_EXPIRED } from "../services/apiErrors";
+import Button from "./ui/Button";
+import StatusBadge from "./ui/StatusBadge";
+import { VENUE_TONES } from "../services/venueStatusTones";
 
 // Keyed by status, the same shape as VenueDetail's BOOKINGS_ERROR_MESSAGES.
 // The server's `error` string is not surfaced: on the venue routes it is
@@ -192,40 +195,41 @@ export default function VenueCalendar({ venueId, initialDate = new Date() }) {
       <header className="venue-calendar__header">
         <span className="eyebrow">Venue calendar</span>
         <h1>{venue ? venue.name : "Venue calendar"}</h1>
-        {venue?.retiredAt && <span className="venue-calendar__badge">Retired</span>}
+        {venue?.retiredAt && <StatusBadge tone={VENUE_TONES.retired}>Retired</StatusBadge>}
       </header>
 
       <div className="venue-calendar__toolbar">
         <div className="venue-calendar__nav" role="group" aria-label="Move through the calendar">
-          <button
-            type="button"
+          <Button
+            variant="secondary"
             aria-label={`Previous ${view}`}
             onClick={() => setAnchor((current) => shiftAnchor(view, current, -1))}
           >
             Previous
-          </button>
-          <button type="button" aria-label="Go to today" onClick={() => setAnchor(new Date())}>
+          </Button>
+          <Button variant="secondary" aria-label="Go to today" onClick={() => setAnchor(new Date())}>
             Today
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="secondary"
             aria-label={`Next ${view}`}
             onClick={() => setAnchor((current) => shiftAnchor(view, current, 1))}
           >
             Next
-          </button>
+          </Button>
         </div>
 
         <div className="venue-calendar__views" role="group" aria-label="Calendar view">
           {CALENDAR_VIEWS.map((option) => (
-            <button
+            // The chosen view is the filled variant; aria-pressed says the same in words.
+            <Button
               key={option}
-              type="button"
+              variant={option === view ? "primary" : "secondary"}
               aria-pressed={option === view}
               onClick={() => setView(option)}
             >
               {VIEW_LABELS[option]}
-            </button>
+            </Button>
           ))}
         </div>
       </div>
@@ -308,8 +312,8 @@ export default function VenueCalendar({ venueId, initialDate = new Date() }) {
                               key={day.getTime()}
                               {...cellProps(day, outside ? " venue-calendar__cell--muted" : "")}
                             >
-                              <button
-                                type="button"
+                              <Button
+                                variant="link"
                                 className="venue-calendar__day-number"
                                 aria-label={`Show ${day.toLocaleDateString(CALENDAR_LOCALE, {
                                   weekday: "long",
@@ -320,7 +324,7 @@ export default function VenueCalendar({ venueId, initialDate = new Date() }) {
                                 onClick={() => showDay(day)}
                               >
                                 {day.getDate()}
-                              </button>
+                              </Button>
                               {dayEntries.length > 0 && <EntryList entries={dayEntries} compact />}
                             </td>
                           );

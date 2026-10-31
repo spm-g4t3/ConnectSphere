@@ -27,6 +27,7 @@
 import { useState } from "react";
 import { shortId } from "../services/displayFormat";
 import { formatOccupiedPeriod } from "../services/occupiedPeriodDisplay";
+import Button from "./ui/Button";
 
 /** "1 approved booking" / "3 approved bookings". */
 function countLabel(count, noun) {
@@ -91,33 +92,33 @@ export default function BlockConflictList({
       </ul>
 
       <div className="block-conflicts__actions">
-        <button type="button" onClick={() => onChangePeriod?.()} disabled={submitting}>
+        <Button variant="secondary" onClick={() => onChangePeriod?.()} disabled={submitting}>
           {changeLabel}
-        </button>
+        </Button>
 
         {!confirming && (
-          <button
-            type="button"
+          <Button
+            variant="danger"
             onClick={() => setConfirmingFor(signature)}
             disabled={submitting}
           >
             {overrideLabel ?? `Override and flag ${countLabel(count, "booking")}`}
-          </button>
+          </Button>
         )}
 
         {confirming && (
           <>
             <span>{confirmText}</span>
-            <button
-              type="button"
+            <Button
+              variant="danger"
               onClick={() => onConfirmOverride?.(conflicts.map((c) => c.bookingId))}
               disabled={submitting}
             >
               {submitting ? "Flagging..." : confirmLabel}
-            </button>
-            <button type="button" onClick={() => setConfirmingFor(null)} disabled={submitting}>
+            </Button>
+            <Button variant="secondary" onClick={() => setConfirmingFor(null)} disabled={submitting}>
               Cancel
-            </button>
+            </Button>
           </>
         )}
       </div>

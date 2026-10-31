@@ -365,7 +365,7 @@ describe("SCRUM178_AC1_AC2_AC4 venue calendar flow (SCRUM-184)", () => {
 
     expect(window.location.pathname).toBe(`/venues/${RETIRED.id}/calendar`);
     expect(await screen.findByRole("heading", { level: 1, name: "Old Annex" })).toBeInTheDocument();
-    expect(screen.getByText("Retired")).toHaveClass("venue-calendar__badge");
+    expect(screen.getByText("Retired")).toHaveClass("ui-status-badge", "ui-status-badge--neutral");
     await settled();
 
     expect(lastWindow()).toEqual({ ...windowOf(monday, dayAfter(monday, 7)), venueId: RETIRED.id });
@@ -401,7 +401,7 @@ describe("SCRUM178_AC1 retired venue calendar from search (SCRUM-185)", () => {
 
     expect(window.location.pathname).toBe(`/venues/${RETIRED.id}/calendar`);
     expect(await screen.findByRole("heading", { level: 1, name: "Old Annex" })).toBeInTheDocument();
-    expect(screen.getByText("Retired")).toHaveClass("venue-calendar__badge");
+    expect(screen.getByText("Retired")).toHaveClass("ui-status-badge", "ui-status-badge--neutral");
     await settled();
 
     expect(calendarWindows()).toEqual([

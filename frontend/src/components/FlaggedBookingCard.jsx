@@ -42,7 +42,8 @@ export default function FlaggedBookingCard({
   return (
     <li className="pending-bookings__card">
       {/* Locked while any resolution is in flight, so the resolving card stays
-          open and a refusal shown inside it is not lost to another card. */}
+          open and a refusal shown inside it is not lost to another card.
+          A native button: it is a disclosure row, not an action, so Button would restyle it. */}
       <button
         type="button"
         className="pending-bookings__toggle"
@@ -121,6 +122,7 @@ export default function FlaggedBookingCard({
             verb="cancelling"
             busy={busy}
             buttonLabel="Cancel booking"
+            buttonVariant="danger"
             sendingLabel={resolving === "cancel" ? "Cancelling..." : null}
             onSubmit={(reason) => onCancel(item, reason)}
           />

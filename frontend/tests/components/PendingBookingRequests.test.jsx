@@ -194,7 +194,7 @@ describe("the queue (AC1)", () => {
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     expect(toggle).toHaveTextContent("Hall 1");
     expect(toggle).toHaveTextContent(formatVenueRange(item("1").startsAt, item("1").endsAt));
-    expect(within(toggle).getByText("Pending")).toHaveClass("status-badge", "status--booking-pending");
+    expect(within(toggle).getByText("Pending")).toHaveClass("ui-status-badge", "ui-status-badge--warning");
     expect(screen.queryByRole("region")).not.toBeInTheDocument();
   });
 
@@ -203,7 +203,7 @@ describe("the queue (AC1)", () => {
     const { user } = renderQueue();
     await screen.findByText("Event 1");
 
-    expect(within(toggleFor("Event 1")).getByText("Conflicting")).toHaveClass("status--booking-conflicting");
+    expect(within(toggleFor("Event 1")).getByText("Conflicting")).toHaveClass("ui-status-badge", "ui-status-badge--warning");
     const region = await openCard(user, "1");
     expect(within(region).getByText(/approved/i, { selector: ".pending-bookings__conflicting" })).toBeInTheDocument();
     // Still open: it can be decided on.

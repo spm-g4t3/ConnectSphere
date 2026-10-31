@@ -25,6 +25,9 @@ import VenueDetail from "./VenueDetail";
 import VenueBlocksPanel from "./VenueBlocksPanel";
 import VenueHoldsPanel from "./VenueHoldsPanel";
 import { formatOccupiedPeriod } from "../services/occupiedPeriodDisplay";
+import Button from "./ui/Button";
+import StatusBadge from "./ui/StatusBadge";
+import { VENUE_TONES } from "../services/venueStatusTones";
 import { flaggedBookingsHeading, venueSaveFlagReasons } from "../services/flaggedBookingDisplay";
 
 // Keyed by status, the same shape as AuthContext's LOGIN_ERROR_MESSAGES.
@@ -46,7 +49,7 @@ const RETIRE_ERROR_MESSAGES = {
 // currentUserId (SCRUM-131) is only passed through, to VenueBlocksPanel, so
 // a block's audit line and history can say "you" for the signed-in user's own
 // changes. Optional: without it those show as a short id.
-export default function VenueCatalogue({ currentUserId } = {}) {
+export default function VenueCatalogue({ currentUserId, asPage = false } = {}) {
   const [venues, setVenues] = useState([]);
   const [loadingVenues, setLoadingVenues] = useState(true);
   const [venuesError, setVenuesError] = useState(null);
@@ -165,12 +168,19 @@ export default function VenueCatalogue({ currentUserId } = {}) {
     }
   }
 
+  // On its own route the catalogue is the page; on the dashboard it is a
+  // section under the greeting's h1. The page keeps its h1 while a panel is
+  // open, since the panel replaces the list.
+  const Title = asPage ? "h1" : "h2";
+  const pageTitle = asPage && <h1>Venue catalogue</h1>;
+
   if (activePanel?.mode === "create") {
     return (
       <section>
-        <button onClick={() => setActivePanel(null)}>
+        {pageTitle}
+        <Button variant="link" onClick={() => setActivePanel(null)}>
           &larr; Back to the venue catalogue
-        </button>
+        </Button>
         <VenueForm onSaved={handleSaved} />
       </section>
     );
@@ -179,9 +189,10 @@ export default function VenueCatalogue({ currentUserId } = {}) {
   if (activePanel?.mode === "edit") {
     return (
       <section>
-        <button onClick={() => setActivePanel(null)}>
+        {pageTitle}
+        <Button variant="link" onClick={() => setActivePanel(null)}>
           &larr; Back to the venue catalogue
-        </button>
+        </Button>
         <VenueForm venueId={activePanel.venue.id} onSaved={handleSaved} />
       </section>
     );
@@ -190,9 +201,10 @@ export default function VenueCatalogue({ currentUserId } = {}) {
   if (activePanel?.mode === "detail") {
     return (
       <section>
-        <button onClick={() => setActivePanel(null)}>
+        {pageTitle}
+        <Button variant="link" onClick={() => setActivePanel(null)}>
           &larr; Back to the venue catalogue
-        </button>
+        </Button>
         {/* No onSaved: this panel reads and changes nothing, so closing it
             needs no refetch. */}
         <VenueDetail venue={activePanel.venue} />
@@ -203,10 +215,11 @@ export default function VenueCatalogue({ currentUserId } = {}) {
   if (activePanel?.mode === "blocks") {
     return (
       <section>
+        {pageTitle}
         {/* handleSaved, not a bare close: the panel can learn the venue was
             retired meanwhile (VENUE_RETIRED), and the catalogue row should
             say so when we come back to it. */}
-        <button onClick={handleSaved}>&larr; Back to the venue catalogue</button>
+        <Button variant="link" onClick={handleSaved}>&larr; Back to the venue catalogue</Button>
         <VenueBlocksPanel venue={activePanel.venue} currentUserId={currentUserId} />
       </section>
     );
@@ -217,7 +230,8 @@ export default function VenueCatalogue({ currentUserId } = {}) {
   if (activePanel?.mode === "holds") {
     return (
       <section>
-        <button onClick={handleSaved}>&larr; Back to the venue catalogue</button>
+        {pageTitle}
+        <Button variant="link" onClick={handleSaved}>&larr; Back to the venue catalogue</Button>
         <VenueHoldsPanel venue={activePanel.venue} currentUserId={currentUserId} />
       </section>
     );
@@ -225,7 +239,7 @@ export default function VenueCatalogue({ currentUserId } = {}) {
 
   return (
     <section>
-      <h2>Venue catalogue</h2>
+      <Title>Venue catalogue</Title>
 
       {/* A status region on the catalogue itself, not a modal or a page of
           its own: the coordinators have already been notified, so there is
@@ -246,9 +260,9 @@ export default function VenueCatalogue({ currentUserId } = {}) {
           <p>
             Where an event has an assigned coordinator, they have been notified.
           </p>
-          <button type="button" onClick={() => setFlaggedBookings([])}>
+          <Button variant="secondary" onClick={() => setFlaggedBookings([])}>
             Dismiss
-          </button>
+          </Button>
         </div>
       )}
 
@@ -275,11 +289,9 @@ export default function VenueCatalogue({ currentUserId } = {}) {
             <li key={venue.id}>
               <div className="venue-catalogue__item-main">
                 <strong>{venue.name}</strong> — {venue.location}
-                <span
-                  className={`status-badge ${retired ? "status--retired" : "status--active"}`}
-                >
+                <StatusBadge tone={retired ? VENUE_TONES.retired : VENUE_TONES.active}>
                   {retired ? "Retired" : "Active"}
-                </span>
+                </StatusBadge>
                 {retireError?.id === venue.id && (
                   <p className="venue-catalogue__error" role="alert">
                     {retireError.message}
@@ -293,22 +305,23 @@ export default function VenueCatalogue({ currentUserId } = {}) {
                     server-side and quietly edit a venue nobody can book.
                     Now that the button opens a real form, that is no longer
                     hypothetical. */}
-                <button
+                <Button
+                  variant="secondary"
                   disabled={retired}
                   title={retired ? "A retired venue cannot be edited." : undefined}
                   onClick={() => setActivePanel({ mode: "edit", venue })}
                 >
                   Edit details
-                </button>
+                </Button>
 
                 {/* Pointedly NOT disabled when retired. AC3 is two clauses,
                     and this is the second one: a retired venue stops
                     appearing in searches *while its past bookings remain
                     viewable*. Greying this out on a retired row would make
                     retirement a delete after all. */}
-                <button onClick={() => setActivePanel({ mode: "detail", venue })}>
+                <Button variant="secondary" onClick={() => setActivePanel({ mode: "detail", venue })}>
                   View bookings &amp; history
-                </button>
+                </Button>
 
                 {/* SCRUM-181. NOT disabled when retired either, for the same
                     clause: SCRUM-178 AC1 keeps a retired venue's past
@@ -322,25 +335,27 @@ export default function VenueCatalogue({ currentUserId } = {}) {
                 {/* Disabled on a retired venue for the reason Edit details is:
                     the server refuses a new block there with VENUE_RETIRED, so
                     the button would only open a form that cannot be saved. */}
-                <button
+                <Button
+                  variant="secondary"
                   disabled={retired}
                   title={retired ? "A retired venue cannot be blocked." : undefined}
                   onClick={() => setActivePanel({ mode: "blocks", venue })}
                 >
                   Manage blocks
-                </button>
+                </Button>
 
                 {/* SCRUM-491. Beside Manage blocks, because a tentative hold
                     is the other way Venue Staff keep a venue for a while.
                     Disabled on a retired venue for the same reason: the
                     server refuses a hold there with VENUE_RETIRED (AC4). */}
-                <button
+                <Button
+                  variant="secondary"
                   disabled={retired}
                   title={retired ? "A retired venue cannot be held." : undefined}
                   onClick={() => setActivePanel({ mode: "holds", venue })}
                 >
                   Place hold
-                </button>
+                </Button>
 
                 {/* Two-step inline confirmation rather than a modal or
                     window.confirm. Retirement is the first irreversible
@@ -351,23 +366,24 @@ export default function VenueCatalogue({ currentUserId } = {}) {
                     single button is a new primitive to maintain. A state
                     variable and two buttons are neither. */}
                 {!retired && !confirming && (
-                  <button
+                  <Button
+                    variant="danger"
                     onClick={() => setConfirmingId(venue.id)}
                     title="A retired venue stops appearing in searches. Its past bookings stay viewable. This cannot be undone."
                   >
                     Retire venue
-                  </button>
+                  </Button>
                 )}
 
                 {!retired && confirming && (
                   <>
                     <span>Retire this venue? It cannot be undone.</span>
-                    <button onClick={() => handleRetire(venue)} disabled={retiring}>
+                    <Button variant="danger" onClick={() => handleRetire(venue)} disabled={retiring}>
                       {retiring ? "Retiring..." : "Yes, retire"}
-                    </button>
-                    <button onClick={() => setConfirmingId(null)} disabled={retiring}>
+                    </Button>
+                    <Button variant="secondary" onClick={() => setConfirmingId(null)} disabled={retiring}>
                       Cancel
-                    </button>
+                    </Button>
                   </>
                 )}
               </div>
@@ -376,7 +392,7 @@ export default function VenueCatalogue({ currentUserId } = {}) {
         })}
       </ul>
 
-      <button onClick={() => setActivePanel({ mode: "create" })}>+ Add new venue</button>
+      <Button onClick={() => setActivePanel({ mode: "create" })}>+ Add new venue</Button>
     </section>
   );
 }

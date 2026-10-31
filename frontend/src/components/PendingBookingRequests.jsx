@@ -57,7 +57,7 @@ function marksOnApproval(item, pendingIds) {
   return overlapping.filter((other) => pendingIds.has(other.id)).length;
 }
 
-export default function PendingBookingRequests({ onDecided }) {
+export default function PendingBookingRequests({ onDecided, asPage = false }) {
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -144,10 +144,12 @@ export default function PendingBookingRequests({ onDecided }) {
   }
 
   const pendingIds = new Set(requests.filter((r) => r.status === "pending").map((r) => r.id));
+  // Its own route makes it the page title; on the dashboard it is a section.
+  const Heading = asPage ? "h1" : "h2";
 
   return (
     <section className="pending-bookings">
-      <h2>Pending booking requests</h2>
+      <Heading>Pending booking requests</Heading>
 
       {loading && <p>Loading...</p>}
       {error && (

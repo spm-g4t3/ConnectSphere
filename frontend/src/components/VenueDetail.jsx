@@ -41,6 +41,9 @@ import { formatTurnaround } from "../services/turnaroundOptions";
 import { safetyFactText } from "../services/venueSafetyFacts";
 import VenueSafetyFacts from "./VenueSafetyFacts";
 import BookingSuitabilitySummary from "./BookingSuitabilitySummary";
+import Button from "./ui/Button";
+import StatusBadge from "./ui/StatusBadge";
+import { BOOKING_GROUP_TONES, toneFor } from "../services/venueStatusTones";
 import { SESSION_EXPIRED } from "../services/apiErrors";
 
 const BOOKINGS_ERROR_MESSAGES = {
@@ -274,9 +277,9 @@ export default function VenueDetail({ venue }) {
             <p className="venue-detail__error" role="alert">
               {detailsError}
             </p>
-            <button type="button" onClick={retryDetails}>
+            <Button variant="secondary" onClick={retryDetails}>
               Try again
-            </button>
+            </Button>
           </>
         )}
 
@@ -337,7 +340,9 @@ export default function VenueDetail({ venue }) {
                         hold -- pending, rejected, withdrawn -- must not read as
                         one. Absent from older responses, so shown only when sent. */}
                     {booking.statusDisplay?.label && (
-                      <span className="venue-detail__booking-status">{booking.statusDisplay.label}</span>
+                      <StatusBadge tone={toneFor(BOOKING_GROUP_TONES, booking.statusDisplay.group)}>
+                        {booking.statusDisplay.label}
+                      </StatusBadge>
                     )}
                     {hasSuitability && (
                       <BookingSuitabilitySummary

@@ -28,6 +28,7 @@ import { Fragment, useCallback, useEffect, useId, useRef, useState } from "react
 import { createVenue, getVenueDetails, updateVenue } from "../services/venueService";
 import { describeClosing, formatVenuePeriod } from "../services/datetimeFormat";
 import BlockConflictList from "./BlockConflictList";
+import Button from "./ui/Button";
 import {
   ACCESSIBILITY_FEATURES,
   FACILITIES,
@@ -771,9 +772,9 @@ export default function VenueForm({ venueId = null, onSaved }) {
         </div>
       )}
 
-      <button type="submit" disabled={saving}>
+      <Button type="submit" disabled={saving}>
         {saving ? "Saving..." : isEdit ? "Save changes" : "Create venue"}
-      </button>
+      </Button>
     </form>
   );
 }

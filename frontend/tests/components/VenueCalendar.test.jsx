@@ -928,7 +928,7 @@ describe("SCRUM178_AC1 VenueCalendar venue header", () => {
     await renderCalendar();
 
     expect(await screen.findByRole("heading", { level: 1, name: "Hall A" })).toBeInTheDocument();
-    expect(screen.getByText("Retired")).toHaveClass("venue-calendar__badge");
+    expect(screen.getByText("Retired")).toHaveClass("ui-status-badge", "ui-status-badge--neutral");
   });
 
   it("SCRUM178_AC1_a_retired_venue_on_a_past_date_shows_its_past_bookings_and_blocks", async () => {
@@ -951,7 +951,7 @@ describe("SCRUM178_AC1 VenueCalendar venue header", () => {
     await renderCalendar({ initialDate: local(2025, 2, 12, 10) });
 
     expect(await screen.findByRole("heading", { level: 1, name: "Hall A" })).toBeInTheDocument();
-    expect(screen.getByText("Retired")).toHaveClass("venue-calendar__badge");
+    expect(screen.getByText("Retired")).toHaveClass("ui-status-badge", "ui-status-badge--neutral");
     expect(requestedWindow()).toMatchObject({ from: local(2025, 2, 10), to: local(2025, 2, 17) });
 
     const cells = weekCells("10 – 16 Mar 2025");

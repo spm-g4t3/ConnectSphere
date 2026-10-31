@@ -177,7 +177,7 @@ function AppRoutes() {
           element={
             <ProtectedRoute allowedRoles={["venue_staff"]}>
               <div className="dashboard dashboard--venue-staff">
-                <VenueCatalogue />
+                <VenueCatalogue asPage />
               </div>
             </ProtectedRoute>
           }
@@ -372,7 +372,7 @@ function AppRoutes() {
           element={
             <ProtectedRoute allowedRoles={["venue_staff"]}>
               <div className="dashboard dashboard--venue-staff">
-                <PendingBookingRequests />
+                <PendingBookingRequests asPage />
               </div>
             </ProtectedRoute>
           }
@@ -385,7 +385,7 @@ function AppRoutes() {
           element={
             <ProtectedRoute allowedRoles={["venue_staff"]}>
               <div className="dashboard dashboard--venue-staff">
-                <FlaggedBookings />
+                <FlaggedBookings asPage />
               </div>
             </ProtectedRoute>
           }

@@ -240,16 +240,16 @@ describe("VenueBlocksPanel list", () => {
     const upcoming = rowFor(UPCOMING);
     expect(within(upcoming).getByText("Maintenance")).toBeInTheDocument();
     expect(within(upcoming).getByText("Aircon servicing")).toBeInTheDocument();
-    expect(within(upcoming).getByText("Upcoming")).toHaveClass("status--block-upcoming");
+    expect(within(upcoming).getByText("Upcoming")).toHaveClass("ui-status-badge", "ui-status-badge--danger");
 
     const inEffect = rowFor(IN_EFFECT);
     expect(within(inEffect).getByText("Internal activity")).toBeInTheDocument();
-    expect(within(inEffect).getByText("In effect")).toHaveClass("status--block-in_effect");
+    expect(within(inEffect).getByText("In effect")).toHaveClass("ui-status-badge", "ui-status-badge--danger");
     expect(inEffect.querySelector(".venue-blocks__notes")).toBeNull();
 
     const ended = rowFor(ENDED);
     expect(within(ended).getByText("Safety")).toBeInTheDocument();
-    expect(within(ended).getByText("Ended")).toHaveClass("status--block-ended");
+    expect(within(ended).getByText("Ended")).toHaveClass("ui-status-badge", "ui-status-badge--neutral");
     expect(ended).toHaveClass("venue-blocks__item--ended");
 
     // Server order is kept.

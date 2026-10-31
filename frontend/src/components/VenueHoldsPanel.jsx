@@ -31,6 +31,9 @@ import { formatOccupiedPeriod } from "../services/occupiedPeriodDisplay";
 import { reasonLabel } from "../services/venueBlockReasons";
 import VenueHoldForm from "./VenueHoldForm";
 import { BlockActor } from "./BlockHistory";
+import Button from "./ui/Button";
+import StatusBadge from "./ui/StatusBadge";
+import { HOLD_TONE } from "../services/venueStatusTones";
 
 /** "1 thing is" / "3 things are", for the conflict heading. */
 function thingsAre(count) {
@@ -226,13 +229,13 @@ export default function VenueHoldsPanel({ venue, currentUserId }) {
       )}
 
       {!formOpen && (
-        <button
+        <Button
           onClick={openForm}
           disabled={venueRetired}
           title={venueRetired ? "A retired venue cannot be held." : undefined}
         >
           + Place a hold
-        </button>
+        </Button>
       )}
 
       {formOpen && (
@@ -272,7 +275,7 @@ export default function VenueHoldsPanel({ venue, currentUserId }) {
                 <div className="venue-holds__item-main">
                   <strong>{hold.eventName || "Unnamed event"}</strong>
                   <span>{formatRange(hold.eventStartsAt, hold.eventEndsAt, "no date")}</span>
-                  <span className="status-badge status--hold-active">Tentatively held</span>
+                  <StatusBadge tone={HOLD_TONE}>Tentatively held</StatusBadge>
                   <p className="venue-holds__audit">
                     Expires {formatTimestamp(hold.expiresAt)} · Placed{" "}
                     {formatTimestamp(hold.placedAt)} {renderPlacer(hold)}
