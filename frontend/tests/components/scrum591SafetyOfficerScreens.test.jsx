@@ -260,3 +260,214 @@ describe("SCRUM591_AC3 the Safety Officer screens use the shared buttons and sta
     expect(within(screen.getByRole("status")).getByText("on_hold")).toHaveClass("ui-status-badge--neutral");
   });
 });
+
+function renderHistoryNow() {
+  render(
+    <MemoryRouter>
+      <SafetyReviewHistory />
+    </MemoryRouter>,
+  );
+}
+
+function failure(message) {
+  return Object.assign(new Error(message), { response: { data: { error: message } } });
+}
+
+describe("SCRUM591_AC4 loading, empty, error and date states follow the standard", () => {
+  it("SCRUM591_AC4_lists_show_the_standard_loading_text", async () => {
+    getSafetyReviewQueue.mockReturnValue(new Promise(() => {}));
+    getSafetyReviewHistory.mockReturnValue(new Promise(() => {}));
+
+    const queue = render(<SafetyOfficerDashboard user={{ name: "Riley" }} />);
+    expect(screen.getByRole("status")).toHaveTextContent(/^Loading\.\.\.$/);
+    queue.unmount();
+
+    renderHistoryNow();
+    expect(screen.getByRole("status")).toHaveTextContent(/^Loading\.\.\.$/);
+  });
+
+  it("SCRUM591_AC4_an_empty_queue_says_what_is_missing_and_what_happens_next", async () => {
+    getSafetyReviewQueue.mockResolvedValue([]);
+    render(<SafetyOfficerDashboard user={{ name: "Riley" }} />);
+
+    expect(await screen.findByText("No events are waiting for a safety review.")).toBeInTheDocument();
+    expect(screen.getByText("Events appear here when a coordinator sends them for a safety check."))
+      .toBeInTheDocument();
+  });
+
+  it("SCRUM591_AC4_an_empty_history_says_what_is_missing_and_what_happens_next", async () => {
+    getSafetyReviewHistory.mockResolvedValue([]);
+    renderHistoryNow();
+
+    expect(await screen.findByText("No events have been reviewed yet.")).toBeInTheDocument();
+    expect(screen.getByText("An event appears here once a Safety Officer responds to it in Safety review."))
+      .toBeInTheDocument();
+  });
+
+  it("SCRUM591_AC4_a_queue_that_fails_to_load_offers_try_again_and_reloads", async () => {
+    const user = userEvent.setup();
+    getSafetyReviewQueue.mockRejectedValueOnce(failure("Queue unavailable"));
+    render(<SafetyOfficerDashboard user={{ name: "Riley" }} />);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Queue unavailable");
+    await user.click(within(alert).getByRole("button", { name: "Try again" }));
+
+    expect(await screen.findByText("Event event-1")).toBeInTheDocument();
+    expect(getSafetyReviewQueue).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM591_AC4_history_that_fails_to_load_offers_try_again_and_reloads", async () => {
+    const user = userEvent.setup();
+    getSafetyReviewHistory.mockRejectedValueOnce(failure("History unavailable"));
+    renderHistoryNow();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("History unavailable");
+    await user.click(within(alert).getByRole("button", { name: "Try again" }));
+
+    expect(await screen.findByText("Event event-1")).toBeInTheDocument();
+    expect(getSafetyReviewHistory).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM591_AC4_a_review_that_fails_to_open_offers_try_again_for_that_review", async () => {
+    const user = userEvent.setup();
+    getSafetyReview.mockRejectedValueOnce(failure("Details unavailable"));
+    await renderQueue();
+
+    // The second row, so a retry that reopens the wrong event would fail.
+    await user.click(rowButton("Event event-2", "Review event"));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Details unavailable");
+    await user.click(within(alert).getByRole("button", { name: "Try again" }));
+
+    expect(await screen.findByRole("heading", { level: 2, name: "Event event-2" })).toBeInTheDocument();
+    expect(getSafetyReview).toHaveBeenNthCalledWith(2, "event-2");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM591_AC4_history_details_that_fail_to_open_offer_try_again_for_that_event", async () => {
+    const user = userEvent.setup();
+    getSafetyReview.mockRejectedValueOnce(failure("Details unavailable"));
+    await renderHistory();
+
+    await user.click(rowButton("Event event-2", "View details"));
+    const alert = await screen.findByRole("alert");
+    await user.click(within(alert).getByRole("button", { name: "Try again" }));
+
+    expect(await screen.findByRole("heading", { level: 2, name: "Event event-2" })).toBeInTheDocument();
+    expect(getSafetyReview).toHaveBeenNthCalledWith(2, "event-2");
+  });
+
+  it("SCRUM591_AC4_a_failed_response_shows_the_error_without_try_again", async () => {
+    const user = userEvent.setup();
+    submitSafetyReviewResponse.mockRejectedValue(failure("The note is too long."));
+    await renderQueue();
+
+    await user.click(rowButton("Event event-1", "Review event"));
+    await screen.findByRole("heading", { level: 2, name: "Event event-1" });
+    await user.click(screen.getByRole("button", { name: "Submit response" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("The note is too long.");
+    expect(within(alert).queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM591_AC4_a_history_refresh_that_fails_after_a_response_offers_try_again", async () => {
+    const user = userEvent.setup();
+    await renderQueue();
+    await user.click(rowButton("Event event-1", "Review event"));
+    await screen.findByRole("heading", { level: 2, name: "Event event-1" });
+
+    getSafetyReview.mockRejectedValueOnce(new Error("reload failed"));
+    await user.click(screen.getByRole("button", { name: "Submit response" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("The response was recorded, but the safety history could not be refreshed.");
+
+    getSafetyReview.mockImplementation(async (id) => detailFor(id, "approved"));
+    await user.click(within(alert).getByRole("button", { name: "Try again" }));
+
+    expect(await screen.findByText(/No further response can be submitted/)).toBeInTheDocument();
+    expect(getSafetyReview).toHaveBeenLastCalledWith("event-1");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM591_AC4_a_conflict_whose_reload_fails_offers_try_again_for_that_event", async () => {
+    const user = userEvent.setup();
+    submitSafetyReviewResponse.mockRejectedValue(
+      Object.assign(new Error("conflict"), { response: { status: 409, data: { error: "Event changed." } } }),
+    );
+    await renderQueue();
+    await user.click(rowButton("Event event-2", "Review event"));
+    await screen.findByRole("heading", { level: 2, name: "Event event-2" });
+
+    getSafetyReview.mockRejectedValueOnce(new Error("reload failed"));
+    await user.click(screen.getByRole("button", { name: "Submit response" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Event changed. The latest safety history could not be loaded.");
+
+    getSafetyReview.mockImplementation(async (id) => detailFor(id, "approved"));
+    await user.click(within(alert).getByRole("button", { name: "Try again" }));
+
+    expect(await screen.findByText(/No further response can be submitted/)).toBeInTheDocument();
+    expect(getSafetyReview).toHaveBeenLastCalledWith("event-2");
+  });
+
+  it("SCRUM591_AC4_dates_use_the_standard_format", async () => {
+    const user = userEvent.setup();
+    // 01:00Z is 9:00 am in Singapore; a device-zone or device-format helper
+    // would print something else in a UTC runner.
+    const startsAt = "2026-01-15T01:00:00Z";
+    const endsAt = "2026-01-15T03:00:00Z";
+    getSafetyReviewQueue.mockResolvedValue([{ ...queueEvent("event-1"), startsAt, endsAt }]);
+    getSafetyReviewHistory.mockResolvedValue([{ ...historyRow("event-1"), respondedAt: "2026-01-16T06:30:00Z" }]);
+    getSafetyReview.mockResolvedValue({
+      ...detailFor("event-1"),
+      event: { id: "event-1", eventName: "Event event-1", status: "safety_review", startsAt, endsAt },
+      history: [{
+        id: "response-1",
+        outcome: "changes_requested",
+        safetyOfficerName: "Riley",
+        createdAt: "2026-01-15T17:30:00Z",
+        affectedBookingIds: [],
+        equipmentAffected: false,
+      }],
+    });
+
+    const queue = render(<SafetyOfficerDashboard user={{ name: "Riley" }} />);
+    await screen.findByText("Event event-1");
+    expect(screen.getByText("15 Jan 2026, 9:00 am – 11:00 am")).toBeInTheDocument();
+
+    await user.click(rowButton("Event event-1", "Review event"));
+    await screen.findByRole("heading", { level: 2, name: "Event event-1" });
+    expect(screen.getByText("Event date and times").nextElementSibling)
+      .toHaveTextContent("15 Jan 2026, 9:00 am – 11:00 am");
+    expect(screen.getByText("Riley · 16 Jan 2026, 1:30 am")).toBeInTheDocument();
+    queue.unmount();
+
+    await renderHistory();
+    expect(screen.getByText("Reviewed: 16 Jan 2026, 2:30 pm")).toBeInTheDocument();
+  });
+
+  it("SCRUM591_AC4_an_event_without_dates_says_not_recorded_once", async () => {
+    const user = userEvent.setup();
+    getSafetyReviewQueue.mockResolvedValue([{ ...queueEvent("event-1"), startsAt: null, endsAt: null }]);
+    getSafetyReviewHistory.mockResolvedValue([{ ...historyRow("event-1"), startsAt: null, endsAt: null }]);
+
+    const queue = render(<SafetyOfficerDashboard user={{ name: "Riley" }} />);
+    await screen.findByText("Event event-1");
+    expect(screen.getByText("Event event-1").closest("li").querySelector("p"))
+      .toHaveTextContent(/^Date and time not recorded$/);
+
+    await user.click(rowButton("Event event-1", "Review event"));
+    await screen.findByRole("heading", { level: 2, name: "Event event-1" });
+    expect(screen.getByText("Event date and times").nextElementSibling).toHaveTextContent(/^Not recorded$/);
+    queue.unmount();
+
+    await renderHistory();
+    expect(screen.getByText("Event event-1").closest("li").querySelector("p"))
+      .toHaveTextContent(/^Date and time not recorded$/);
+  });
+});

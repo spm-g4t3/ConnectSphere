@@ -1,18 +1,22 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   getSafetyReview,
   getSafetyReviewHistory,
 } from "../services/safetyReviewService";
-import { formatRange, formatTimestamp } from "../services/displayFormat";
-import { OUTCOME_LABELS, OUTCOME_TONES } from "./safetyReviewLabels";
+import { formatDateTime } from "../services/displayFormat";
+import { OUTCOME_LABELS, OUTCOME_TONES, eventRange } from "./safetyReviewLabels";
 import { SafetyReviewDetail } from "./SafetyReviewDetail";
 import Button from "./ui/Button";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import LoadingText from "./ui/LoadingText";
 import StatusBadge from "./ui/StatusBadge";
 
 export default function SafetyReviewHistory() {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [listError, setListError] = useState(null);
   const [error, setError] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [detail, setDetail] = useState(null);
@@ -21,24 +25,38 @@ export default function SafetyReviewHistory() {
   const listHeadingRef = useRef(null);
   const returnFocusId = useRef(null);
 
-  useEffect(() => {
-    let active = true;
+  // State is set only in the promise callbacks, and only while isActive()
+  // holds, so a first load that settles after unmounting is dropped.
+  const loadHistory = useCallback((isActive = () => true) =>
     getSafetyReviewHistory()
       .then((rows) => {
-        if (active) setHistory(rows);
+        if (!isActive()) return;
+        setHistory(rows);
+        setListError(null);
       })
       .catch((requestError) => {
-        if (active) {
-          setError(requestError.response?.data?.error ?? "The review history could not be loaded.");
+        if (isActive()) {
+          setListError(requestError.response?.data?.error ?? "The review history could not be loaded.");
         }
       })
       .finally(() => {
-        if (active) setLoading(false);
-      });
+        if (isActive()) setLoading(false);
+      }), []);
+
+  useEffect(() => {
+    let active = true;
+    loadHistory(() => active);
     return () => {
       active = false;
     };
-  }, []);
+  }, [loadHistory]);
+
+  // Loading starts true, so only a retry needs to raise it.
+  function retryHistory() {
+    setLoading(true);
+    setListError(null);
+    loadHistory();
+  }
 
   // Back returns focus to the row that was opened, or to the list heading if
   // that row is no longer listed.
@@ -57,7 +75,10 @@ export default function SafetyReviewHistory() {
     try {
       setDetail(await getSafetyReview(id));
     } catch (requestError) {
-      setError(requestError.response?.data?.error ?? "The event's safety details could not be loaded.");
+      setError({
+        message: requestError.response?.data?.error ?? "The event's safety details could not be loaded.",
+        retry: () => openDetail(id),
+      });
     } finally {
       setDetailLoading(false);
     }
@@ -80,8 +101,8 @@ export default function SafetyReviewHistory() {
           >
             &larr; Back to Review history
           </Button>
-          {detailLoading && <p>Loading event arrangements...</p>}
-          {error && <p className="safety-review__error" role="alert">{error}</p>}
+          {detailLoading && <LoadingText />}
+          {error && <ErrorNotice message={error.message} onRetry={error.retry} />}
           {detail && (
             <>
               {detail.event.status === "safety_review" && (
@@ -97,15 +118,20 @@ export default function SafetyReviewHistory() {
       ) : (
         <section>
           <h2 ref={listHeadingRef} tabIndex={-1}>Reviewed events</h2>
-          {loading && <p>Loading...</p>}
-          {error && <p className="safety-review__error" role="alert">{error}</p>}
-          {!loading && !error && history.length === 0 && <p>No events have been reviewed yet.</p>}
+          {loading && <LoadingText />}
+          {listError && <ErrorNotice message={listError} onRetry={retryHistory} />}
+          {!loading && !listError && history.length === 0 && (
+            <EmptyState
+              message="No events have been reviewed yet."
+              nextStep="An event appears here once a Safety Officer responds to it in Safety review."
+            />
+          )}
           <ul className="safety-review__queue">
             {history.map((event) => (
               <li key={event.id}>
                 <div>
                   <strong>{event.eventName}</strong>
-                  <p>{formatRange(event.startsAt, event.endsAt, "Date and time not recorded")}</p>
+                  <p>{eventRange(event.startsAt, event.endsAt, "Date and time not recorded")}</p>
                   <p>
                     Outcome:{" "}
                     <StatusBadge tone={OUTCOME_TONES[event.outcome] ?? "neutral"}>
@@ -114,7 +140,7 @@ export default function SafetyReviewHistory() {
                   </p>
                   {event.note && <p>Note: {event.note}</p>}
                   <p>Reviewed by: {event.safetyOfficerName ?? "Not recorded"}</p>
-                  <p>Reviewed: {formatTimestamp(event.respondedAt)}</p>
+                  <p>Reviewed: {formatDateTime(event.respondedAt)}</p>
                 </div>
                 <Button
                   ref={(node) => {

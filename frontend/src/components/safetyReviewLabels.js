@@ -1,3 +1,5 @@
+import { formatDateTimeRange } from "../services/displayFormat";
+
 export const OUTCOME_LABELS = {
   approved: "Approved",
   changes_requested: "Changes requested",
@@ -21,3 +23,10 @@ export const EVENT_STATUS_BADGES = {
   rejected: { label: "Rejected", tone: "danger" },
   cancelled: { label: "Cancelled", tone: "neutral" },
 };
+
+// The shared range helper prints the fallback once per missing end; an event
+// with no dates at all is one missing fact, so it is said once.
+export function eventRange(startsAt, endsAt, fallback) {
+  if (!startsAt && !endsAt) return fallback;
+  return formatDateTimeRange(startsAt, endsAt, fallback);
+}

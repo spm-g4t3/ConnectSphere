@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { submitSafetyReviewResponse } from "../services/safetyReviewService";
-import { formatRange, formatTimestamp } from "../services/displayFormat";
-import { EVENT_STATUS_BADGES, OUTCOME_LABELS, OUTCOME_TONES } from "./safetyReviewLabels";
+import { formatDateTime } from "../services/displayFormat";
+import { EVENT_STATUS_BADGES, OUTCOME_LABELS, OUTCOME_TONES, eventRange } from "./safetyReviewLabels";
 import Button from "./ui/Button";
 import StatusBadge from "./ui/StatusBadge";
 
@@ -67,7 +67,7 @@ export function SafetyReviewDetail({ detail, onSubmitted, onError, readOnly = fa
         <dt>Expected attendance</dt>
         <dd>{event.expectedAttendance ?? "Not recorded"}</dd>
         <dt>Event date and times</dt>
-        <dd>{formatRange(event.startsAt, event.endsAt, "Not recorded")}</dd>
+        <dd>{eventRange(event.startsAt, event.endsAt, "Not recorded")}</dd>
         <dt>Accessibility requirements</dt>
         <dd>{recorded(event.accessibilityRequirements)}</dd>
         <dt>Coordinator's note</dt>
@@ -143,7 +143,7 @@ export function SafetyReviewDetail({ detail, onSubmitted, onError, readOnly = fa
               <StatusBadge tone={OUTCOME_TONES[response.outcome] ?? "neutral"}>
                 {OUTCOME_LABELS[response.outcome] ?? response.outcome}
               </StatusBadge>
-              <span>{response.safetyOfficerName ?? "Safety Officer"} · {formatTimestamp(response.createdAt)}</span>
+              <span>{response.safetyOfficerName ?? "Safety Officer"} · {formatDateTime(response.createdAt)}</span>
               {response.note && <p>{response.note}</p>}
               <p>
                 Affected bookings: {response.affectedBookingIds.length};

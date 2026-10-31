@@ -3,11 +3,13 @@ import {
   getSafetyReview,
   getSafetyReviewQueue,
 } from "../services/safetyReviewService";
-import { formatRange } from "../services/displayFormat";
 import NotificationInbox from "./NotificationInbox";
 import Button from "./ui/Button";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import LoadingText from "./ui/LoadingText";
 import { SafetyReviewDetail } from "./SafetyReviewDetail";
-import { OUTCOME_LABELS } from "./safetyReviewLabels";
+import { OUTCOME_LABELS, eventRange } from "./safetyReviewLabels";
 
 function waitingLabel(seconds) {
   const elapsed = Math.max(0, Number(seconds) || 0);
@@ -24,6 +26,9 @@ export default function SafetyOfficerDashboard({ user }) {
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [listError, setListError] = useState(null);
+  // The review pane shows open, refresh and submit failures in one place, so
+  // each carries the retry for what failed (none for a form error).
   const [error, setError] = useState(null);
   const [message, setMessage] = useState(null);
   const rowButtons = useRef(new Map());
@@ -32,11 +37,12 @@ export default function SafetyOfficerDashboard({ user }) {
 
   const refreshQueue = useCallback(async () => {
     setLoading(true);
+    setListError(null);
     try {
       setQueue(await getSafetyReviewQueue());
-      setError(null);
+      setListError(null);
     } catch (requestError) {
-      setError(requestError.response?.data?.error ?? "The safety review list could not be loaded.");
+      setListError(requestError.response?.data?.error ?? "The safety review list could not be loaded.");
     } finally {
       setLoading(false);
     }
@@ -64,9 +70,21 @@ export default function SafetyOfficerDashboard({ user }) {
     try {
       setDetail(await getSafetyReview(id));
     } catch (requestError) {
-      setError(requestError.response?.data?.error ?? "The event's safety details could not be loaded.");
+      setError({
+        message: requestError.response?.data?.error ?? "The event's safety details could not be loaded.",
+        retry: () => openReview(id),
+      });
     } finally {
       setDetailLoading(false);
+    }
+  }
+
+  async function reloadDetail(id, failureMessage) {
+    try {
+      setDetail(await getSafetyReview(id));
+      setError(null);
+    } catch {
+      setError({ message: failureMessage, retry: () => reloadDetail(id, failureMessage) });
     }
   }
 
@@ -74,11 +92,7 @@ export default function SafetyOfficerDashboard({ user }) {
     setMessage(`Response recorded: ${OUTCOME_LABELS[outcome]}.`);
     setError(null);
     await refreshQueue();
-    try {
-      setDetail(await getSafetyReview(id));
-    } catch {
-      setError("The response was recorded, but the safety history could not be refreshed.");
-    }
+    await reloadDetail(id, "The response was recorded, but the safety history could not be refreshed.");
   }
 
   async function responseError(responseError) {
@@ -86,14 +100,15 @@ export default function SafetyOfficerDashboard({ user }) {
       setError(null);
       return;
     }
-    setError(responseError.message);
+    // Submitting again is the retry for a form error, so none is offered.
+    setError({ message: responseError.message });
     if (responseError.status === 409 && selectedId) {
       await refreshQueue();
-      setError(responseError.message);
       try {
         setDetail(await getSafetyReview(selectedId));
       } catch {
-        setError(`${responseError.message} The latest safety history could not be loaded.`);
+        const failureMessage = `${responseError.message} The latest safety history could not be loaded.`;
+        setError({ message: failureMessage, retry: () => reloadDetail(selectedId, failureMessage) });
       }
     }
   }
@@ -117,9 +132,9 @@ export default function SafetyOfficerDashboard({ user }) {
           >
             &larr; Back to Safety review
           </Button>
-          {detailLoading && <p>Loading event arrangements...</p>}
+          {detailLoading && <LoadingText />}
           {message && <p className="safety-review__success" role="status">{message}</p>}
-          {error && <p className="safety-review__error" role="alert">{error}</p>}
+          {error && <ErrorNotice message={error.message} onRetry={error.retry} />}
           {detail && (
             <SafetyReviewDetail
               detail={detail}
@@ -131,15 +146,20 @@ export default function SafetyOfficerDashboard({ user }) {
       ) : (
         <section>
           <h2 ref={listHeadingRef} tabIndex={-1}>Waiting for review</h2>
-          {loading && <p>Loading...</p>}
-          {error && <p className="safety-review__error" role="alert">{error}</p>}
-          {!loading && !error && queue.length === 0 && <p>No events are waiting for a safety review.</p>}
+          {loading && <LoadingText />}
+          {listError && <ErrorNotice message={listError} onRetry={refreshQueue} />}
+          {!loading && !listError && queue.length === 0 && (
+            <EmptyState
+              message="No events are waiting for a safety review."
+              nextStep="Events appear here when a coordinator sends them for a safety check."
+            />
+          )}
           <ul className="safety-review__queue">
             {queue.map((event) => (
               <li key={event.id}>
                 <div>
                   <strong>{event.eventName}</strong>
-                  <p>{formatRange(event.startsAt, event.endsAt, "Date and time not recorded")}</p>
+                  <p>{eventRange(event.startsAt, event.endsAt, "Date and time not recorded")}</p>
                   <p>Venues: {event.venues.length ? event.venues.join(", ") : "Not recorded"}</p>
                   <p>Expected attendance: {event.expectedAttendance ?? "Not recorded"}</p>
                   <p>Coordinator: {event.coordinatorName ?? "Not recorded"}</p>
