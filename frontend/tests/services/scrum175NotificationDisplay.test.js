@@ -52,18 +52,6 @@ const attendeeConfirmed = (overrides = {}) => ({
   ...overrides,
 });
 
-const decided = (overrides = {}) => ({
-  eventRequestId: EVENT,
-  eventName: "Tech Talk",
-  changeRequestId: "cr-1",
-  changeField: "proposed_start",
-  requestedChange: "Start an hour later",
-  decision: "approved",
-  decisionNotes: "Hall is free then",
-  decidedAt: "2026-11-02T09:00:00+08:00",
-  ...overrides,
-});
-
 describe("SCRUM175_AC1 event_confirmed for the Organiser", () => {
   it("SCRUM175_AC1_organiser_is_told_the_event_is_confirmed_with_its_period_and_venues", () => {
     const { headline, detail } = describe175("event_confirmed", organiserConfirmed());
@@ -115,31 +103,6 @@ describe("SCRUM175_AC3 event_venue_changed for attendees", () => {
   });
 });
 
-describe("SCRUM175_AC5 change_request_decided for the Organiser", () => {
-  it("SCRUM175_AC5_organiser_is_told_their_change_request_was_approved_with_field_and_notes", () => {
-    const { headline, detail } = describe175("change_request_decided", decided());
-
-    expect(headline).toBe("Your change request for Tech Talk was approved");
-    expect(detail).toContain("Proposed start");
-    expect(detail).toContain("Hall is free then");
-  });
-
-  it("SCRUM175_AC5_organiser_is_told_their_change_request_was_declined", () => {
-    const { headline, detail } = describe175(
-      "change_request_decided",
-      decided({ decision: "rejected", decisionNotes: "No hall is free" }),
-    );
-
-    expect(headline).toBe("Your change request for Tech Talk was declined");
-    expect(detail).toContain("No hall is free");
-  });
-
-  it("SCRUM175_AC5_a_decision_without_notes_says_no_reason_was_recorded", () => {
-    const { detail } = describe175("change_request_decided", decided({ decision: "rejected", decisionNotes: null }));
-    expect(detail).toContain("No reason recorded");
-  });
-});
-
 describe("SCRUM175_AC6 event_cancelled for attendees", () => {
   it("SCRUM175_AC6_attendee_is_told_the_event_was_cancelled_with_the_coordinators_message", () => {
     const { headline, detail } = describe175("event_cancelled", {
@@ -188,16 +151,6 @@ describe("SCRUM175 notices with parts of the payload missing", () => {
     });
   });
 
-  it.each([["other"], [undefined], [42]])(
-    "SCRUM175_AC5_a_change_field_of_%s_names_no_field",
-    (changeField) => {
-      expect(describe175("change_request_decided", decided({ changeField }))).toEqual({
-        headline: "Your change request for Tech Talk was approved",
-        detail: "Coordinator's notes: Hall is free then.",
-      });
-    },
-  );
-
   it("SCRUM175_AC3_venue_change_without_the_previous_venue_says_unknown_venue", () => {
     expect(describe175("event_venue_changed", {
       audience: "attendee", eventRequestId: EVENT, eventName: "Tech Talk", venueName: "Hall B",
@@ -213,9 +166,7 @@ describe("SCRUM175_AC7 an unknown branch reads as the generic notification", () 
     ["event_confirmed", { ...attendeeConfirmed(), audience: "venue_staff" }],
     ["event_confirmed", { ...attendeeConfirmed(), audience: undefined }],
     ["event_venue_changed", { audience: "organiser", eventName: "Tech Talk", venueName: "Hall B" }],
-    ["change_request_decided", decided({ decision: "event_cancelled" })],
-    ["change_request_decided", decided({ decision: undefined })],
-  ])("SCRUM175_AC7_%s_with_an_unknown_audience_or_decision_is_generic", (type, payload) => {
+  ])("SCRUM175_AC7_%s_with_an_unknown_audience_is_generic", (type, payload) => {
     expect(describe175(type, payload)).toEqual(GENERIC);
   });
 });
@@ -267,13 +218,10 @@ describe("SCRUM175_AC7 where each notice opens", () => {
     expect(notificationLink(note("event_cancelled"), "attendee")).toBeNull();
   });
 
-  it.each(["event_confirmed", "change_request_decided"])(
-    "SCRUM175_AC7_organiser_%s_opens_their_list_focused_on_the_event",
-    (type) => {
-      expect(notificationLink(note(type), "event_organiser")).toEqual({
-        to: "/events",
-        state: { focusEventRequestId: EVENT },
-      });
-    },
-  );
+  it("SCRUM175_AC7_organiser_event_confirmed_opens_their_list_focused_on_the_event", () => {
+    expect(notificationLink(note("event_confirmed"), "event_organiser")).toEqual({
+      to: "/events",
+      state: { focusEventRequestId: EVENT },
+    });
+  });
 });

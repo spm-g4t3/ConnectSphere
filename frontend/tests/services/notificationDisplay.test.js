@@ -1100,23 +1100,31 @@ describe("describeNotification: missing names and payloads", () => {
   });
 });
 
-// Every change to notifications_type_known restates the whole list, so the
-// latest file that sets it (the baseline, or a migration from 010 on) is what
-// the backend can send; a type there with no wording here would show as "New notification".
+// The types the backend can send: the latest file that restates
+// notifications_type_known (the baseline, or a migration from 010 on), plus any
+// a later migration widens it by. A type there with no wording here would show
+// as "New notification".
 const DB = resolve(dirname(fileURLToPath(import.meta.url)), "../../../backend/db");
 const TYPE_LIST =
   /notifications_type_known\s+check\s*\(\s*type\s*(?:=\s*any\s*\(\s*array\s*\[([^\]]*)\]|in\s*\(([^)]*)\))/;
+// A widen reads the live list back and adds the types it lacks (042's idiom).
+const WIDENED_TYPES = /unnest\(array\[([^\]]*)\]\)\s+as\s+t\s+where\s+not\s+\(t\s*=\s*any\s*\(v_types\)\)/;
+const quoted = (text) => [...text.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
 
 function knownNotificationTypes() {
   const later = readdirSync(join(DB, "migrations"))
     .filter((name) => /^\d+_.*\.sql$/.test(name))
     .sort()
     .map((name) => join(DB, "migrations", name));
-  const lists = [join(DB, "baseline", "05_notifications.sql"), ...later]
-    .map((file) => readFileSync(file, "utf8").match(TYPE_LIST))
-    .filter(Boolean);
-  const [, array, plain] = lists.at(-1);
-  return [...(array ?? plain).matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
+  let known = [];
+  for (const file of [join(DB, "baseline", "05_notifications.sql"), ...later]) {
+    const source = readFileSync(file, "utf8");
+    const list = source.match(TYPE_LIST);
+    if (list) known = quoted(list[1] ?? list[2]);
+    const widened = source.match(WIDENED_TYPES);
+    if (widened) known = [...new Set([...known, ...quoted(widened[1])])];
+  }
+  return known;
 }
 
 const FIXTURES = {
@@ -1190,7 +1198,6 @@ const FIXTURES = {
   registration_promoted: { eventName: "Tech Talk" },
   // SCRUM-175 (042).
   event_confirmed: { audience: "organiser", eventName: "Tech Talk", reconfirmed: false, venues: [] },
-  change_request_decided: { eventName: "Tech Talk", changeField: "venue", decision: "approved" },
   event_venue_changed: { audience: "attendee", eventName: "Tech Talk", previousVenueName: "Hall A", venueName: "Hall B" },
 };
 

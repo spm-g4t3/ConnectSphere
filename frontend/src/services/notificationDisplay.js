@@ -40,10 +40,6 @@
 //     startsAt, endsAt, confirmedAt, reconfirmed }, plus venues: [{ venueName,
 //     startsAt, endsAt }] for audience organiser or venueNames: [] for
 //     audience attendee
-//   change_request_decided (042, SCRUM-175): { eventRequestId, eventName,
-//     changeRequestId, changeField, requestedChange, decision, decisionNotes,
-//     decidedAt }; decision is approved or rejected, changeField the
-//     event_change_field value (proposed_start, venue, other, ...)
 //   event_venue_changed (042, SCRUM-175): { audience, eventRequestId,
 //     eventName, previousVenueName, venueName }; audience is attendee
 //   event_rejected (024, SCRUM-347): { audience, eventName }, plus reason and
@@ -111,7 +107,7 @@ import { formatRange, formatTimestamp } from "./displayFormat";
 import { reasonLabel } from "./venueBlockReasons";
 import { formatOccupiedPeriod } from "./occupiedPeriodDisplay";
 import { formatVenuePeriod, formatVenueTimestamp } from "./datetimeFormat";
-import { detailFieldLabel, detailFieldList } from "./eventDetailFields";
+import { detailFieldList } from "./eventDetailFields";
 
 const UNNAMED_EVENT = "Unnamed event";
 const UNKNOWN_VENUE = "Unknown venue";
@@ -311,16 +307,6 @@ function confirmedSchedule(payload, venueNames) {
     : "";
   const at = names.length > 0 ? ` at ${joinWords(names)}` : "";
   return period || at ? ` It runs${period}${at}.` : "";
-}
-
-/**
- * The label of a change request's field. The enum is snake_case and the
- * labels are keyed in camelCase, so proposed_start reads "Proposed start".
- * "other" names no field, so it returns "".
- */
-function changeFieldLabel(changeField) {
-  if (typeof changeField !== "string" || !changeField || changeField === "other") return "";
-  return detailFieldLabel(changeField.replace(/_([a-z])/g, (_match, letter) => letter.toUpperCase()));
 }
 
 function describeClarification(payload, _names, type) {
@@ -640,24 +626,6 @@ const DESCRIBERS = {
       };
     }
     return undefined;
-  },
-
-  // Sent to the Organiser for an approval or rejection only; the automatic
-  // closures have their own notices. An unknown decision reads as generic.
-  change_request_decided(payload, { eventName }) {
-    const headlineByDecision = {
-      approved: `Your change request for ${eventName} was approved`,
-      rejected: `Your change request for ${eventName} was declined`,
-    };
-    if (!Object.hasOwn(headlineByDecision, payload.decision)) return undefined;
-    const field = changeFieldLabel(payload.changeField);
-
-    return {
-      headline: headlineByDecision[payload.decision],
-      detail:
-        (field ? `Field: ${field}. ` : "") +
-        `Coordinator's notes: ${asSentence(payload.decisionNotes || NO_REASON)}`,
-    };
   },
 
   // Sent to registered attendees; the Organiser hears of the same change
