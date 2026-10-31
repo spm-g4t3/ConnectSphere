@@ -163,10 +163,10 @@ describe("SCRUM175 notices with parts of the payload missing", () => {
 
 describe("SCRUM175_AC7 an unknown branch reads as the generic notification", () => {
   it.each([
-    ["event_confirmed", { ...attendeeConfirmed(), audience: "venue_staff" }],
-    ["event_confirmed", { ...attendeeConfirmed(), audience: undefined }],
-    ["event_venue_changed", { audience: "organiser", eventName: "Tech Talk", venueName: "Hall B" }],
-  ])("SCRUM175_AC7_%s_with_an_unknown_audience_is_generic", (type, payload) => {
+    ["event_confirmed", "venue_staff", { ...attendeeConfirmed(), audience: "venue_staff" }],
+    ["event_confirmed", "no", { ...attendeeConfirmed(), audience: undefined }],
+    ["event_venue_changed", "organiser", { audience: "organiser", eventName: "Tech Talk", venueName: "Hall B" }],
+  ])("SCRUM175_AC7_%s_with_%s_audience_is_generic", (type, _audience, payload) => {
     expect(describe175(type, payload)).toEqual(GENERIC);
   });
 });

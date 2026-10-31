@@ -178,6 +178,28 @@ describe('SCRUM-175: confirmation, venue change and cancellation notices', () =>
       expect((await notices(id, 'event_confirmed', 'organiser'))[0].payload.reconfirmed).toBe(true);
     });
 
+    // The promotion trigger fires inside the status change, so the attendee
+    // notice must be written after it or the newly registered would miss it.
+    it('SCRUM175_AC2_attendees_promoted_by_the_reconfirmation_are_told_too', async () => {
+      const id = await safetyApproved([await makeVenue()]);
+      await confirmedBefore(id);
+      await db.query(
+        `update event_requests
+            set registration_enabled = true, registration_opens_at = now() - interval '1 day', registration_capacity = 3
+          where id = $1`,
+        [id],
+      );
+      await register(id, ['registered', 'registered', 'waitlisted']);
+
+      await confirm(id);
+
+      expect(await one(
+        'select status from event_registrations where event_request_id = $1 and attendee_id = $2',
+        [id, attendees[2]],
+      )).toEqual({ status: 'registered' });
+      expect(await recipients(id, 'event_confirmed', 'attendee')).toEqual(sorted(attendees.slice(0, 3)));
+    });
+
     it('SCRUM175_AC2_a_first_confirmation_tells_attendees_nothing', async () => {
       const id = await safetyApproved([await makeVenue()]);
       await register(id, ['registered']);
@@ -209,6 +231,18 @@ describe('SCRUM-175: confirmation, venue change and cancellation notices', () =>
           venueName: await nameOf(newVenue),
         },
       }]);
+    });
+
+    // A significant change returns the event to Approved with its registrations
+    // kept; they learn the venues from the re-confirmation instead.
+    it('SCRUM175_AC3_a_replacement_before_reconfirmation_tells_attendees_nothing', async () => {
+      const id = await makeEvent('approved');
+      const flagged = await flaggedBooking(id);
+      await register(id, ['registered']);
+
+      await approveReplacement(id, await makeVenue(), flagged.bookingId);
+
+      expect(await recipients(id, 'event_venue_changed', 'attendee')).toEqual([]);
     });
 
     it('SCRUM175_AC3_cancelling_a_flagged_booking_tells_attendees_nothing', async () => {
