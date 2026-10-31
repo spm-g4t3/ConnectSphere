@@ -1,12 +1,15 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   getSafetyReview,
   getSafetyReviewQueue,
 } from "../services/safetyReviewService";
-import { formatRange } from "../services/displayFormat";
 import NotificationInbox from "./NotificationInbox";
+import Button from "./ui/Button";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import LoadingText from "./ui/LoadingText";
 import { SafetyReviewDetail } from "./SafetyReviewDetail";
-import { OUTCOME_LABELS } from "./safetyReviewLabels";
+import { OUTCOME_LABELS, eventRange } from "./safetyReviewLabels";
 
 function waitingLabel(seconds) {
   const elapsed = Math.max(0, Number(seconds) || 0);
@@ -23,16 +26,24 @@ export default function SafetyOfficerDashboard({ user }) {
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [listError, setListError] = useState(null);
+  // The review pane shows open, refresh and submit failures in one place, so
+  // each carries the retry for what failed (none for a form error).
   const [error, setError] = useState(null);
   const [message, setMessage] = useState(null);
+  const [detailFocusRequest, setDetailFocusRequest] = useState(0);
+  const rowButtons = useRef(new Map());
+  const listHeadingRef = useRef(null);
+  const returnFocusId = useRef(null);
 
   const refreshQueue = useCallback(async () => {
     setLoading(true);
+    setListError(null);
     try {
       setQueue(await getSafetyReviewQueue());
-      setError(null);
+      setListError(null);
     } catch (requestError) {
-      setError(requestError.response?.data?.error ?? "The safety review list could not be loaded.");
+      setListError(requestError.response?.data?.error ?? "The safety review list could not be loaded.");
     } finally {
       setLoading(false);
     }
@@ -41,6 +52,15 @@ export default function SafetyOfficerDashboard({ user }) {
   useEffect(() => {
     refreshQueue();
   }, [refreshQueue]);
+
+  // Back returns focus to the row that was opened; a reviewed event has left
+  // the queue, so the list heading takes focus instead.
+  useEffect(() => {
+    if (selectedId || loading || returnFocusId.current === null) return;
+    const target = rowButtons.current.get(returnFocusId.current) ?? listHeadingRef.current;
+    returnFocusId.current = null;
+    target?.focus();
+  }, [selectedId, loading]);
 
   async function openReview(id) {
     setSelectedId(id);
@@ -51,9 +71,23 @@ export default function SafetyOfficerDashboard({ user }) {
     try {
       setDetail(await getSafetyReview(id));
     } catch (requestError) {
-      setError(requestError.response?.data?.error ?? "The event's safety details could not be loaded.");
+      setError({
+        message: requestError.response?.data?.error ?? "The event's safety details could not be loaded.",
+        retry: () => openReview(id),
+      });
     } finally {
       setDetailLoading(false);
+    }
+  }
+
+  async function reloadDetail(id, failureMessage, retried = false) {
+    try {
+      setDetail(await getSafetyReview(id));
+      setError(null);
+      // Try again had focus and has now gone, so focus returns to the event.
+      if (retried) setDetailFocusRequest((count) => count + 1);
+    } catch {
+      setError({ message: failureMessage, retry: () => reloadDetail(id, failureMessage, true) });
     }
   }
 
@@ -61,11 +95,7 @@ export default function SafetyOfficerDashboard({ user }) {
     setMessage(`Response recorded: ${OUTCOME_LABELS[outcome]}.`);
     setError(null);
     await refreshQueue();
-    try {
-      setDetail(await getSafetyReview(id));
-    } catch {
-      setError("The response was recorded, but the safety history could not be refreshed.");
-    }
+    await reloadDetail(id, "The response was recorded, but the safety history could not be refreshed.");
   }
 
   async function responseError(responseError) {
@@ -73,29 +103,30 @@ export default function SafetyOfficerDashboard({ user }) {
       setError(null);
       return;
     }
-    setError(responseError.message);
+    // Submitting again is the retry for a form error, so none is offered.
+    setError({ message: responseError.message });
     if (responseError.status === 409 && selectedId) {
       await refreshQueue();
-      setError(responseError.message);
       try {
         setDetail(await getSafetyReview(selectedId));
       } catch {
-        setError(`${responseError.message} The latest safety history could not be loaded.`);
+        const failureMessage = `${responseError.message} The latest safety history could not be loaded.`;
+        setError({ message: failureMessage, retry: () => reloadDetail(selectedId, failureMessage, true) });
       }
     }
   }
 
   return (
     <div className="dashboard dashboard--safety-officer">
-      <h1>Safety Officer</h1>
+      <h1>Safety review</h1>
       <p>Signed in as {user.name ?? user.email}.</p>
 
       {selectedId ? (
         <section>
-          <button
-            className="safety-review__back"
-            type="button"
+          <Button
+            variant="link"
             onClick={() => {
+              returnFocusId.current = selectedId;
               setSelectedId(null);
               setDetail(null);
               setError(null);
@@ -103,36 +134,50 @@ export default function SafetyOfficerDashboard({ user }) {
             }}
           >
             &larr; Back to Safety review
-          </button>
-          {detailLoading && <p>Loading event arrangements...</p>}
+          </Button>
+          {detailLoading && <LoadingText />}
           {message && <p className="safety-review__success" role="status">{message}</p>}
-          {error && <p className="safety-review__error" role="alert">{error}</p>}
+          {error && <ErrorNotice message={error.message} onRetry={error.retry} />}
           {detail && (
             <SafetyReviewDetail
               detail={detail}
               onSubmitted={responseSubmitted}
               onError={responseError}
+              focusRequest={detailFocusRequest}
             />
           )}
         </section>
       ) : (
         <section>
-          <h2>Safety review</h2>
-          {loading && <p>Loading...</p>}
-          {error && <p className="safety-review__error" role="alert">{error}</p>}
-          {!loading && !error && queue.length === 0 && <p>No events are waiting for a safety review.</p>}
+          <h2 ref={listHeadingRef} tabIndex={-1}>Waiting for review</h2>
+          {loading && <LoadingText />}
+          {listError && <ErrorNotice message={listError} onRetry={refreshQueue} />}
+          {!loading && !listError && queue.length === 0 && (
+            <EmptyState
+              message="No events are waiting for a safety review."
+              nextStep="Events appear here when a coordinator sends them for a safety check."
+            />
+          )}
           <ul className="safety-review__queue">
             {queue.map((event) => (
               <li key={event.id}>
                 <div>
                   <strong>{event.eventName}</strong>
-                  <p>{formatRange(event.startsAt, event.endsAt, "Date and time not recorded")}</p>
+                  <p>{eventRange(event.startsAt, event.endsAt, "Date and time not recorded")}</p>
                   <p>Venues: {event.venues.length ? event.venues.join(", ") : "Not recorded"}</p>
                   <p>Expected attendance: {event.expectedAttendance ?? "Not recorded"}</p>
                   <p>Coordinator: {event.coordinatorName ?? "Not recorded"}</p>
                   <p>Waiting: {waitingLabel(event.waitingSeconds)}</p>
                 </div>
-                <button type="button" onClick={() => openReview(event.id)}>Review event</button>
+                <Button
+                  ref={(node) => {
+                    if (node) rowButtons.current.set(event.id, node);
+                    else rowButtons.current.delete(event.id);
+                  }}
+                  onClick={() => openReview(event.id)}
+                >
+                  Review event
+                </Button>
               </li>
             ))}
           </ul>
