@@ -2116,9 +2116,11 @@ export async function listEventRequestsForCoordinator(coordinatorId, { client } 
 
   const db = await resolveClient(client);
 
+  // SCRUM-402 (SCRUM-404): each event's change requests come with it, so My
+  // events can say how many submissions wait, in the same round trip.
   const { data, error } = await db
     .from('event_requests')
-    .select(COORDINATOR_COLUMNS)
+    .select(`${COORDINATOR_COLUMNS}, ${CHANGE_REQUEST_COUNT_EMBED}`)
     .eq('assigned_coordinator_id', coordinatorId)
     .order('proposed_start', { ascending: true, nullsFirst: false })
     .order('id', { ascending: true });
@@ -2135,7 +2137,20 @@ export async function listEventRequestsForCoordinator(coordinatorId, { client } 
   return rows.map((row) => ({
     ...withClosingNotes(row),
     organiserName: nameOf(row.organiser_id),
+    openChangeRequestCount: openChangeRequestGroups(row.event_change_requests),
   }));
+}
+
+/** The change-request columns /mine reads to count open submissions. */
+const CHANGE_REQUEST_COUNT_EMBED = 'event_change_requests(request_group_id, status)';
+
+/**
+ * SCRUM-402: how many submissions (groups, not rows) still wait for a
+ * decision. A row from before 036 is its own group.
+ */
+function openChangeRequestGroups(changeRequests) {
+  const open = (changeRequests ?? []).filter((cr) => cr.status === 'outstanding' || cr.status === 'in_progress');
+  return new Set(open.map((cr) => cr.request_group_id)).size;
 }
 
 

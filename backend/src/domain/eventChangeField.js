@@ -24,6 +24,8 @@ export const CHANGE_FIELD = Object.freeze({
   VENUE: 'venue',
   EQUIPMENT: 'equipment',
   OTHER: 'other',
+  // SCRUM-402 AC7 (035): the Organiser asks for the event to be cancelled.
+  CANCELLATION: 'cancellation',
 });
 
 /** Every value CHANGE_FIELD holds, for checking a value against the vocabulary. */
@@ -45,6 +47,7 @@ export const CHANGE_FIELD_LABEL = Object.freeze({
   [CHANGE_FIELD.VENUE]: 'Venue',
   [CHANGE_FIELD.EQUIPMENT]: 'Equipment',
   [CHANGE_FIELD.OTHER]: 'Something else',
+  [CHANGE_FIELD.CANCELLATION]: 'Cancel the event',
 });
 
 /**
@@ -58,21 +61,11 @@ export function isValidChangeField(value) {
 }
 
 /**
- * Which event_requests column a structured change field maps onto, for
- * applying an approved change back onto the event record (SCRUM-37, AC5).
- *
- * A field with no entry here -- venue, equipment, other -- has no column of
- * its own to write into; see the comment on 'other' in
- * 006_event_change_requests.sql for why. Approving a change to one of those
- * is still a valid decision, it is only not reflected anywhere on the event
- * record, because nowhere yet exists to put it.
- *
- * Mirrors the field-by-field branches process_change_request applies in
- * 006_event_change_requests.sql -- the actual write happens there,
- * inside the same transaction as the decision, not from this module or from
- * JavaScript at all. This map exists so that mapping is documented and
- * testable in one place rather than only readable out of a SQL function
- * body; a test checks the two stay in step.
+ * Which event_requests column each of the six structured change fields is
+ * stored in (SCRUM-37). Since SCRUM-402 a venue request writes a column too,
+ * the venue requirements, and equipment in review writes the equipment
+ * requirements: DETAIL_FIELD_BY_CHANGE_FIELD below is the full mapping, and
+ * this one stays for the six it has always named.
  */
 export const EVENT_REQUEST_COLUMN_BY_CHANGE_FIELD = Object.freeze({
   [CHANGE_FIELD.EVENT_NAME]: 'event_name',
@@ -93,3 +86,20 @@ export const EVENT_REQUEST_COLUMN_BY_CHANGE_FIELD = Object.freeze({
 export function hasEventRequestColumn(changeField) {
   return Object.hasOwn(EVENT_REQUEST_COLUMN_BY_CHANGE_FIELD, changeField);
 }
+
+/**
+ * SCRUM-402: the detail field (backend/src/domain/eventDetailField.js) each
+ * change field is applied as, when a change request is accepted. A venue
+ * request is a change to the venue requirements (D6). Other and cancellation
+ * write no field. Mirrors change_request_targets() in 036; a test reads both.
+ */
+export const DETAIL_FIELD_BY_CHANGE_FIELD = Object.freeze({
+  [CHANGE_FIELD.EVENT_NAME]: 'eventName',
+  [CHANGE_FIELD.DESCRIPTION]: 'description',
+  [CHANGE_FIELD.PURPOSE]: 'purpose',
+  [CHANGE_FIELD.PROPOSED_START]: 'proposedStart',
+  [CHANGE_FIELD.PROPOSED_END]: 'proposedEnd',
+  [CHANGE_FIELD.EXPECTED_ATTENDANCE]: 'expectedAttendance',
+  [CHANGE_FIELD.VENUE]: 'venueRequirements',
+  [CHANGE_FIELD.EQUIPMENT]: 'equipmentRequirements',
+});

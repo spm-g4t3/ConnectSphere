@@ -15,8 +15,10 @@ import {
   CHANGE_FIELD_LABEL,
   isValidChangeField,
   EVENT_REQUEST_COLUMN_BY_CHANGE_FIELD,
+  DETAIL_FIELD_BY_CHANGE_FIELD,
   hasEventRequestColumn,
 } from '../../src/domain/eventChangeField.js';
+import { DETAIL_FIELDS, DETAIL_FIELD_COLUMN } from '../../src/domain/eventDetailField.js';
 import { useSchemaDb, enumLabels, functionSource } from './helpers/schemaVocabulary.js';
 
 const schemaDb = useSchemaDb();
@@ -79,28 +81,39 @@ describe('SCRUM-34: every change field has a label an Organiser can read', () =>
 });
 
 
-describe('SCRUM-37: EVENT_REQUEST_COLUMN_BY_CHANGE_FIELD mirrors process_change_request', () => {
+describe('SCRUM-402: the change fields map onto 387\'s detail fields as 036 applies them', () => {
   /**
-   * Pull the changeField -> column pairs straight out of the built
-   * process_change_request: each branch is one line of the form
-   * `... change_field = 'x' then update event_requests set y = ...`
-   * specifically so this test can parse it without a SQL parser.
+   * Since SCRUM-402, process_change_request (036) has no per-field branches to
+   * parse: it reads change_request_targets(), whose values list this pulls out.
+   * Renamed from SCRUM-37's test of those branches, which 036 replaced.
    */
-  async function columnsAppliedInSql() {
-    const sql = await functionSource(schemaDb(), 'process_change_request');
-    const pairs = [...sql.matchAll(
-      /change_field = '([a-z_]+)'\s+then\s+update\s+event_requests\s+set\s+([a-z_]+)\s*=/g,
-    )];
-    if (pairs.length === 0) throw new Error('could not find any change_field branches in process_change_request');
-
-    return Object.fromEntries(pairs.map((m) => [m[1], m[2]]));
+  async function targetsInSql() {
+    const sql = await functionSource(schemaDb(), 'change_request_targets');
+    const rows = [...sql.matchAll(/\('([a-z_]+)', '([A-Za-z]+)', '([a-z_]+)'\)/g)];
+    if (rows.length === 0) throw new Error('could not read change_request_targets()');
+    return rows.map(([, changeField, detailField, column]) => ({ changeField, detailField, column }));
   }
 
-  it('applies every structured field to exactly the column the SQL function applies it to', async () => {
-    // If this fails, EVENT_REQUEST_COLUMN_BY_CHANGE_FIELD and
-    // process_change_request's branches have drifted apart -- one names a
-    // field or column the other does not.
-    expect(EVENT_REQUEST_COLUMN_BY_CHANGE_FIELD).toEqual(await columnsAppliedInSql());
+  it('SCRUM402_AC5_every_change_field_targets_the_detail_field_and_column_036_applies', async () => {
+    const targets = await targetsInSql();
+
+    expect(Object.fromEntries(targets.map((t) => [t.changeField, t.detailField]))).toEqual(DETAIL_FIELD_BY_CHANGE_FIELD);
+    for (const { detailField, column } of targets) {
+      expect(DETAIL_FIELDS).toContain(detailField);
+      expect(DETAIL_FIELD_COLUMN[detailField]).toBe(column);
+    }
+    // The six SCRUM-37 named keep their columns; venue and equipment now have one.
+    for (const [changeField, column] of Object.entries(EVENT_REQUEST_COLUMN_BY_CHANGE_FIELD)) {
+      expect(DETAIL_FIELD_COLUMN[DETAIL_FIELD_BY_CHANGE_FIELD[changeField]]).toBe(column);
+    }
+  });
+
+  it('SCRUM402_AC5_a_venue_request_is_a_change_to_the_venue_requirements_and_other_and_cancellation_write_nothing', () => {
+    expect(DETAIL_FIELD_BY_CHANGE_FIELD[CHANGE_FIELD.VENUE]).toBe('venueRequirements');
+    expect(DETAIL_FIELD_BY_CHANGE_FIELD[CHANGE_FIELD.EQUIPMENT]).toBe('equipmentRequirements');
+    expect(DETAIL_FIELD_BY_CHANGE_FIELD).not.toHaveProperty(CHANGE_FIELD.OTHER);
+    expect(DETAIL_FIELD_BY_CHANGE_FIELD).not.toHaveProperty(CHANGE_FIELD.CANCELLATION);
+    expect(CHANGE_FIELD_LABEL[CHANGE_FIELD.CANCELLATION]).toBe('Cancel the event');
   });
 
   it('has no entry for fields with no column on event_requests', () => {

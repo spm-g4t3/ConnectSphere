@@ -12,8 +12,9 @@ describe('SCRUM-371: cancellation fields', () => {
 
   beforeAll(async () => {
     db = await createSchemaDb();
-    organiser = await seedUser(db, { email: 'organiser@test' });
-    coordinator = await seedUser(db, { email: 'coordinator@test' });
+    // Roles as they act: 050 checks the decider's role inside process_change_request's gate.
+    organiser = await seedUser(db, { email: 'organiser@test', role: 'event_organiser' });
+    coordinator = await seedUser(db, { email: 'coordinator@test', role: 'event_coordinator' });
   });
 
   afterAll(async () => {

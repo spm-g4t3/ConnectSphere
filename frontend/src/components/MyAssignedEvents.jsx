@@ -162,6 +162,12 @@ function EventRow({ event, onOpen }) {
             {display.label}
           </span>
           <NeedsAttentionBadge event={event} />
+          {/* SCRUM-402 (SCRUM-404): submissions waiting, counted by GET /mine. */}
+          {event.openChangeRequestCount > 0 && (
+            <span className="my-assigned-events__change-requests">
+              {event.openChangeRequestCount === 1 ? "1 change request" : `${event.openChangeRequestCount} change requests`}
+            </span>
+          )}
         </span>
         <span className="my-assigned-events__meta">
           <span>{formatEventDate(event.proposedStart)}</span>

@@ -315,7 +315,7 @@ no enum value. If the team moves the gate after Confirmed, only the from-status 
 | Case | Preconditions | Action | Expected result | Implemented by |
 |---|---|---|---|---|
 | AC7-01 | In Safety review | A adds, amends or removes an equipment line | 55000 "… only be changed as a significant change" (052's guard, D12) | Proved (pglite-558): `SCRUM489_AC7_%s_in_safety_review_is_refused_as_a_significant_change_and_nothing_changes`. No earlier test named safety_review: SCRUM-21's `SCRUM21_AC10_…` cover confirmed only. Over HTTP the route cannot tell the statuses apart, so `SCRUM21_AC10_a_confirmed_event_gets_409_with_the_significant_change_message` (eventEquipment.test.js) already proves the 409 |
-| AC7-02 | In Safety review | An approved change request moves the date, time or attendance | The event returns to Approved | **Cannot be tested as written** (D10): `process_change_request` keeps the status today; SCRUM-395 builds this |
+| AC7-02 | In Safety review | An approved change request moves the date, time or attendance | The event returns to Approved | Proved (pglite, SCRUM-402): `SCRUM402_AC5_while_%s_a_significant_field_goes_through_395_and_the_event_is_approved`. 30 October 2026: SCRUM-402 replaced process_change_request, so an approved change request on a Safety review event now goes through 395 and returns the event to Approved. |
 
 ### AC8 — the Safety Officers are told; the organiser sees "Safety check"
 
@@ -379,7 +379,8 @@ SCRUM-558: 60 cases (AC1-10, AC6-06, AC8-06 and AC8-07 added); **57 proved**; 1
 not yet implemented (AC8-07, the Safety Officer's card); the same 2. After the
 AC8-07 fix-up: **59 proved**; 0 not yet implemented; 1 that cannot be written
 (AC7-02, SCRUM-395's). After SCRUM-559: 62 cases (AC2-14 and AC2-15 added);
-**61 proved**; 0 not yet implemented; the same 1. Twenty-five are traps.
+**61 proved**; 0 not yet implemented; the same 1. Twenty-five are traps. After SCRUM-402
+(30 October 2026): **62 proved**; 0 not yet implemented; 0 that cannot be written.
 
 | Section | Cases |
 |---|---|

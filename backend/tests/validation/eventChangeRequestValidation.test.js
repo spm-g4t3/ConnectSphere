@@ -42,6 +42,7 @@ const VALID_REQUESTED_CHANGE = Object.freeze({
   [CHANGE_FIELD.VENUE]: 'Move to the larger hall on Level 3',
   [CHANGE_FIELD.EQUIPMENT]: 'Add two extra microphones',
   [CHANGE_FIELD.OTHER]: 'Something else that needs to change',
+  [CHANGE_FIELD.CANCELLATION]: 'We have lost our keynote speaker',
 });
 
 /** Run validation and return the thrown error, or null if it passed. */
