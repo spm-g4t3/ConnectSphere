@@ -87,6 +87,11 @@
 //   event_details_changed (022, SCRUM-387): { eventRequestId, eventName,
 //     reason, changedFields, status }; changedFields are the camelCase names
 //     in eventDetailFields.js, and eventName is the name after the edit
+//   change_request_decided (036, SCRUM-402): { eventRequestId, eventName,
+//     changeRequestId, decision, notes, changeFields }; to the Organiser;
+//     decision is approved or rejected, changeFields the enum members asked for
+//   change_request_significant_submitted (036, SCRUM-402): { eventRequestId,
+//     eventName, changeRequestId, changeFields }; to the event's holder
 //   booking_flagged_event_change (096): { eventName, venueName, startsAt,
 //     endsAt, reason }
 //   booking_request_event_change (096): { eventRequestId, eventName,
@@ -108,6 +113,7 @@ import { reasonLabel } from "./venueBlockReasons";
 import { formatOccupiedPeriod } from "./occupiedPeriodDisplay";
 import { formatVenuePeriod, formatVenueTimestamp } from "./datetimeFormat";
 import { detailFieldList } from "./eventDetailFields";
+import { changeFieldList } from "./changeRequestDisplay";
 
 const UNNAMED_EVENT = "Unnamed event";
 const UNKNOWN_VENUE = "Unknown venue";
@@ -824,6 +830,29 @@ const DESCRIBERS = {
     return {
       headline: `${eventName} has a significant change`,
       detail: `The event was updated by its Coordinator. Reason: ${payload.reason || NO_REASON}.`,
+    };
+  },
+
+  // SCRUM-402 (AC11). The outcome of the Organiser's change request, from the
+  // function that decided it; a cancellation request is named as one.
+  change_request_decided(payload, { eventName }) {
+    const fields = Array.isArray(payload.changeFields) ? payload.changeFields : [];
+    const cancellation = fields.includes("cancellation");
+    const subject = cancellation ? `Your request to cancel ${eventName}` : `Your change request for ${eventName}`;
+    const outcome = { approved: "accepted", rejected: "declined" }[payload.decision] ?? "closed";
+    const asked = !cancellation && fields.length > 0 ? `Requested: ${changeFieldList(fields)}. ` : "";
+    const note = payload.notes
+      ? `${payload.decision === "approved" ? "Coordinator's note" : "Reason"}: ${payload.notes}.`
+      : "No note was left.";
+    return { headline: `${subject} was ${outcome}`, detail: `${asked}${note}` };
+  },
+
+  // SCRUM-402 (AC12, W1 §6). The holder hears the Organiser asked for a significant change.
+  change_request_significant_submitted(payload, { eventName }) {
+    const fields = Array.isArray(payload.changeFields) ? payload.changeFields : [];
+    return {
+      headline: `The organiser asked to change ${eventName}`,
+      detail: `${fields.length > 0 ? `Requested: ${changeFieldList(fields)}. ` : ""}Review it on the event.`,
     };
   },
 

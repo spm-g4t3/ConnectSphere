@@ -1163,6 +1163,8 @@ const FIXTURES = {
   },
   event_significant_change: { eventName: "Tech Talk", reason: "Updated schedule" },
   event_details_changed: { eventName: "Tech Talk", reason: "Typo in the name", changedFields: ["eventName"] },
+  change_request_decided: { eventName: "Tech Talk", decision: "approved", notes: "Done", changeFields: ["purpose"] },
+  change_request_significant_submitted: { eventName: "Tech Talk", changeFields: ["proposed_start"] },
   event_significant_change_attendee: {
     eventName: "Tech Talk",
     startsAt: PAYLOAD.startsAt,
@@ -1243,6 +1245,14 @@ describe("describeNotification: event_rejected (SCRUM-347)", () => {
 });
 
 describe("describeNotification: every type the backend sends (SCRUM-172 AC6)", () => {
+  it("SCRUM402_AC11_the_known_types_include_what_036_appends_to_the_live_list", () => {
+    const known = knownNotificationTypes();
+    expect(known).toEqual(expect.arrayContaining(["change_request_decided", "change_request_significant_submitted"]));
+    // 037 restates the list whole after 036, so they now come from 039's append, and
+    // everything 037's list named stays.
+    expect(known).toEqual(expect.arrayContaining(["registration_promoted", "event_details_changed", "booking_flagged"]));
+  });
+
   it("SCRUM172_AC6_every_known_type_has_wording", () => {
     const known = knownNotificationTypes();
     expect(known.length).toBeGreaterThanOrEqual(18);

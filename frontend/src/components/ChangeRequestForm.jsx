@@ -2,79 +2,125 @@
 // Lets an Event Organiser request changes to a submitted event and specify
 // which event information or arrangement needs updating (SCRUM-32).
 //
-// AC covered here: "can request changes after submission" and "can specify
-// the information or arrangement that needs to be changed". Tracking whether
-// it's processed, and applying the change once processed, are separate
-// concerns — likely the other two subtasks you're about to send me.
+// SCRUM-402: one request may change several fields (C4), sent together as a
+// group the coordinator accepts or declines as a whole, with one optional note.
+// "Cancel the event" stands alone in a request (D8). Errors are keyed on the
+// status, never on the server's text; a 400's details[] go beside their row.
 
 import { useState } from "react";
 import { submitChangeRequest } from "../services/changeRequestService";
+import { SESSION_EXPIRED } from "../services/apiErrors";
 import {
   CHANGE_FIELD_OPTIONS,
   toChangeField,
 } from "../services/eventChangeFields";
 
 const DATE_CHANGE_FIELDS = new Set(["proposed_start", "proposed_end"]);
+const MAX_CHANGES = 9;
+const NOTE_MAX_LENGTH = 2000;
+
+const SUBMIT_ERROR_MESSAGES = {
+  400: "Your change request can't be submitted as written. Check each change and try again.",
+  401: SESSION_EXPIRED,
+  403: "This event can't be changed from your account.",
+  404: "This event can't be found. It may have been removed.",
+};
+
+let nextKey = 0;
+const newRow = () => ({ key: ++nextKey, option: "", details: "" });
+
+/** What the form refuses before sending: blanks, a field twice, a mixed cancellation. */
+function rowErrors(rows) {
+  const errors = rows.map(() => null);
+  const seen = new Map();
+  rows.forEach((row, i) => {
+    const changeField = toChangeField(row.option);
+    if (!row.option) errors[i] = "Choose what you'd like to change.";
+    else if (!row.details.trim()) {
+      errors[i] = changeField === "cancellation" ? "Say why you want to cancel." : "Describe the change you're requesting.";
+    } else if (seen.has(changeField)) {
+      // Accessibility and "Something else" both travel as `other` (eventChangeFields.js).
+      errors[i] = changeField === "other"
+        ? "Put accessibility and other changes in one 'Something else' entry."
+        : "This field is already in this request.";
+    }
+    if (changeField) seen.set(changeField, i);
+  });
+  return errors;
+}
+
+/** A 400's details[] as messages per row, keyed by changes[i].field. */
+function serverRowErrors(details, count) {
+  const errors = Array.from({ length: count }, () => null);
+  const rest = [];
+  for (const detail of details) {
+    const row = detail?.field?.match(/^changes\[(\d+)\]/);
+    if (row && Number(row[1]) < count) errors[Number(row[1])] = detail.message;
+    else rest.push(detail);
+  }
+  return { errors, rest };
+}
 
 export default function ChangeRequestForm({ eventRequestId, onSubmitted }) {
-  const [field, setField] = useState("");
-  const [details, setDetails] = useState("");
+  const [rows, setRows] = useState(() => [newRow()]);
+  const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
-  // The backend reports a rejected value as [{ field, message }] -- notably
-  // for expected_attendance, where checkRequestedChange refuses anything
-  // non-numeric. Kept separate from `error` so "about 200 people" produces
-  // the sentence that explains itself instead of a generic retry message the
-  // Organiser could read forever without learning what to do.
-  const [detailErrors, setDetailErrors] = useState([]);
+  const [errors, setErrors] = useState([]);
+  const [otherErrors, setOtherErrors] = useState([]);
   const [success, setSuccess] = useState(false);
 
-  // Which enum member this choice will travel as. Read during render too, for
-  // the notice below, so it is computed once here rather than twice.
-  const changeField = toChangeField(field);
+  const cancelling = rows.some((row) => toChangeField(row.option) === "cancellation");
+  const noteTooLong = Array.from(note.trim()).length > NOTE_MAX_LENGTH;
+
+  function update(index, patch) {
+    setRows((current) => {
+      const next = current.map((row, i) => (i === index ? { ...row, ...patch } : row));
+      // A cancellation stands alone: choosing it removes the other rows.
+      return toChangeField(next[index].option) === "cancellation" ? [next[index]] : next;
+    });
+    setErrors([]);
+    setError(null);
+  }
 
   async function handleSubmit(e) {
     e.preventDefault();
-
-    if (!field) {
-      setError("Please choose what you'd like to change.");
-      return;
-    }
-    if (!details.trim()) {
-      setError("Please describe the change you're requesting.");
+    const local = rowErrors(rows);
+    if (local.some(Boolean) || noteTooLong) {
+      setErrors(local);
+      setError(noteTooLong ? "The note must be 2,000 characters or fewer." : null);
       return;
     }
 
     setSubmitting(true);
     setError(null);
-    setDetailErrors([]);
-
+    setErrors([]);
+    setOtherErrors([]);
     try {
-      const requestedChange = DATE_CHANGE_FIELDS.has(changeField)
-        ? new Date(details).toISOString()
-        : details.trim();
-
-      // Mapped exactly once, here. The dropdown's values are the form's own
-      // vocabulary; `field` on the wire is the Postgres enum
-      // event_change_field. Sending the option value straight through -- which
-      // is what this used to do -- was a 400 on every single choice.
+      // Mapped exactly once, here: the dropdown's values are the form's own
+      // vocabulary; `field` on the wire is the Postgres enum event_change_field.
       await submitChangeRequest(eventRequestId, {
-        field: changeField,
-        details: requestedChange,
+        changes: rows.map((row) => {
+          const field = toChangeField(row.option);
+          return {
+            field,
+            details: DATE_CHANGE_FIELDS.has(field) ? new Date(row.details).toISOString() : row.details.trim(),
+          };
+        }),
+        ...(note.trim() && { note: note.trim() }),
       });
       setSuccess(true);
-      setField("");
-      setDetails("");
+      setRows([newRow()]);
+      setNote("");
       onSubmitted?.();
     } catch (err) {
-      const problems = err.response?.data?.details;
-      if (Array.isArray(problems) && problems.length > 0) {
-        setDetailErrors(problems);
+      const details = err.response?.status === 400 ? err.response.data?.details : null;
+      if (Array.isArray(details) && details.length > 0) {
+        const { errors: byRow, rest } = serverRowErrors(details, rows.length);
+        setErrors(byRow);
+        setOtherErrors(rest);
       } else {
-        setError(
-          err.response?.data?.error ||
-            "Could not submit your change request. Please try again.",
-        );
+        setError(SUBMIT_ERROR_MESSAGES[err.response?.status] || "Could not submit your change request. Please try again.");
       }
     } finally {
       setSubmitting(false);
@@ -91,94 +137,82 @@ export default function ChangeRequestForm({ eventRequestId, onSubmitted }) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="change-request-form">
+    <form onSubmit={handleSubmit} className="change-request-form" noValidate>
       <h2>Request a change</h2>
 
-      <label>
-        What needs to change?
-        <select
-          value={field}
-          onChange={(e) => {
-            setField(e.target.value);
-            setDetails("");
-            setError(null);
-            setDetailErrors([]);
-          }}
-          required
-        >
-          <option value="" disabled>
-            Select an option
-          </option>
-          {CHANGE_FIELD_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-      </label>
+      {rows.map((row, index) => {
+        const changeField = toChangeField(row.option);
+        const label = `Change ${index + 1}`;
+        return (
+          <fieldset key={row.key} className="change-request-form__row" aria-label={label}>
+            <label>
+              What needs to change?
+              <select
+                value={row.option}
+                onChange={(e) => update(index, { option: e.target.value, details: "" })}
+              >
+                <option value="" disabled>
+                  Select an option
+                </option>
+                {CHANGE_FIELD_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-      {/*
-        Shown when the choice has no enum member of its own and travels as
-        "Something else" -- accessibility today, and anything added later that
-        the database has no heading for. Said out loud rather than done
-        silently: the Coordinator's list will show this request as "Something
-        else", and an Organiser who expected to see "Accessibility" there
-        would otherwise think it had gone to the wrong place.
-      */}
-      {changeField === "other" && field !== "other" && (
-        <p className="change-request-form__notice">
-          This will be recorded as "Something else" — there is no separate
-          category for it yet, so please describe it fully below.
-        </p>
+            {/* Accessibility has no enum member and travels as "Something else",
+                said out loud so the Organiser knows where to look for it. */}
+            {changeField === "other" && row.option !== "other" && (
+              <p className="change-request-form__notice">
+                This will be recorded as "Something else" — there is no separate
+                category for it yet, so please describe it fully below.
+              </p>
+            )}
+
+            <label>
+              {changeField === "cancellation" ? "Why do you want to cancel?" : "Describe the change"}
+              {DATE_CHANGE_FIELDS.has(changeField) ? (
+                <input type="datetime-local" value={row.details} onChange={(e) => update(index, { details: e.target.value })} />
+              ) : changeField === "expected_attendance" ? (
+                <input type="number" min="1" step="1" value={row.details} onChange={(e) => update(index, { details: e.target.value })} />
+              ) : (
+                <textarea
+                  value={row.details}
+                  onChange={(e) => update(index, { details: e.target.value })}
+                  rows={changeField === "cancellation" ? 3 : 4}
+                  placeholder={changeField === "cancellation" ? "" : "Describe the new value or arrangement"}
+                />
+              )}
+            </label>
+            {errors[index] && <p className="change-request-form__error">{errors[index]}</p>}
+            {rows.length > 1 && (
+              <button type="button" onClick={() => setRows((current) => current.filter((_, i) => i !== index))}>
+                Remove
+              </button>
+            )}
+          </fieldset>
+        );
+      })}
+
+      {!cancelling && (
+        <button type="button" disabled={rows.length >= MAX_CHANGES} onClick={() => setRows((current) => [...current, newRow()])}>
+          Add another change
+        </button>
       )}
 
       <label>
-        Describe the change
-        {DATE_CHANGE_FIELDS.has(changeField) ? (
-          <input
-            type="datetime-local"
-            value={details}
-            onChange={(e) => setDetails(e.target.value)}
-            required
-          />
-        ) : changeField === "expected_attendance" ? (
-          <input
-            type="number"
-            min="1"
-            step="1"
-            value={details}
-            onChange={(e) => setDetails(e.target.value)}
-            required
-          />
-        ) : (
-          <textarea
-            value={details}
-            onChange={(e) => setDetails(e.target.value)}
-            rows={4}
-            placeholder="Describe the new value or arrangement"
-            required
-          />
-        )}
+        Note for the coordinator (optional)
+        <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} />
       </label>
 
       {error && <p className="change-request-form__error" role="alert">{error}</p>}
-
-      {/*
-        The same renderer EventRequestForm uses for a submit's details[], and
-        the same reasoning: the backend already names every fault precisely,
-        so flattening them into one generic sentence throws away the only
-        thing that tells the Organiser what to type instead.
-      */}
-      {detailErrors.length > 0 && (
+      {otherErrors.length > 0 && (
         <div className="change-request-form__details-errors" role="alert">
           <p>Your change request can't be submitted yet:</p>
           <ul>
-            {detailErrors.map((problem, i) => (
-              <li key={i}>
-                {problem.field ? `${problem.field}: ` : ""}
-                {problem.message}
-              </li>
-            ))}
+            {otherErrors.map((problem, i) => <li key={i}>{problem.message}</li>)}
           </ul>
         </div>
       )}
