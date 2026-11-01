@@ -19,10 +19,9 @@ import { formatVenuePeriod } from "../services/datetimeFormat";
 import { venueText } from "../services/flaggedBookingDisplay";
 import { cancelFlaggedBooking, getEventFlaggedBookings } from "../services/flaggedBookingService";
 import { coordinatorCancelErrorMessage, isStaleResolutionError } from "../services/flaggedBookingErrors";
-import { SESSION_EXPIRED, statusMessageOf } from "../services/apiErrors";
+import { statusMessageOf } from "../services/apiErrors";
 
 const LIST_ERROR_MESSAGES = {
-  401: SESSION_EXPIRED,
   403: "Only the coordinator assigned to this event can see its flagged bookings.",
   404: "This event no longer exists.",
 };

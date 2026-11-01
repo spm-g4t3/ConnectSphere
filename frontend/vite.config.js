@@ -30,6 +30,14 @@ const MY_BOOKING_REQUESTS = { lines: 100, branches: 98.07, functions: 100, state
 // only starts the check. The guard is cheap defence behind the button.
 const BOOKING_REQUEST_PANEL = { lines: 100, branches: 99.4, functions: 100, statements: 99.3 }
 
+// SCRUM-583: the expiry and idle files are new or rewritten and owned outright.
+const SCRUM583_FILES = [
+  'src/auth/AuthContext.jsx',
+  'src/auth/SessionTimeout.jsx',
+  'src/auth/sessionExpiry.js',
+  'src/services/apiClient.js',
+]
+
 const SCRUM17_FILES = [
   'src/components/VenueBlocksPanel.jsx',
   'src/components/VenueBlockForm.jsx',
@@ -243,6 +251,16 @@ const SCRUM355_FILES = [
 // CoordinatorRequestDetail.jsx, MyEventRequests.jsx and eventRequestService.js
 // stay ungated; notificationDisplay.js and notificationLink.js keep the 100%
 // of SCRUM17_FILES and SCRUM172_FILES.
+// SCRUM-402: the coordinator's review panel and the display helper it shares
+// with the Organiser's list and the notices, new files only this story owns.
+// Its edits to ChangeRequestForm.jsx, ChangeRequestStatusList.jsx,
+// CoordinatorRequestDetail.jsx and MyAssignedEvents.jsx stay ungated, and
+// notificationDisplay.js keeps SCRUM17_FILES' 100%.
+const SCRUM402_FILES = [
+  'src/components/ChangeRequestReviewPanel.jsx',
+  'src/services/changeRequestDisplay.js',
+]
+
 const SCRUM387_FILES = [
   'src/components/EventDetailsEditPanel.jsx',
   'src/components/EventChangeHistory.jsx',
@@ -296,6 +314,7 @@ export default defineConfig({
           file === 'src/components/VenueBlocksPanel.jsx' ? PANEL : FULL,
         ]),
         ...SCRUM186_FILES.map((file) => [file, FULL]),
+        ...SCRUM583_FILES.map((file) => [file, FULL]),
         ...SCRUM178_FILES.map((file) => [file, FULL]),
         ...SCRUM137_FILES.map((file) => [file, FULL]),
         ...SCRUM141_FILES.map((file) => [file, FULL]),
@@ -325,6 +344,7 @@ export default defineConfig({
         ...SCRUM172_FILES.map((file) => [file, FULL]),
         ...SCRUM355_FILES.map((file) => [file, FULL]),
         ...SCRUM387_FILES.map((file) => [file, FULL]),
+        ...SCRUM402_FILES.map((file) => [file, FULL]),
         ...SCRUM347_FILES.map((file) => [file, FULL]),
         ...SCRUM478_FILES.map((file) => [file, FULL]),
         ...SCRUM584_FILES.map((file) => [file, FULL]),

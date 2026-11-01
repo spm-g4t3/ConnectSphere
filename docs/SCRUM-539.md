@@ -128,7 +128,7 @@ text (`UnassignedRequestCancelPanel.jsx:16`):
 | 403 | "A coordinator has been assigned to this request since you opened it, so only they can cancel it now. Go back to the queue to see where it stands." | Another Lead assigned it first (AC3, AC5-01); from the cancel or the preview |
 | 409 | "This request is no longer waiting in the queue. It may already have been cancelled or assigned. Go back to the queue to see where it stands." | Another Lead cancelled it first (AC5-03), or it left Submitted |
 | 400 | "Enter a cancellation reason and select who initiated it." | A reason or initiator the server refused |
-| 401 | "Your session has expired. Please sign in again." | — |
+| 401 | No wording of its own: SCRUM-583 sends the user to login with "Your session expired. Please sign in again.". | — |
 | 404 | "This event request no longer exists." | — |
 | Anything else | "The request could not be cancelled. No changes have been made; try again." | — |
 

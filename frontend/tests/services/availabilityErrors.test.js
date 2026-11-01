@@ -33,7 +33,6 @@ describe("availabilityErrorMessages", () => {
   });
 
   it.each([
-    [401, "Your session has expired. Please sign in again."],
     [403, "Only Technical Support Staff can check equipment availability."],
   ])("SCRUM23_AC1_explains_status_%s", (status, message) => {
     expect(availabilityErrorMessages(failure(status, {}), "check")).toEqual([message]);

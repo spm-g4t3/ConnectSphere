@@ -87,6 +87,11 @@
 //   event_details_changed (022, SCRUM-387): { eventRequestId, eventName,
 //     reason, changedFields, status }; changedFields are the camelCase names
 //     in eventDetailFields.js, and eventName is the name after the edit
+//   change_request_decided (036, SCRUM-402): { eventRequestId, eventName,
+//     changeRequestId, decision, notes, changeFields }; to the Organiser;
+//     decision is approved or rejected, changeFields the enum members asked for
+//   change_request_significant_submitted (036, SCRUM-402): { eventRequestId,
+//     eventName, changeRequestId, changeFields }; to the event's holder
 //   booking_flagged_event_change (096): { eventName, venueName, startsAt,
 //     endsAt, reason }
 //   booking_request_event_change (096): { eventRequestId, eventName,
@@ -96,6 +101,12 @@
 //     fields }; fields lists the registration dates the new start now precedes
 //   registration_promoted (037, SCRUM-460): { eventRequestId, eventName,
 //     registrationId }
+//   registration_opened / registration_closed / registration_capacity_reached
+//     / registration_place_released (051, SCRUM-177): { audience,
+//     eventRequestId, eventName, occurrenceKey }, plus opensAt, closesAt and
+//     cause; closedAt and cause; capacity and registeredCount; and capacity,
+//     registeredCount and cause. audience is organiser, coordinator or (opened
+//     and closed only) waitlisted
 //   equipment_* (097, SCRUM-176): { audience, eventRequestId, eventName,
 //     lines: [{ equipmentType, quantity, reserved, outcome }], ... }; see
 //     describeEquipmentNotification for what each type adds.
@@ -108,6 +119,7 @@ import { reasonLabel } from "./venueBlockReasons";
 import { formatOccupiedPeriod } from "./occupiedPeriodDisplay";
 import { formatVenuePeriod, formatVenueTimestamp } from "./datetimeFormat";
 import { detailFieldList } from "./eventDetailFields";
+import { changeFieldList } from "./changeRequestDisplay";
 
 const UNNAMED_EVENT = "Unnamed event";
 const UNKNOWN_VENUE = "Unknown venue";
@@ -116,6 +128,14 @@ const PREVIOUS_COORDINATOR = "the previous coordinator";
 // Week 7: a flagged booking tells its coordinator another plan is needed.
 const ALTERNATIVE_ARRANGEMENTS = " Alternative arrangements are required.";
 const VENUE_RETIRED = "The venue has been retired.";
+// registration_closed causes (051, 052); the same reasons registration_closed_reason gives.
+const REGISTRATION_CLOSED_CAUSES = Object.freeze({
+  closing_time: "The closing time passed.",
+  switched_off: "Registration was switched off.",
+  settings_changed: "The registration dates were changed.",
+  event_started: "The event has started.",
+  event_not_confirmed: "The event is no longer confirmed.",
+});
 
 /** True when `value` is a time that will parse. */
 function isInstant(value) {
@@ -812,6 +832,57 @@ const DESCRIBERS = {
     };
   },
 
+  // SCRUM-177 (AC1). Staff are told the window; a waiting attendee that the
+  // queue is moving again.
+  registration_opened(payload, { eventName }) {
+    if (payload.audience === "waitlisted") {
+      return {
+        headline: `Registration for ${eventName} has reopened`,
+        detail: "Places can be offered from the waiting list again. You keep your place in the queue.",
+      };
+    }
+    return {
+      headline: `Registration for ${eventName} is open`,
+      detail: isInstant(payload.closesAt)
+        ? `Attendees can register until ${formatDateTime(payload.closesAt)}.`
+        : "Attendees can register until registration is switched off or the event starts.",
+    };
+  },
+
+  // SCRUM-177 (AC1). A cause this build does not know is left out, not guessed.
+  registration_closed(payload, { eventName }) {
+    const cause = Object.hasOwn(REGISTRATION_CLOSED_CAUSES, payload.cause ?? "")
+      ? `${REGISTRATION_CLOSED_CAUSES[payload.cause]} `
+      : "";
+    return {
+      headline: `Registration for ${eventName} has closed`,
+      detail: payload.audience === "waitlisted"
+        ? `${cause}No places are offered from the waiting list while it is closed; you keep your place in the queue.`
+        : `${cause}No new attendees can register.`,
+    };
+  },
+
+  // SCRUM-177 (AC2). Counts only; never who registered.
+  registration_capacity_reached(payload, { eventName }) {
+    return {
+      headline: `${eventName} is full`,
+      detail: Number.isInteger(payload.capacity)
+        ? `All ${payload.capacity} places are taken.`
+        : "All places are taken.",
+    };
+  },
+
+  // SCRUM-177 (AC4). Sent only when nobody was waiting to take the place.
+  registration_place_released(payload, { eventName }) {
+    const counts = Number.isInteger(payload.capacity) && Number.isInteger(payload.registeredCount)
+      ? ` ${payload.registeredCount} of ${payload.capacity} places are now taken.`
+      : "";
+    return {
+      headline: `A place opened at ${eventName}`,
+      detail: `An attendee withdrew.${counts}`,
+    };
+  },
+
   // SCRUM-172 (AC6). Sent to Tech Support for the same safety outcomes.
   safety_equipment_review(payload, { eventName }) {
     return {
@@ -824,6 +895,29 @@ const DESCRIBERS = {
     return {
       headline: `${eventName} has a significant change`,
       detail: `The event was updated by its Coordinator. Reason: ${payload.reason || NO_REASON}.`,
+    };
+  },
+
+  // SCRUM-402 (AC11). The outcome of the Organiser's change request, from the
+  // function that decided it; a cancellation request is named as one.
+  change_request_decided(payload, { eventName }) {
+    const fields = Array.isArray(payload.changeFields) ? payload.changeFields : [];
+    const cancellation = fields.includes("cancellation");
+    const subject = cancellation ? `Your request to cancel ${eventName}` : `Your change request for ${eventName}`;
+    const outcome = { approved: "accepted", rejected: "declined" }[payload.decision] ?? "closed";
+    const asked = !cancellation && fields.length > 0 ? `Requested: ${changeFieldList(fields)}. ` : "";
+    const note = payload.notes
+      ? `${payload.decision === "approved" ? "Coordinator's note" : "Reason"}: ${payload.notes}.`
+      : "No note was left.";
+    return { headline: `${subject} was ${outcome}`, detail: `${asked}${note}` };
+  },
+
+  // SCRUM-402 (AC12, W1 §6). The holder hears the Organiser asked for a significant change.
+  change_request_significant_submitted(payload, { eventName }) {
+    const fields = Array.isArray(payload.changeFields) ? payload.changeFields : [];
+    return {
+      headline: `The organiser asked to change ${eventName}`,
+      detail: `${fields.length > 0 ? `Requested: ${changeFieldList(fields)}. ` : ""}Review it on the event.`,
     };
   },
 

@@ -3,10 +3,8 @@ import { getConfirmedArrangements } from "../services/eventRequestService";
 import { formatVenuePeriod } from "../services/datetimeFormat";
 import { readStatusDisplay } from "../services/eventRequestStatusDisplay";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
-import { SESSION_EXPIRED } from "../services/apiErrors";
 
 const READ_ERRORS = {
-  401: SESSION_EXPIRED,
   403: "Only the event's organiser can view these arrangements.",
   404: "This event request is no longer available.",
 };

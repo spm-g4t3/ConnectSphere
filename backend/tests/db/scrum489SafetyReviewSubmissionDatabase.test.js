@@ -755,14 +755,23 @@ describe('SCRUM-489: readiness and submission for the safety check', () => {
       ['event_name', 'Renamed after confirmation'],
       ['description', 'Updated description'],
       ['purpose', 'Updated purpose'],
-    ])('SCRUM363_AC8_approved_change_request_applies_ordinary_%s_to_a_confirmed_event', async (field, value) => {
+    ])('SCRUM402_AC5_an_accepted_change_request_returns_a_confirmed_event_to_approved_and_applies_ordinary_%s', async (field, value) => {
+      // Was SCRUM363_AC8_approved_change_request_applies_ordinary_%s_to_a_confirmed_event,
+      // which applied it with the event left Confirmed. SCRUM-402 AC5 and D7: a
+      // Confirmed event returns to Approved first, then the field goes through 387.
       const id = await readyToConfirm();
       await confirm(id);
       const before = await written(id);
       const { changeId, response } = await approveChange(id, field, value);
       expect(response.status).toBe(200);
       expect((await one(`select ${field} as value from event_requests where id = $1`, [id])).value).toBe(value);
-      expect(await written(id)).toEqual(before);
+      const after = await written(id);
+      expect(after.event).toEqual({ status: 'approved' });
+      expect(after.history).toEqual([
+        ...before.history,
+        expect.objectContaining({ previous_status: 'confirmed', new_status: 'approved', changed_by: coordinatorA }),
+      ]);
+      expect(after.submissions).toEqual(before.submissions);
       expect((await one('select status from event_change_requests where id = $1', [changeId])).status).toBe('processed');
     });
 

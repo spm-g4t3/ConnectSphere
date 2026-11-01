@@ -31,12 +31,10 @@ import AssignCoordinatorPanel from "./AssignCoordinatorPanel";
 import UnassignedRequestCancelPanel from "./UnassignedRequestCancelPanel";
 import useListRead from "./useListRead";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
-import { SESSION_EXPIRED } from "../services/apiErrors";
 
 // 403 has its own words, as in ReviewQueue: it means the account is not a
 // Lead, an administration problem, not a breakage.
 const QUEUE_ERROR_MESSAGES = {
-  401: SESSION_EXPIRED,
   403: "Only the Event Coordinator Lead can see the unassigned queue.",
   500: "The unassigned queue could not be loaded. Please try again.",
 };

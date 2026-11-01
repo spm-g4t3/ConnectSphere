@@ -3,11 +3,9 @@ import { getRegisteredEvents } from "../services/attendeeEventService";
 import { attendeeEventPath } from "../services/attendeeEventRoutes";
 import useOpenEventRead from "./useOpenEventRead";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
-import { SESSION_EXPIRED } from "../services/apiErrors";
 import WaitingListPlaces from "./WaitingListPlaces";
 
 const MESSAGES = {
-  401: SESSION_EXPIRED,
   403: "Only Attendees can view registered events.",
 };
 const FALLBACK = "Registered events could not be loaded. Please try again.";

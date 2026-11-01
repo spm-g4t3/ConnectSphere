@@ -130,7 +130,6 @@ describe("SCRUM475 My Registrations", () => {
   });
 
   it.each([
-    [401, "Your session has expired"],
     [403, "Only Attendees can view waiting lists."],
   ])("SCRUM475_AC2_a_%s_on_load_is_explained", async (status, text) => {
     vi.mocked(getRegisteredEvents).mockResolvedValue([]);

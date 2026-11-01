@@ -27,11 +27,9 @@
 
 import { useEffect, useState } from "react";
 import { assignEventRequest, listCoordinatorWorkload } from "../services/eventRequestService";
-import { SESSION_EXPIRED } from "../services/apiErrors";
 import { activeEventsText, coordinatorName } from "../services/coordinatorDisplay";
 
 const LOAD_ERROR_MESSAGES = {
-  401: SESSION_EXPIRED,
   403: "Only the Event Coordinator Lead can assign event requests.",
   500: "The list of coordinators could not be loaded. Please try again.",
 };
@@ -42,7 +40,6 @@ const LOAD_ERROR_MESSAGES = {
 // by the response's code, never by its text (see assignErrorMessage).
 const ASSIGN_ERROR_MESSAGES = {
   400: "That person cannot be assigned this request. They may no longer be an Event Coordinator. Choose someone else.",
-  401: SESSION_EXPIRED,
   403: "Only the Event Coordinator Lead can assign event requests.",
   404: "This request no longer exists.",
   409: "This request can no longer be assigned. It may have been withdrawn or cancelled. Go back to the queue to see what is still waiting.",

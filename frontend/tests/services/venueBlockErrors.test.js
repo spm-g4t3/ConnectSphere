@@ -88,11 +88,8 @@ describe("blockErrorMessage statuses", () => {
     );
   });
 
-  it("401 and 403 have their own messages for every action", () => {
+  it("403 has its own message for every action", () => {
     for (const action of ACTIONS) {
-      expect(blockErrorMessage(httpError(401), action)).toBe(
-        "Your session has expired. Please sign in again.",
-      );
       expect(blockErrorMessage(httpError(403), action)).toBe(
         "Only Venue Staff can manage venue blocks.",
       );

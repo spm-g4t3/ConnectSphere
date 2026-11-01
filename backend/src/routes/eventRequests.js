@@ -116,12 +116,13 @@ import {
   createChangeRequestFromClient,
   getChangeRequestsForCoordinator,
   getChangeRequestsForEvent,
+  previewChangeRequest,
   processChangeRequest,
 } from '../services/eventChangeRequestService.js';
 // SCRUM-491. Credential-free like the two services above: it resolves the
 // client lazily and never imports venueService.js.
 import { listHoldCandidates } from '../services/venueHoldService.js';
-import { getStatusDisplay } from '../domain/eventRequestStatus.js';
+import { STATUS, getStatusDisplay } from '../domain/eventRequestStatus.js';
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
 import { noopFinalEventGuard, createFinalEventGuard, eventIdFromParam, eventIdFromRecord, organisesEvent } from '../middleware/finalEventGuard.js';
 // Both of these are credential-free on purpose, and that is worth knowing
@@ -1156,7 +1157,14 @@ export function createEventRequestRouter({
    * the list rather than splicing this into it.
    */
   router.post('/:id/change-requests', organiserOnly, guardOwnEvent, async (req, res) => {
-    await getEventRequestForOrganiser(req.params.id, req.user.id, { client });
+    const event = await getEventRequestForOrganiser(req.params.id, req.user.id, { client });
+
+    // SCRUM-347: a rejected event is revised by reopening it, not by change requests,
+    // which rejection closes and nobody could process after a reopen. 039 refuses it
+    // under the event lock; this early answer costs no query and gives the same 400.
+    if (event.status === STATUS.REJECTED) {
+      throw new ValidationError('Cannot request a change to a rejected event; revise and resubmit it instead');
+    }
 
     const created = await createChangeRequestFromClient(
       req.params.id,
@@ -1168,6 +1176,23 @@ export function createEventRequestRouter({
     res.status(201).json(created);
   });
 
+  /**
+   * SCRUM-402 AC4: what accepting this change request, and the rest of its
+   * group, would do. Read before deciding; preview_change_request (036)
+   * refuses whoever the decision would refuse, the same way, and changes nothing.
+   */
+  router.get('/change-requests/:changeRequestId/preview', coordinatorOnly, async (req, res) => {
+    res.status(200).json(await previewChangeRequest(req.params.changeRequestId, req.user.id, { client }));
+  });
+
+  /**
+   * SCRUM-402: accept or decline a change request and its group, as a whole.
+   * Body { decision, decisionNotes, expectedImpact }: a reason is required to
+   * decline; expectedImpact is the preview's, for 395 to compare. 409 with
+   * `code`: REVIEW_NOT_STARTED, EVENT_STATUS_NOT_ALLOWED,
+   * CHANGE_REQUEST_ALREADY_PROCESSED, or a code from 395 or 387, which the
+   * decision passes through (SIGNIFICANT_CHANGE_IMPACT_CHANGED, EVENT_HOLDS_ARRANGEMENTS).
+   */
   router.post('/change-requests/:changeRequestId/decision', coordinatorOnly, guardChangeRequest, async (req, res) => {
     const processed = await processChangeRequest(
       req.params.changeRequestId,
