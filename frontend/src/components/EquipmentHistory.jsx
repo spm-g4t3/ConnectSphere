@@ -30,7 +30,6 @@ export default function EquipmentHistory({ type }) {
 
   return (
     <div>
-      <h2>History: {type.name}</h2>
       {error && <p role="alert">{error}</p>}
       {!error && entries === null && <p>Loading history...</p>}
       {entries?.length === 0 && <p>No changes recorded.</p>}

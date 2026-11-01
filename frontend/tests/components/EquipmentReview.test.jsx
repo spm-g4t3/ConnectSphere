@@ -440,7 +440,7 @@ describe("EquipmentReview: stock back for missing items", () => {
   it("SCRUM574_AC2_part_of_one_line_counts_as_some", async () => {
     await open(cannot([missing({ quantity: 2, available: 1 })]));
     expect(hint()).toHaveTextContent("1 of 1 missing item can now be reserved: Projector \u00D71 of 2.");
-    expect(screen.getByRole("button", { name: "Review again" })).toHaveClass("er-btn--secondary");
+    expect(screen.getByRole("button", { name: "Review again" })).toHaveClass("ui-button--secondary");
   });
 
   it("SCRUM574_AC3_reservable_quantity_is_capped_at_what_is_missing", async () => {
@@ -467,9 +467,9 @@ describe("EquipmentReview: stock back for missing items", () => {
   });
 
   it.each([
-    ["some", "er-btn--secondary"],
-    ["all", "er-btn--primary"],
-    ["none", "er-btn--secondary"],
+    ["some", "ui-button--secondary"],
+    ["all", "ui-button--primary"],
+    ["none", "ui-button--secondary"],
   ])("SCRUM574_AC5_review_again_works_for_%s_and_is_styled_%s", async (outcome, style) => {
     await open(cannot(OUTCOMES[outcome]));
     const button = screen.getByRole("button", { name: "Review again" });

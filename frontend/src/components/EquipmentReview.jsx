@@ -41,10 +41,12 @@ import {
   takeOverEquipmentReview,
 } from "../services/equipmentReviewService";
 import { isStaleRefusal, reviewErrorMessage } from "../services/equipmentReviewErrors";
-import { equipmentStatusClass } from "../services/equipmentRequestStatus";
+import { equipmentStatusTone } from "../services/equipmentRequestStatus";
 import { formatTimestamp } from "../services/displayFormat";
 import { SERVER_TEXT_MAX_LENGTH } from "../services/textLimits";
 import { formatEventPeriod } from "../services/eventPeriodFormat";
+import Button from "./ui/Button";
+import StatusBadge from "./ui/StatusBadge";
 import "./EquipmentReview.css";
 
 const RESULT_CLASS = {
@@ -488,9 +490,9 @@ export default function EquipmentReview() {
         <h1>Equipment request review</h1>
         <p role="alert">{loadError ?? "This event has no equipment request to review."}</p>
         {loadError && (
-          <button type="button" onClick={load}>
+          <Button variant="secondary" onClick={load}>
             Try again
-          </button>
+          </Button>
         )}
       </div>
     );
@@ -519,7 +521,7 @@ export default function EquipmentReview() {
   });
   const stock = status === "cannot_be_fully_arranged" ? stockBack(lines) : null;
   // Review again stands out only when every missing item can now be reserved.
-  const startClass = status === "cannot_be_fully_arranged" && stock?.outcome !== "all" ? "er-btn--secondary" : "er-btn--primary";
+  const startVariant = status === "cannot_be_fully_arranged" && stock?.outcome !== "all" ? "secondary" : "primary";
 
   return (
     <div className="dashboard dashboard--tech-support equipment-review">
@@ -528,9 +530,7 @@ export default function EquipmentReview() {
       <section className="equipment-review__event">
         <div className="er-event-head">
           <h2>{event?.name ?? "Event"}</h2>
-          <span className={`equipment-review__status equipment-review__status--${equipmentStatusClass(status)}`}>
-            {request.statusLabel}
-          </span>
+          <StatusBadge tone={equipmentStatusTone(status)}>{request.statusLabel}</StatusBadge>
         </div>
         <dl className="er-facts">
           <div>
@@ -546,9 +546,9 @@ export default function EquipmentReview() {
             <dd>{event?.assignedCoordinatorName ?? "No coordinator assigned."}</dd>
           </div>
         </dl>
-        <button type="button" className="er-btn er-btn--link" disabled={busy} onClick={load}>
+        <Button variant="link" disabled={busy} onClick={load}>
           Refresh
-        </button>
+        </Button>
       </section>
 
       <section className={`er-next er-next--${next.tone}`} aria-label="Next step">
@@ -571,14 +571,14 @@ export default function EquipmentReview() {
         {(canStart || canTakeOver) && (
           <div className="equipment-review__actions">
             {canStart && (
-              <button type="button" className={`er-btn ${startClass}`} disabled={busy} onClick={handleStart}>
+              <Button variant={startVariant} disabled={busy} onClick={handleStart}>
                 {status === "cannot_be_fully_arranged" ? "Review again" : "Start review"}
-              </button>
+              </Button>
             )}
             {canTakeOver && (
-              <button type="button" className="er-btn er-btn--primary" disabled={busy} onClick={handleTakeOver}>
+              <Button disabled={busy} onClick={handleTakeOver}>
                 Take over review
-              </button>
+              </Button>
             )}
           </div>
         )}
@@ -655,9 +655,9 @@ export default function EquipmentReview() {
                     <span className="er-line__top">
                       <strong>{line.name}</strong>
                       {(lineState(line) === "flagged" || lineState(line) === "cannot") && (
-                        <span className={`er-pill er-pill--${lineState(line)}`}>
-                          {lineState(line) === "flagged" ? "Needs decision" : "Not provided"}
-                        </span>
+                        lineState(line) === "flagged"
+                          ? <StatusBadge tone="warning">Needs decision</StatusBadge>
+                          : <StatusBadge tone="danger">Not provided</StatusBadge>
                       )}
                       {line.typeRetired && <small>This equipment type has been retired.</small>}
                       <span className="er-line__chevron" aria-hidden="true">
@@ -723,36 +723,32 @@ export default function EquipmentReview() {
                                 {reviewing && !editingThis && (
                                   <ul className="er-choices">
                                     <li>
-                                      <button
-                                        type="button"
-                                        className="er-btn er-btn--primary"
+                                      <Button
                                         aria-label={`Move to new time: ${line.name}`}
                                         disabled={busy}
                                         onClick={() => handleResolve("move", line, reservation)}
                                       >
                                         Move to new time
-                                      </button>
+                                      </Button>
                                       <span>Reserve the same units for the event's new date and time. Only works if enough are free then.</span>
                                     </li>
                                     {reservation.canKeep && (
                                       <li>
-                                        <button
-                                          type="button"
-                                          className="er-btn er-btn--secondary"
+                                        <Button
+                                          variant="secondary"
                                           aria-label={`Keep old time: ${line.name}`}
                                           disabled={busy}
                                           onClick={() => handleResolve("keep", line, reservation)}
                                         >
                                           Keep old time
-                                        </button>
+                                        </Button>
                                         <span>Leave the reservation as it is and clear the flag. Choose this if the old time still works.</span>
                                       </li>
                                     )}
                                     {reservation.quantity > 1 && (
                                       <li>
-                                        <button
-                                          type="button"
-                                          className="er-btn er-btn--secondary"
+                                        <Button
+                                          variant="secondary"
                                           aria-label={`Reduce quantity: ${line.name}`}
                                           disabled={busy}
                                           onClick={() =>
@@ -763,14 +759,13 @@ export default function EquipmentReview() {
                                           }
                                         >
                                           Reduce quantity
-                                        </button>
+                                        </Button>
                                         <span>Keep fewer than {reservation.quantity} and let the rest go. You will be asked why.</span>
                                       </li>
                                     )}
                                     <li>
-                                      <button
-                                        type="button"
-                                        className="er-btn er-btn--danger"
+                                      <Button
+                                        variant="danger"
                                         aria-label={`Release all: ${line.name}`}
                                         disabled={busy}
                                         onClick={() =>
@@ -778,7 +773,7 @@ export default function EquipmentReview() {
                                         }
                                       >
                                         Release all
-                                      </button>
+                                      </Button>
                                       <span>{`Give all ${reservation.quantity} back so other events can use them. You will be asked why.`}</span>
                                     </li>
                                   </ul>
@@ -789,9 +784,8 @@ export default function EquipmentReview() {
                             {reviewing && !reservation.flagged && !editingThis && (
                               <div className="er-res__actions">
                                 {(reservation.quantity > 1 || (line.shortBy > 0 && canReserveNow !== 0)) && (
-                                  <button
-                                    type="button"
-                                    className="er-btn er-btn--secondary"
+                                  <Button
+                                    variant="secondary"
                                     aria-label={`Change quantity: ${line.name}`}
                                     disabled={busy}
                                     onClick={() =>
@@ -802,11 +796,10 @@ export default function EquipmentReview() {
                                     }
                                   >
                                     Change quantity
-                                  </button>
+                                  </Button>
                                 )}
-                                <button
-                                  type="button"
-                                  className="er-btn er-btn--danger"
+                                <Button
+                                  variant="danger"
                                   aria-label={`Release all: ${line.name}`}
                                   disabled={busy}
                                   onClick={() =>
@@ -814,7 +807,7 @@ export default function EquipmentReview() {
                                   }
                                 >
                                   Release all
-                                </button>
+                                </Button>
                               </div>
                             )}
 
@@ -871,9 +864,9 @@ export default function EquipmentReview() {
                                   </p>
                                 )}
                                 <div className="equipment-review__actions">
-                                  <button
+                                  <Button
                                     type="submit"
-                                    className={`er-btn ${editor.kind === "release" ? "er-btn--danger" : "er-btn--primary"}`}
+                                    variant={editor.kind === "release" ? "danger" : "primary"}
                                     disabled={busy}
                                   >
                                     {busy
@@ -883,10 +876,10 @@ export default function EquipmentReview() {
                                         : editor.kind === "change" && Number(quantityInput) > reservation.quantity
                                           ? `Reserve ${Number(quantityInput) - reservation.quantity} more`
                                           : "Reduce"}
-                                  </button>
-                                  <button type="button" className="er-btn er-btn--secondary" disabled={busy} onClick={resetEditors}>
+                                  </Button>
+                                  <Button variant="secondary" disabled={busy} onClick={resetEditors}>
                                     Cancel
-                                  </button>
+                                  </Button>
                                 </div>
                               </form>
                             )}
@@ -923,14 +916,13 @@ export default function EquipmentReview() {
                               setReserveError(null);
                             }}
                           />
-                          <button
+                          <Button
                             type="submit"
-                            className="er-btn er-btn--primary"
                             aria-label={`${reserveText}: ${line.name}`}
                             disabled={busy}
                           >
                             {busy ? "Saving..." : reserveText}
-                          </button>
+                          </Button>
                         </div>
                       )}
                       {canReserveNow === 0 && (
@@ -945,25 +937,23 @@ export default function EquipmentReview() {
                         </p>
                       )}
                       <div className="equipment-review__actions">
-                        <button
-                          type="button"
-                          className="er-btn er-btn--secondary"
+                        <Button
+                          variant="secondary"
                           aria-label={`${marked ? "Edit note for" : "Mark as cannot be provided:"} ${line.name}`}
                           disabled={busy}
                           onClick={() => openMark(line)}
                         >
                           {marked ? "Edit note" : "Cannot be provided"}
-                        </button>
+                        </Button>
                         {marked && (
-                          <button
-                            type="button"
-                            className="er-btn er-btn--secondary"
+                          <Button
+                            variant="secondary"
                             aria-label={`Remove mark on ${line.name}`}
                             disabled={busy}
                             onClick={() => handleClear(line)}
                           >
                             Remove mark
-                          </button>
+                          </Button>
                         )}
                       </div>
                     </form>
@@ -988,12 +978,12 @@ export default function EquipmentReview() {
                       </p>
                     )}
                     <div className="equipment-review__actions">
-                      <button type="submit" className="er-btn er-btn--primary" disabled={busy}>
+                      <Button type="submit" disabled={busy}>
                         {busy ? "Saving..." : "Save note"}
-                      </button>
-                      <button type="button" className="er-btn er-btn--secondary" disabled={busy} onClick={resetEditors}>
+                      </Button>
+                      <Button variant="secondary" disabled={busy} onClick={resetEditors}>
                         Cancel
-                      </button>
+                      </Button>
                     </div>
                   </form>
                 )}
@@ -1034,9 +1024,7 @@ export default function EquipmentReview() {
               as no reservation is flagged.
             </p>
           ) : !confirmingComplete ? (
-            <button
-              type="button"
-              className="er-btn er-btn--primary"
+            <Button
               disabled={busy || flaggedTotal > 0}
               onClick={() => {
                 setNotice(null);
@@ -1046,19 +1034,19 @@ export default function EquipmentReview() {
               }}
             >
               Complete review
-            </button>
+            </Button>
           ) : (
             <div className="equipment-review__confirm">
               <p>
                 {`${shortLines.length} item${shortLines.length === 1 ? " is" : "s are"} not fully reserved. Each needs a "Cannot be provided" note, and the request will be marked Cannot be fully arranged. Reservations already made are kept.`}
               </p>
               <div className="equipment-review__actions">
-                <button type="button" className="er-btn er-btn--primary" disabled={busy} onClick={handleComplete}>
+                <Button disabled={busy} onClick={handleComplete}>
                   {busy ? "Completing..." : "Yes, complete review"}
-                </button>
-                <button type="button" className="er-btn er-btn--secondary" disabled={busy} onClick={() => setConfirmingComplete(false)}>
+                </Button>
+                <Button variant="secondary" disabled={busy} onClick={() => setConfirmingComplete(false)}>
                   Not yet
-                </button>
+                </Button>
               </div>
             </div>
           )}

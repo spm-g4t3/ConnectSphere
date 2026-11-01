@@ -11,8 +11,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { getEquipmentQueue } from "../services/equipmentQueueService";
-import { equipmentStatusClass } from "../services/equipmentRequestStatus";
+import { equipmentStatusTone } from "../services/equipmentRequestStatus";
 import { formatEventPeriod } from "../services/eventPeriodFormat";
+import Button from "./ui/Button";
+import StatusBadge from "./ui/StatusBadge";
 import "./EquipmentRequestQueue.css";
 
 const LOAD_ERRORS = {
@@ -51,9 +53,7 @@ function RequestRow({ row, showFlagReasons }) {
       <div className="equipment-queue__main">
         <div className="equipment-queue__title">
           <strong>{row.eventName}</strong>
-          <span className={`equipment-queue__status equipment-queue__status--${equipmentStatusClass(row.status)}`}>
-            {row.statusLabel}
-          </span>
+          <StatusBadge tone={equipmentStatusTone(row.status)}>{row.statusLabel}</StatusBadge>
         </div>
         <p className="equipment-queue__detail">{formatEventPeriod(row.proposedStart, row.proposedEnd)}</p>
         <p className="equipment-queue__detail">
@@ -138,9 +138,9 @@ export default function EquipmentRequestQueue() {
           <p role="alert" className="equipment-queue__error">
             {error}
           </p>
-          <button type="button" onClick={load}>
+          <Button variant="secondary" onClick={load}>
             Try again
-          </button>
+          </Button>
         </section>
       )}
 

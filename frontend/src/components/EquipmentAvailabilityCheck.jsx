@@ -19,6 +19,8 @@ import { checkEquipmentAvailability, listActiveEquipmentTypes } from "../service
 import { availabilityErrorMessages } from "../services/availabilityErrors";
 import { deviceTimeZoneLabel, toOffsetIsoString } from "../services/datetimeFormat";
 import { formatRange } from "../services/displayFormat";
+import Button from "./ui/Button";
+import StatusBadge from "./ui/StatusBadge";
 import "./EquipmentAvailabilityCheck.css";
 
 const RESULT_CLASS = {
@@ -100,9 +102,9 @@ function AvailabilityResult({ result }) {
                     <td className="availability-reservations__number">{reservation.quantity}</td>
                     <td>
                       {reservation.flagged ? (
-                        <span className="availability-reservations__flag">Flagged for review</span>
+                        <StatusBadge tone="danger">Flagged for review</StatusBadge>
                       ) : (
-                        "Reserved"
+                        <StatusBadge tone="success">Reserved</StatusBadge>
                       )}
                     </td>
                   </tr>
@@ -188,6 +190,8 @@ export default function EquipmentAvailabilityCheck() {
       {noTypes && <p>No active equipment types yet. Add one in the equipment catalogue first.</p>}
 
       <form onSubmit={handleSubmit} noValidate>
+        <h2>Choose equipment and period</h2>
+
         <div className="availability-check__field">
           <label htmlFor="availability-type">Equipment type</label>
           <select id="availability-type" {...bind("equipmentTypeId")}>
@@ -227,9 +231,9 @@ export default function EquipmentAvailabilityCheck() {
           </ul>
         )}
 
-        <button type="submit" disabled={checking || noTypes}>
+        <Button type="submit" disabled={checking || noTypes}>
           {checking ? "Checking..." : "Check availability"}
-        </button>
+        </Button>
       </form>
 
       {result && <AvailabilityResult result={result} />}

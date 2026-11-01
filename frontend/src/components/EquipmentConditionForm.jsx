@@ -18,6 +18,7 @@
 import { useState } from "react";
 import { previewEquipmentChange, recordEquipmentCondition } from "../services/equipmentService";
 import EquipmentImpactConfirmation from "./EquipmentImpactConfirmation";
+import Button from "./ui/Button";
 import useConfirmedChange from "./useConfirmedChange";
 
 function asQuantity(text) {
@@ -73,6 +74,7 @@ export default function EquipmentConditionForm({ type, onSaved }) {
         cancelLabel="Go back"
         onConfirm={flow.confirm}
         onCancel={flow.cancel}
+        headingLevel={2}
       />
     );
   }
@@ -81,7 +83,6 @@ export default function EquipmentConditionForm({ type, onSaved }) {
 
   return (
     <form className="equipment-form" onSubmit={handleSubmit} noValidate>
-      <h2>Damage and maintenance: {type.name}</h2>
       <p>Total quantity: {type.totalQuantity}</p>
 
       <div className="equipment-form__field">
@@ -112,9 +113,9 @@ export default function EquipmentConditionForm({ type, onSaved }) {
         </ul>
       )}
 
-      <button type="submit" disabled={flow.busy}>
+      <Button type="submit" disabled={flow.busy}>
         {flow.stage === "checking" ? "Checking..." : flow.busy ? "Saving..." : "Save quantities"}
-      </button>
+      </Button>
     </form>
   );
 }

@@ -11,9 +11,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { getReviewedByMe } from "../services/equipmentQueueService";
-import { equipmentStatusClass } from "../services/equipmentRequestStatus";
+import { equipmentStatusTone } from "../services/equipmentRequestStatus";
 import { formatEventPeriod } from "../services/eventPeriodFormat";
 import { formatVenueTimestamp } from "../services/datetimeFormat";
+import Button from "./ui/Button";
+import StatusBadge from "./ui/StatusBadge";
 import "./EquipmentRequestQueue.css";
 
 const LOAD_ERRORS = {
@@ -27,9 +29,7 @@ function ReviewedRow({ row }) {
       <div className="equipment-queue__main">
         <div className="equipment-queue__title">
           <strong>{row.eventName}</strong>
-          <span className={`equipment-queue__status equipment-queue__status--${equipmentStatusClass(row.status)}`}>
-            {row.statusLabel}
-          </span>
+          <StatusBadge tone={equipmentStatusTone(row.status)}>{row.statusLabel}</StatusBadge>
         </div>
         <p className="equipment-queue__detail">{formatEventPeriod(row.proposedStart, row.proposedEnd)}</p>
         <p className="equipment-queue__detail">{`Last worked on: ${formatVenueTimestamp(row.lastWorkedAt)}`}</p>
@@ -80,9 +80,9 @@ export default function EquipmentReviewedByMe() {
           <p role="alert" className="equipment-queue__error">
             {error}
           </p>
-          <button type="button" onClick={load}>
+          <Button variant="secondary" onClick={load}>
             Try again
-          </button>
+          </Button>
         </>
       )}
       {list && list.requests.length === 0 && <p>You have not reviewed any equipment requests yet.</p>}

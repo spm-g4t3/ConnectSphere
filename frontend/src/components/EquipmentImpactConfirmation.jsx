@@ -8,6 +8,8 @@
 // It only draws what it is given. The flow lives in useConfirmedChange.
 
 import { describeAffected, impactHeading } from "../services/equipmentImpactDisplay";
+import Button from "./ui/Button";
+import StatusBadge from "./ui/StatusBadge";
 
 export default function EquipmentImpactConfirmation({
   typeName,
@@ -19,13 +21,16 @@ export default function EquipmentImpactConfirmation({
   cancelLabel,
   onConfirm,
   onCancel,
+  // h3 under a catalogue section; h2 where it replaces a form under the panel's h1.
+  headingLevel = 3,
 }) {
+  const Heading = `h${headingLevel}`;
   const items = impact.affected.map(describeAffected);
   const none = items.length === 0;
 
   return (
     <section className="equipment-impact" aria-label={`Reservations affected: ${typeName}`}>
-      <h3>Check before you save</h3>
+      <Heading className="equipment-impact__heading">Check before you save</Heading>
 
       {stale && (
         <p className="equipment-errors" role="alert">
@@ -49,7 +54,7 @@ export default function EquipmentImpactConfirmation({
                 <span>{item.period}</span>
                 <span>Quantity: {item.quantity}</span>
                 <span>Coordinator: {item.coordinator}</span>
-                {item.alreadyFlagged && <span>Already flagged</span>}
+                {item.alreadyFlagged && <StatusBadge tone="danger">Already flagged</StatusBadge>}
               </li>
             ))}
           </ul>
@@ -65,12 +70,12 @@ export default function EquipmentImpactConfirmation({
       )}
 
       <div className="equipment-impact__actions">
-        <button type="button" disabled={busy} onClick={onConfirm}>
+        <Button variant="danger" disabled={busy} onClick={onConfirm}>
           {busy ? "Saving..." : confirmLabel}
-        </button>
-        <button type="button" disabled={busy} onClick={onCancel}>
+        </Button>
+        <Button variant="secondary" disabled={busy} onClick={onCancel}>
           {cancelLabel}
-        </button>
+        </Button>
       </div>
     </section>
   );

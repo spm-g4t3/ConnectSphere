@@ -32,9 +32,19 @@ import useConfirmedChange from "./useConfirmedChange";
 import EquipmentForm from "./EquipmentForm";
 import EquipmentConditionForm from "./EquipmentConditionForm";
 import EquipmentHistory from "./EquipmentHistory";
+import Button from "./ui/Button";
 import "./EquipmentCatalogue.css";
 
 const COLUMNS = 8;
+
+// A panel replaces the list, so its title is the page's h1. It sits here, not in
+// the form, so it stays while the form gives way to the confirmation step.
+function panelTitle({ mode, type }) {
+  if (mode === "create") return "Add an equipment type";
+  if (mode === "edit") return `Edit ${type.name}`;
+  if (mode === "condition") return `Damage and maintenance: ${type.name}`;
+  return `History: ${type.name}`;
+}
 
 function EquipmentTable({
   types, retired, confirmingId, busyId, rowError, flow, onPanel, onConfirm, onCancelRetire, onChangeRetirement,
@@ -72,49 +82,53 @@ function EquipmentTable({
               <td className="equipment-table__number">{type.usableQuantity}</td>
               <td>
                 <div className="equipment-table__actions">
-                  <button aria-label={`Edit ${type.name}`} onClick={() => onPanel({ mode: "edit", type })}>
+                  <Button variant="secondary" aria-label={`Edit ${type.name}`} onClick={() => onPanel({ mode: "edit", type })}>
                     Edit
-                  </button>
+                  </Button>
                   {!retired && (
-                    <button
+                    <Button
+                      variant="secondary"
                       aria-label={`Damage and maintenance for ${type.name}`}
                       onClick={() => onPanel({ mode: "condition", type })}
                     >
                       Damage and maintenance
-                    </button>
+                    </Button>
                   )}
-                  <button aria-label={`History for ${type.name}`} onClick={() => onPanel({ mode: "history", type })}>
+                  <Button variant="secondary" aria-label={`History for ${type.name}`} onClick={() => onPanel({ mode: "history", type })}>
                     History
-                  </button>
+                  </Button>
                   {retired ? (
-                    <button
+                    <Button
+                      variant="secondary"
                       aria-label={`Reinstate ${type.name}`}
                       disabled={anyBusy}
                       onClick={() => onChangeRetirement(type, "reinstate")}
                     >
                       {reinstating ? "Reinstating..." : "Reinstate"}
-                    </button>
+                    </Button>
                   ) : confirming ? (
                     <>
-                      <button
+                      <Button
+                        variant="danger"
                         aria-label={`Confirm retire ${type.name}`}
                         disabled={anyBusy}
                         onClick={() => onChangeRetirement(type, "retire")}
                       >
                         {retiring ? "Checking..." : "Confirm retire"}
-                      </button>
-                      <button
+                      </Button>
+                      <Button
+                        variant="secondary"
                         aria-label={`Cancel retire ${type.name}`}
                         disabled={flow.busy}
                         onClick={onCancelRetire}
                       >
                         Cancel
-                      </button>
+                      </Button>
                     </>
                   ) : (
-                    <button aria-label={`Retire ${type.name}`} disabled={anyBusy} onClick={() => onConfirm(type.id)}>
+                    <Button variant="danger" aria-label={`Retire ${type.name}`} disabled={anyBusy} onClick={() => onConfirm(type.id)}>
                       Retire
-                    </button>
+                    </Button>
                   )}
                 </div>
               </td>
@@ -272,7 +286,8 @@ export default function EquipmentCatalogue() {
     return (
       <div className="dashboard dashboard--tech-support equipment-catalogue">
         <section>
-          <button onClick={() => setActivePanel(null)}>&larr; Back to the equipment catalogue</button>
+          <Button variant="link" onClick={() => setActivePanel(null)}>&larr; Back to the equipment catalogue</Button>
+          <h1>{panelTitle(activePanel)}</h1>
           {mode === "create" && <EquipmentForm onSaved={handleSaved} />}
           {mode === "edit" && <EquipmentForm type={type} onSaved={handleSaved} />}
           {mode === "condition" && <EquipmentConditionForm type={type} onSaved={handleSaved} />}
@@ -302,7 +317,7 @@ export default function EquipmentCatalogue() {
       <section>
         <div className="equipment-catalogue__bar">
           <h2>Active equipment</h2>
-          <button onClick={() => setActivePanel({ mode: "create" })}>Add equipment type</button>
+          <Button onClick={() => setActivePanel({ mode: "create" })}>Add equipment type</Button>
         </div>
         {loading && <p>Loading equipment...</p>}
         {loadError && <p role="alert">{loadError}</p>}
