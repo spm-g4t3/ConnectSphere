@@ -79,7 +79,8 @@ describe('SCRUM-52 SQL read against the final schema', () => {
     expect(queries).toBe(1);
   });
 
-  it.each(Object.values(STATUS).filter(status => status !== STATUS.CONFIRMED))(
+  // Cancelled has its own read (SCRUM-434 AC5), tested in scrum434AttendeeCancelledEventDatabase.test.js.
+  it.each(Object.values(STATUS).filter(status => ![STATUS.CONFIRMED, STATUS.CANCELLED].includes(status)))(
     'SCRUM24_AC2_AC3_SQL_non_confirmed_event_has_no_arrangements_%s', async status => {
       await registeredEvent({ status });
       await book('Private hall');

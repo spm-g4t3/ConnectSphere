@@ -12,7 +12,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { getMyEventRequests, reopenEventRequest } from "../services/eventRequestService";
-import { isRegistrationConfigurable } from "../services/registrationStatuses";
+import { isRegistrationConfigurable, mayHaveRegistrationList } from "../services/registrationStatuses";
 import {
   readStatusDisplay,
   statusClassName,
@@ -353,7 +353,7 @@ export default function MyEventRequests() {
                 {display.description}
               </p>
               <SafetyApprovalNotice status={req.status} />
-              {req.status === "confirmed" && <ConfirmedArrangements eventRequestId={req.id} />}
+              {(req.status === "confirmed" || req.status === "completed") && <ConfirmedArrangements eventRequestId={req.id} />}
               {assignment && (
                 <p className="my-event-requests__assignment">{assignment}</p>
               )}
@@ -459,6 +459,14 @@ export default function MyEventRequests() {
                     Registration settings
                   </Link>
                 )}
+                {mayHaveRegistrationList(req.status) && (
+                  <Link
+                    className="my-event-requests__registration-link"
+                    to={`/events/${req.id}/registrations`}
+                  >
+                    View registrations
+                  </Link>
+                )}
                 {req.status === "draft" && (
                   <button onClick={() => setActivePanel({ mode: "edit", request: req })}>
                     Continue editing
@@ -481,10 +489,12 @@ export default function MyEventRequests() {
                   </button>
                 )}
 
-                {/* SCRUM-347: a rejected event is revised and resubmitted instead. */}
+                {/* SCRUM-347: a rejected event is revised and resubmitted instead.
+                    SCRUM-379 AC3: a completed event is final, so it takes no change request. */}
                 {req.status !== "draft" &&
                   req.status !== "pending_clarification" &&
                   req.status !== "cancelled" &&
+                  req.status !== "completed" &&
                   req.status !== "rejected" && (
                   <button
                     onClick={() => setActivePanel({ mode: "change-request", request: req })}

@@ -10,6 +10,8 @@ import TechnicalSupportDashboard from "./TechnicalSupportDashboard";
 import AttendeeDashboard from "./AttendeeDashboard";
 import EventCoordinatorLeadDashboard from "./EventCoordinatorLeadDashboard";
 import SafetyOfficerDashboard from "./SafetyOfficerDashboard";
+import EmptyState from "./ui/EmptyState";
+import LoadingText from "./ui/LoadingText";
 
 const DASHBOARD_BY_ROLE = {
   EVENT_ORGANISER: EventOrganiserDashboard,
@@ -17,7 +19,7 @@ const DASHBOARD_BY_ROLE = {
   VENUE_STAFF: VenueStaffDashboard,
   // TECHNICAL_SUPPORT_STAFF, not TECHNICAL_SUPPORT. The key has to be what
   // normaliseRole produces from the token's role, and the short form matched
-  // nothing — Technical Support saw "No dashboard available for your role".
+  // nothing — Technical Support saw the "No dashboard" message.
   TECHNICAL_SUPPORT_STAFF: TechnicalSupportDashboard,
   ATTENDEE: AttendeeDashboard,
   // SCRUM-485 (SCRUM-509). The same rule: normaliseRole turns
@@ -34,13 +36,18 @@ export default function Dashboard() {
   const { user } = useAuth();
 
   if (!user) {
-    return <p>Loading...</p>;
+    return <LoadingText />;
   }
 
   const RoleDashboard = DASHBOARD_BY_ROLE[normaliseRole(user.role)];
 
   if (!RoleDashboard) {
-    return <p>No dashboard available for your role. Please contact support.</p>;
+    return (
+      <EmptyState
+        message="No dashboard is available for your role."
+        nextStep="Ask your Event Coordinator Lead to check your role."
+      />
+    );
   }
 
   return <RoleDashboard user={user} />;

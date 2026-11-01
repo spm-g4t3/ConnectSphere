@@ -28,6 +28,7 @@ import { PAYLOAD } from "../fixtures/notifications.js";
 vi.mock("../../src/services/eventRequestService", () => ({
   getEventRequestQueue: vi.fn(),
   getMyAssignedEvents: vi.fn(),
+  getNeedsAttention: vi.fn(() => Promise.resolve([])),
   getCoordinatorChangeRequests: vi.fn(),
   processCoordinatorChangeRequest: vi.fn(),
   requestEventClarification: vi.fn(),

@@ -10,7 +10,7 @@ choices made where the story left room.
 longer valid" and tells `AuthContext`, which clears the stored session and sends the
 user to the login page with one message. A new `POST /api/auth/refresh` renews the
 session while the user is active. A popup asks "Are you still there?" after 30 minutes
-without activity and signs the user out 15 minutes later if nobody answers. The 37
+without activity and signs the user out 15 minutes later if nobody answers. The
 screens and error tables that each worded their own expiry no longer do. No migration.
 
 ---
@@ -25,7 +25,7 @@ screens and error tables that each worded their own expiry no longer do. No migr
 | `auth/AuthContext.jsx` | `expireSession`, `renewSession`, `endIdleSession`, `sessionExpiredMessage`. Logging out a session the server already dropped (401) now finishes as a log out. |
 | `auth/SessionTimeout.jsx` | Renews an active user's session, asks the idle user, signs out the one who does not answer. Mounted once in `App.jsx`. |
 | `components/LoginForm.jsx`, `App.jsx`, `App.css` | The message on the login page; redirect to `/login` from unprotected screens; popup styles. |
-| 37 `src` files, 32 test files | The per-screen `401: SESSION_EXPIRED` rows, the `SESSION_EXPIRED` constant and their tests are removed. |
+| About 40 `src` files and their tests | The per-screen `401: SESSION_EXPIRED` rows, the `SESSION_EXPIRED` constant and their tests are removed. Four files that `dev` added or changed after the first version of this work (`CoordinatorAttentionList`, `ChangeRequestForm`, `ChangeRequestReviewPanel`, `eventCompletion`) are cleaned the same way. |
 | `vite.config.js`, `vitest.config.js` | `AuthContext.jsx`, `SessionTimeout.jsx`, `sessionExpiry.js`, `apiClient.js` and `routes/auth.js` are gated at 100% coverage. |
 
 ## 2. Acceptance criteria and the tests that prove them

@@ -1,6 +1,7 @@
 import express from 'express';
 
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
+import { noopFinalEventGuard, createFinalEventGuard, eventIdFromParam } from '../middleware/finalEventGuard.js';
 import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
 import { createErrorMiddleware } from '../http/handleError.js';
@@ -16,9 +17,13 @@ const errorMiddleware = createErrorMiddleware('safety reviews route');
 export function createSafetyReviewRouter({
   client,
   requireAuth = defaultRequireAuth,
+  finalEventGuard = noopFinalEventGuard,
   requireRole = createRequireRole,
 } = {}) {
   const router = express.Router();
+
+  // SCRUM-382: a Completed or Cancelled event, or anything attached to it, is read-only.
+  const guardEvent = finalEventGuard(eventIdFromParam('eventRequestId'));
   const safetyOfficerOnly = requireRole(ROLE.SAFETY_OFFICER);
 
   router.use(requireAuth, safetyOfficerOnly);
@@ -35,7 +40,7 @@ export function createSafetyReviewRouter({
     res.status(200).json(await getSafetyReview(req.params.eventRequestId, req.user.id, { client }));
   });
 
-  router.post('/:eventRequestId/responses', async (req, res) => {
+  router.post('/:eventRequestId/responses', guardEvent, async (req, res) => {
     const response = await respondToSafetyReview(
       req.params.eventRequestId,
       req.body,
@@ -49,4 +54,4 @@ export function createSafetyReviewRouter({
   return router;
 }
 
-export default createSafetyReviewRouter();
+export default createSafetyReviewRouter({ finalEventGuard: createFinalEventGuard() });

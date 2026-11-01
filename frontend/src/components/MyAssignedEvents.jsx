@@ -160,6 +160,12 @@ function EventRow({ event, onOpen }) {
             {display.label}
           </span>
           <NeedsAttentionBadge event={event} />
+          {/* SCRUM-402 (SCRUM-404): submissions waiting, counted by GET /mine. */}
+          {event.openChangeRequestCount > 0 && (
+            <span className="my-assigned-events__change-requests">
+              {event.openChangeRequestCount === 1 ? "1 change request" : `${event.openChangeRequestCount} change requests`}
+            </span>
+          )}
         </span>
         <span className="my-assigned-events__meta">
           <span>{formatEventDate(event.proposedStart)}</span>
@@ -176,7 +182,7 @@ function EventRow({ event, onOpen }) {
   );
 }
 
-export default function MyAssignedEvents() {
+export default function MyAssignedEvents({ onEventChanged } = {}) {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -236,8 +242,12 @@ export default function MyAssignedEvents() {
           onReviewDecisionProcessed={() => {
             setActivePanel(null);
             fetchEvents();
+            onEventChanged?.();
           }}
-          onChangeRequestProcessed={fetchEvents}
+          onChangeRequestProcessed={() => {
+            onEventChanged?.();
+            return fetchEvents();
+          }}
         />
       </section>
     );

@@ -55,6 +55,8 @@
 .equipment-review .er-next h2 { font-size: 1.15rem; margin: 0 0 4px; }
 .equipment-review .er-next p { color: #26383c; margin: 4px 0; }
 .equipment-review .er-next .er-next__who { color: #5a6c70; font-size: 0.88rem; }
+.equipment-review .er-next .er-next__stock { font-weight: 600; }
+.equipment-review .er-next .er-next__stock--all { color: #2e7d4f; }
 .equipment-review .er-next--action { background: #e8f3f1; border-left-color: #0b6b63; }
 .equipment-review .er-next--warn { background: #fff3e6; border-left-color: #ea7a1a; }
 .equipment-review .er-next--ok { background: #eef7f1; border-left-color: #2e7d4f; }

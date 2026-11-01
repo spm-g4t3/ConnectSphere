@@ -1,13 +1,12 @@
 // scrum489NotificationDisplay.test.js
 //
 // SCRUM-489 (AC8): what a Safety Officer reads when an event is submitted for
-// the safety check. The payload is 064's. Times are built with the module's
-// own formatTimestamp, so the suite passes in any zone and locale.
+// the safety check. The payload is 064's. The display format is fixed
+// Singapore text, so the expected time is a literal and passes in any zone.
 
 import { describe, it, expect } from "vitest";
 
 import { describeNotification } from "../../src/services/notificationDisplay.js";
-import { formatTimestamp } from "../../src/services/displayFormat.js";
 
 const PAYLOAD = Object.freeze({
   eventRequestId: "22222222-2222-4222-8222-222222222222",
@@ -24,7 +23,7 @@ describe("SCRUM489_AC8 describeNotification: event_submitted_for_safety_review",
   it("SCRUM489_AC8_names_the_event_the_coordinator_and_the_start", () => {
     expect(describeNotification(submitted(PAYLOAD))).toEqual({
       headline: "Event submitted for safety check",
-      detail: `IS212 Industry Night was submitted by Priya Nair. It starts ${formatTimestamp(PAYLOAD.startsAt)}.`,
+      detail: `IS212 Industry Night was submitted by Priya Nair. It starts 11 Nov 2026, 10:00 am.`,
     });
   });
 

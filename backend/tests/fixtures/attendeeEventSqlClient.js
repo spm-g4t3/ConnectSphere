@@ -8,9 +8,29 @@ const LIST_COLUMNS = 'event_request_id, attendee_id, status, event_requests!inne
 const DETAIL_COLUMNS = 'id,event_request_id,attendee_id,status,'
   + 'event_requests!inner(id,event_name,status,proposed_start,proposed_end,bookings(id,status,venues(name,location)))';
 
+function cancellationMessageQuery(db, onQuery) {
+  let id;
+  const query = {
+    select(columns) { expect(columns.replace(/\s+/g, '')).toBe('attendee_message'); return query; },
+    eq(field, value) { expect(field).toBe('id'); id = value; return query; },
+    async maybeSingle() {
+      onQuery();
+      try {
+        const { rows: [data = null] } = await db.query('select attendee_message from event_requests where id = $1', [id]);
+        return { data, error: null };
+      } catch (error) {
+        return { data: null, error };
+      }
+    },
+  };
+  return query;
+}
+
 export function createAttendeeEventSqlClient(db, { onQuery = () => {} } = {}) {
   return {
     from(table) {
+      // SCRUM-434 AC5: a cancelled event also reads the coordinator's message, and only that column.
+      if (table === 'event_requests') return cancellationMessageQuery(db, onQuery);
       expect(table).toBe('event_registrations');
       const filters = [];
       let isList = false;

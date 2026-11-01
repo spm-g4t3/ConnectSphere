@@ -33,6 +33,15 @@
 //   event_cancelled (047, SCRUM-374): { audience, eventName, reason,
 //     cancelledAt }; audience is organiser, venue_staff,
 //     technical_support_staff or safety_officer
+//   event_cancelled (042, SCRUM-175): { audience, eventRequestId, eventName,
+//     message, cancelledAt } for audience attendee; message is the
+//     coordinator's attendee message, may be null, and there is no reason
+//   event_confirmed (042, SCRUM-175): { audience, eventRequestId, eventName,
+//     startsAt, endsAt, confirmedAt, reconfirmed }, plus venues: [{ venueName,
+//     startsAt, endsAt }] for audience organiser or venueNames: [] for
+//     audience attendee
+//   event_venue_changed (042, SCRUM-175): { audience, eventRequestId,
+//     eventName, previousVenueName, venueName }; audience is attendee
 //   event_rejected (024, SCRUM-347): { audience, eventName }, plus reason and
 //     rejectedAt for the organiser, outcome (withdrawn or cancelled, 027),
 //     venueId, venueName, startsAt and endsAt for venue_staff, and
@@ -74,10 +83,15 @@
 //   event_significant_change (096): { eventRequestId, eventName, reason,
 //     changedFields, statusBefore, statusAfter }
 //   event_significant_change_attendee (096): { eventRequestId, eventName,
-//     startsAt, endsAt, reason }
+//     startsAt, endsAt }; rows from before 042 may carry a reason, never shown
 //   event_details_changed (022, SCRUM-387): { eventRequestId, eventName,
 //     reason, changedFields, status }; changedFields are the camelCase names
 //     in eventDetailFields.js, and eventName is the name after the edit
+//   change_request_decided (036, SCRUM-402): { eventRequestId, eventName,
+//     changeRequestId, decision, notes, changeFields }; to the Organiser;
+//     decision is approved or rejected, changeFields the enum members asked for
+//   change_request_significant_submitted (036, SCRUM-402): { eventRequestId,
+//     eventName, changeRequestId, changeFields }; to the event's holder
 //   booking_flagged_event_change (096): { eventName, venueName, startsAt,
 //     endsAt, reason }
 //   booking_request_event_change (096): { eventRequestId, eventName,
@@ -94,11 +108,12 @@
 // wrote it, and a missing name should read as "Unknown venue", not as
 // "undefined".
 
-import { formatRange, formatTimestamp } from "./displayFormat";
+import { formatDateTime, formatDateTimeRange } from "./displayFormat";
 import { reasonLabel } from "./venueBlockReasons";
 import { formatOccupiedPeriod } from "./occupiedPeriodDisplay";
 import { formatVenuePeriod, formatVenueTimestamp } from "./datetimeFormat";
 import { detailFieldList } from "./eventDetailFields";
+import { changeFieldList } from "./changeRequestDisplay";
 
 const UNNAMED_EVENT = "Unnamed event";
 const UNKNOWN_VENUE = "Unknown venue";
@@ -133,11 +148,11 @@ function setupChangePeriod(payload) {
       endsAt: payload.endsAt,
       occupiedStartsAt: payload.occupiedStartsAt,
       occupiedEndsAt: payload.occupiedEndsAt,
-    });
+    }, formatDateTimeRange);
     return ` It now occupies ${period}.`;
   }
   if (isInstant(payload.occupiedStartsAt) && isInstant(payload.occupiedEndsAt)) {
-    return ` It now occupies ${formatRange(payload.occupiedStartsAt, payload.occupiedEndsAt)}.`;
+    return ` It now occupies ${formatDateTimeRange(payload.occupiedStartsAt, payload.occupiedEndsAt)}.`;
   }
   return "";
 }
@@ -231,7 +246,7 @@ function describeEquipmentNotification(notification) {
       if (payload.change === "event_period") {
         const period =
           isInstant(payload.startsAt) && isInstant(payload.endsAt)
-            ? `The event is now ${formatRange(payload.startsAt, payload.endsAt)}. `
+            ? `The event is now ${formatDateTimeRange(payload.startsAt, payload.endsAt)}. `
             : "";
         return {
           headline: `The date or time of ${eventName} changed`,
@@ -262,13 +277,13 @@ function asSentence(text) {
 
 /** "Booked <range>. ", the start of a flagged booking's detail. */
 function bookedFor(payload) {
-  return `Booked ${formatRange(payload.startsAt, payload.endsAt)}. `;
+  return `Booked ${formatDateTimeRange(payload.startsAt, payload.endsAt)}. `;
 }
 
 /** "The venue is blocked for <reason>, <range>.", from a block's payload. */
 function blockedFor(payload) {
   const reason = payload.reason ? reasonLabel(payload.reason) : "unspecified reason";
-  return `The venue is blocked for ${reason}, ${formatRange(payload.blockStartsAt, payload.blockEndsAt)}.`;
+  return `The venue is blocked for ${reason}, ${formatDateTimeRange(payload.blockStartsAt, payload.blockEndsAt)}.`;
 }
 
 /**
@@ -285,6 +300,19 @@ const REGISTRATION_DATE_LABELS = {
 /** "a", "a and b", "a, b and c". */
 function joinWords(words) {
   return words.length > 1 ? `${words.slice(0, -1).join(", ")} and ${words.at(-1)}` : words[0];
+}
+
+/**
+ * " It runs <range> at A and B." for a confirmed event, leaving out the period
+ * or the venues when the payload lacks them.
+ */
+function confirmedSchedule(payload, venueNames) {
+  const names = venueNames.filter(Boolean);
+  const period = isInstant(payload.startsAt) && isInstant(payload.endsAt)
+    ? ` ${formatDateTimeRange(payload.startsAt, payload.endsAt)}`
+    : "";
+  const at = names.length > 0 ? ` at ${joinWords(names)}` : "";
+  return period || at ? ` It runs${period}${at}.` : "";
 }
 
 function describeClarification(payload, _names, type) {
@@ -334,7 +362,7 @@ const DESCRIBERS = {
     return {
       headline: `${venueName} is unavailable for your request for ${eventName}`,
       detail:
-        `Requested ${formatRange(payload.startsAt, payload.endsAt)}. ` +
+        `Requested ${formatDateTimeRange(payload.startsAt, payload.endsAt)}. ` +
         causes[payload.cause](payload) +
         " The request is still open; you may want to request another venue.",
     };
@@ -373,7 +401,7 @@ const DESCRIBERS = {
     return {
       headline: `The hold on ${venueName} for ${eventName} has expired`,
       detail:
-        `It expired ${formatTimestamp(payload.expiresAt)}. ` +
+        `It expired ${formatDateTime(payload.expiresAt)}. ` +
         "The venue is no longer held for this event; a hold is not a booking.",
     };
   },
@@ -411,7 +439,7 @@ const DESCRIBERS = {
     return {
       headline: `The request for ${eventName} at ${venueName} was withdrawn`,
       detail:
-        `It was for ${formatRange(payload.startsAt, payload.endsAt)}. ` +
+        `It was for ${formatDateTimeRange(payload.startsAt, payload.endsAt)}. ` +
         "It no longer needs a decision.",
     };
   },
@@ -422,7 +450,7 @@ const DESCRIBERS = {
   booking_request_submitted(payload, { eventName, venueName }) {
     return {
       headline: `New request: ${eventName} at ${venueName}`,
-      detail: `It is for ${formatRange(payload.startsAt, payload.endsAt)}. It needs a decision.`,
+      detail: `It is for ${formatDateTimeRange(payload.startsAt, payload.endsAt)}. It needs a decision.`,
       needsAction: true,
     };
   },
@@ -432,7 +460,7 @@ const DESCRIBERS = {
   booking_request_approved(payload, { eventName, venueName }) {
     return {
       headline: `${venueName} was approved for ${eventName}`,
-      detail: `It is booked for ${formatRange(payload.startsAt, payload.endsAt)}.`,
+      detail: `It is booked for ${formatDateTimeRange(payload.startsAt, payload.endsAt)}.`,
     };
   },
 
@@ -459,7 +487,7 @@ const DESCRIBERS = {
     return {
       headline: `Your request for ${venueName} for ${eventName} now clashes with ${approvedEventName}`,
       detail:
-        `${approvedEventName} was approved for ${formatRange(payload.approvedStartsAt, payload.approvedEndsAt)}. ` +
+        `${approvedEventName} was approved for ${formatDateTimeRange(payload.approvedStartsAt, payload.approvedEndsAt)}. ` +
         "Your request is still open; you can withdraw it or wait for Venue Staff.",
     };
   },
@@ -472,7 +500,7 @@ const DESCRIBERS = {
     return {
       headline: `${venueName} was released for ${eventName}`,
       detail:
-        `It is free again for ${formatRange(payload.startsAt, payload.endsAt)}, released by ${by}. ` +
+        `It is free again for ${formatDateTimeRange(payload.startsAt, payload.endsAt)}, released by ${by}. ` +
         `Reason: ${asSentence(payload.reason || NO_REASON)}`,
     };
   },
@@ -487,7 +515,7 @@ const DESCRIBERS = {
       headline: `Your request for ${venueName} for ${eventName} no longer clashes`,
       detail:
         `${releasedEventName} no longer holds the venue, so your request for ` +
-        `${formatRange(payload.startsAt, payload.endsAt)} is pending again and waits for Venue Staff.`,
+        `${formatDateTimeRange(payload.startsAt, payload.endsAt)} is pending again and waits for Venue Staff.`,
     };
   },
 
@@ -503,7 +531,7 @@ const DESCRIBERS = {
     if (payload.outcome === "reinstated") {
       return {
         headline: `${venueName} for ${eventName} was reinstated`,
-        detail: `It is booked again for ${formatRange(payload.startsAt, payload.endsAt)}. ${reason}`,
+        detail: `It is booked again for ${formatDateTimeRange(payload.startsAt, payload.endsAt)}. ${reason}`,
       };
     }
     if (payload.outcome === "cancelled") {
@@ -526,7 +554,7 @@ const DESCRIBERS = {
       return {
         headline: `${venueName} for ${eventName} was replaced by ${replacement}`,
         detail:
-          `${replacement} is booked for ${formatRange(payload.replacementStartsAt, payload.replacementEndsAt)}. ` +
+          `${replacement} is booked for ${formatDateTimeRange(payload.replacementStartsAt, payload.replacementEndsAt)}. ` +
           reason,
       };
     }
@@ -539,7 +567,7 @@ const DESCRIBERS = {
     if (payload.audience === "organiser") {
       const reason = payload.reason || NO_REASON;
       const cancelledAt = payload.cancelledAt
-        ? ` Cancelled ${formatTimestamp(payload.cancelledAt)}.`
+        ? ` Cancelled ${formatDateTime(payload.cancelledAt)}.`
         : "";
       return {
         headline: `${eventName} was cancelled`,
@@ -549,7 +577,7 @@ const DESCRIBERS = {
     if (payload.audience === "safety_officer") {
       const reason = payload.reason || NO_REASON;
       const cancelledAt = payload.cancelledAt
-        ? ` Cancelled ${formatTimestamp(payload.cancelledAt)}.`
+        ? ` Cancelled ${formatDateTime(payload.cancelledAt)}.`
         : "";
       return {
         headline: `${eventName} was cancelled`,
@@ -568,13 +596,58 @@ const DESCRIBERS = {
         detail: "The equipment request was cancelled and its active reservations were released.",
       };
     }
+    // The internal reason stays with the organiser and staff; an attendee is
+    // shown only the message the coordinator wrote for them.
+    if (payload.audience === "attendee") {
+      return {
+        headline: `${eventName} was cancelled`,
+        detail: payload.message ? `Message from the organisers: ${asSentence(payload.message)}` : "",
+      };
+    }
     return undefined;
+  },
+
+  // Sent to the Organiser, and to registered attendees when a changed event
+  // is confirmed again. An unknown audience reads as the generic notification.
+  event_confirmed(payload, { eventName }) {
+    if (payload.audience === "organiser") {
+      const venues = Array.isArray(payload.venues) ? payload.venues.map((venue) => venue?.venueName) : [];
+      return {
+        headline: `${eventName} is confirmed`,
+        detail: `Its fields are now locked; changes go through a change request.${confirmedSchedule(payload, venues)}`,
+      };
+    }
+    if (payload.audience === "attendee") {
+      const venues = Array.isArray(payload.venueNames) ? payload.venueNames : [];
+      const schedule = confirmedSchedule(payload, venues).trim();
+      if (payload.reconfirmed) {
+        return {
+          headline: `An event you registered for is confirmed again: ${eventName}`,
+          detail: `It was re-confirmed after a change.${schedule ? ` ${schedule}` : ""}`,
+        };
+      }
+      return {
+        headline: `An event you registered for is confirmed: ${eventName}`,
+        detail: schedule,
+      };
+    }
+    return undefined;
+  },
+
+  // Sent to registered attendees; the Organiser hears of the same change
+  // through flagged_booking_resolved. An unknown audience reads as generic.
+  event_venue_changed(payload, { eventName, venueName }) {
+    if (payload.audience !== "attendee") return undefined;
+    return {
+      headline: `The venue for ${eventName} changed`,
+      detail: `Now at ${venueName} (was ${payload.previousVenueName || UNKNOWN_VENUE}).`,
+    };
   },
 
   // SCRUM-347. Venue Staff get one per released booking, so theirs names the venue.
   event_rejected(payload, { eventName, venueName }) {
     if (payload.audience === "organiser") {
-      const rejectedAt = payload.rejectedAt ? ` Rejected ${formatTimestamp(payload.rejectedAt)}.` : "";
+      const rejectedAt = payload.rejectedAt ? ` Rejected ${formatDateTime(payload.rejectedAt)}.` : "";
       return {
         headline: `${eventName} was rejected`,
         detail: `Reason: ${asSentence(payload.reason || NO_REASON)}${rejectedAt} You can revise and resubmit it.`,
@@ -584,13 +657,13 @@ const DESCRIBERS = {
     if (payload.audience === "venue_staff" && payload.outcome === "withdrawn") {
       return {
         headline: `The request for ${venueName} for ${eventName} was withdrawn`,
-        detail: `The event was rejected, so its request for ${formatRange(payload.startsAt, payload.endsAt)} no longer needs a decision.`,
+        detail: `The event was rejected, so its request for ${formatDateTimeRange(payload.startsAt, payload.endsAt)} no longer needs a decision.`,
       };
     }
     if (payload.audience === "venue_staff") {
       return {
         headline: `${venueName} was released for ${eventName}`,
-        detail: `The event was rejected, so its booking for ${formatRange(payload.startsAt, payload.endsAt)} no longer holds the venue.`,
+        detail: `The event was rejected, so its booking for ${formatDateTimeRange(payload.startsAt, payload.endsAt)} no longer holds the venue.`,
       };
     }
     if (payload.audience === "technical_support_staff") {
@@ -607,7 +680,7 @@ const DESCRIBERS = {
   event_submitted_for_safety_review(payload, { eventName }) {
     const coordinatorName = payload.coordinatorName || "its coordinator";
     const startsAt = isInstant(payload.startsAt)
-      ? ` It starts ${formatTimestamp(payload.startsAt)}.`
+      ? ` It starts ${formatDateTime(payload.startsAt)}.`
       : "";
 
     return {
@@ -624,7 +697,7 @@ const DESCRIBERS = {
   // queue until a Lead picks a coordinator.
   event_request_awaiting_assignment(payload, { eventName }) {
     const submittedAt = isInstant(payload.submittedAt)
-      ? `Submitted ${formatTimestamp(payload.submittedAt)}. `
+      ? `Submitted ${formatDateTime(payload.submittedAt)}. `
       : "";
 
     return {
@@ -726,7 +799,7 @@ const DESCRIBERS = {
   registration_schedule_conflict(payload, { eventName }) {
     const fields = Array.isArray(payload.fields) ? payload.fields : [];
     const labels = fields.map((field) => REGISTRATION_DATE_LABELS[field]).filter(Boolean);
-    const newStart = isInstant(payload.newStart) ? ` (${formatTimestamp(payload.newStart)})` : "";
+    const newStart = isInstant(payload.newStart) ? ` (${formatDateTime(payload.newStart)})` : "";
     const clash = labels.length
       ? `is earlier than the ${joinWords(labels)}`
       : "clashes with the registration dates";
@@ -760,6 +833,29 @@ const DESCRIBERS = {
     };
   },
 
+  // SCRUM-402 (AC11). The outcome of the Organiser's change request, from the
+  // function that decided it; a cancellation request is named as one.
+  change_request_decided(payload, { eventName }) {
+    const fields = Array.isArray(payload.changeFields) ? payload.changeFields : [];
+    const cancellation = fields.includes("cancellation");
+    const subject = cancellation ? `Your request to cancel ${eventName}` : `Your change request for ${eventName}`;
+    const outcome = { approved: "accepted", rejected: "declined" }[payload.decision] ?? "closed";
+    const asked = !cancellation && fields.length > 0 ? `Requested: ${changeFieldList(fields)}. ` : "";
+    const note = payload.notes
+      ? `${payload.decision === "approved" ? "Coordinator's note" : "Reason"}: ${payload.notes}.`
+      : "No note was left.";
+    return { headline: `${subject} was ${outcome}`, detail: `${asked}${note}` };
+  },
+
+  // SCRUM-402 (AC12, W1 §6). The holder hears the Organiser asked for a significant change.
+  change_request_significant_submitted(payload, { eventName }) {
+    const fields = Array.isArray(payload.changeFields) ? payload.changeFields : [];
+    return {
+      headline: `The organiser asked to change ${eventName}`,
+      detail: `${fields.length > 0 ? `Requested: ${changeFieldList(fields)}. ` : ""}Review it on the event.`,
+    };
+  },
+
   // SCRUM-387 (AC8). One per save, to the Organiser, naming every field it changed.
   event_details_changed(payload, { eventName }) {
     const fields = Array.isArray(payload.changedFields) ? payload.changedFields : [];
@@ -770,13 +866,14 @@ const DESCRIBERS = {
     };
   },
 
+  // The reason is internal, as with cancellation, so it is never shown here,
+  // even on older rows that still carry it.
   event_significant_change_attendee(payload, { eventName }) {
-    const period = payload.startsAt && payload.endsAt
-      ? ` The event now runs ${formatRange(payload.startsAt, payload.endsAt)}.`
-      : "";
     return {
       headline: `An event you registered for has changed: ${eventName}`,
-      detail: `Reason: ${payload.reason || NO_REASON}.${period}`,
+      detail: payload.startsAt && payload.endsAt
+        ? `The event now runs ${formatDateTimeRange(payload.startsAt, payload.endsAt)}.`
+        : "Check the event for its latest details.",
     };
   },
 
@@ -792,8 +889,8 @@ const DESCRIBERS = {
     return {
       headline: `${eventName} moved; a pending request is for the old time`,
       detail:
-        `The request for ${venueName} is for ${formatRange(payload.startsAt, payload.endsAt)}. ` +
-        `The event now runs ${formatRange(payload.newStartsAt, payload.newEndsAt)}. ` +
+        `The request for ${venueName} is for ${formatDateTimeRange(payload.startsAt, payload.endsAt)}. ` +
+        `The event now runs ${formatDateTimeRange(payload.newStartsAt, payload.newEndsAt)}. ` +
         `Coordinator's reason: ${payload.reason || NO_REASON}.`,
     };
   },

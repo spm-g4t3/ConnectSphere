@@ -2,17 +2,16 @@
 //
 // SCRUM-492: what Venue Staff read when a coordinator releases a venue (AC6),
 // and what a coordinator reads when the release frees their request (AC4).
-// The payloads are 089's. Times are built with the module's own formatRange,
-// so the suite passes in any zone and locale.
+// The payloads are 089's. The display format is fixed Singapore text, so the
+// expected times are literals and the suite passes in any zone and locale.
 
 import { describe, it, expect } from "vitest";
 
 import { describeNotification } from "../../src/services/notificationDisplay.js";
-import { formatRange } from "../../src/services/displayFormat.js";
 
 const STARTS = "2026-11-11T13:00:00+08:00";
 const ENDS = "2026-11-11T14:00:00+08:00";
-const RANGE = formatRange(STARTS, ENDS);
+const RANGE = "11 Nov 2026, 1:00 pm – 2:00 pm";
 
 const released = (payload) => ({ id: "n1", type: "booking_released", payload });
 const cleared = (payload) => ({ id: "n2", type: "booking_request_conflict_cleared", payload });

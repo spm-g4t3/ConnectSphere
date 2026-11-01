@@ -7,6 +7,7 @@
 import express from 'express';
 
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
+import { noopFinalEventGuard, createFinalEventGuard, eventIdFromParam, isRegisteredFor } from '../middleware/finalEventGuard.js';
 import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
 import { createErrorMiddleware } from '../http/handleError.js';
@@ -26,16 +27,22 @@ const errorMiddleware = createErrorMiddleware('open events route');
 export function createOpenEventRouter({
   client,
   requireAuth = defaultRequireAuth,
+  finalEventGuard = noopFinalEventGuard,
   requireRole = createRequireRole,
   now = () => new Date(),
 } = {}) {
   const router = express.Router();
 
+  // SCRUM-382: a Completed or Cancelled event, or anything attached to it, is read-only.
+  // Only an attendee who is registered or waitlisted is told so; to anyone else a
+  // final event is not on offer, the same 404 as an event that does not exist.
+  const guardEvent = finalEventGuard(eventIdFromParam('id'), { entitled: isRegisteredFor });
+
   router.use(requireAuth);
 
   const attendeeOnly = requireRole(ROLE.ATTENDEE);
 
-  router.post('/:id/registrations', attendeeOnly, async (req, res) => {
+  router.post('/:id/registrations', attendeeOnly, guardEvent, async (req, res) => {
     const registration = await registerForEvent({
       attendeeId: req.user.id,
       eventId: req.params.id,
@@ -45,7 +52,7 @@ export function createOpenEventRouter({
     res.status(201).json(registration);
   });
 
-  router.post('/:id/waitlist', attendeeOnly, async (req, res) => {
+  router.post('/:id/waitlist', attendeeOnly, guardEvent, async (req, res) => {
     const { created, registration } = await joinEventWaitlist({
       attendeeId: req.user.id,
       eventId: req.params.id,
@@ -81,4 +88,4 @@ export function createOpenEventRouter({
   return router;
 }
 
-export default createOpenEventRouter();
+export default createOpenEventRouter({ finalEventGuard: createFinalEventGuard() });

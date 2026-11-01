@@ -9,6 +9,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
+import userEvent from "@testing-library/user-event";
 
 import Navigation from "../../src/components/Navigation.jsx";
 import { useAuth } from "../../src/auth/AuthContext";
@@ -357,5 +358,27 @@ describe("SCRUM172_AC4 the nav's Notifications link", () => {
     renderAs("saftey_officer");
 
     expect(screen.queryByRole("link", { name: /Notifications/ })).not.toBeInTheDocument();
+  });
+});
+
+describe("SCRUM584 AC7 the nav follows the UI standard", () => {
+  it("SCRUM584_AC7_a_failed_logout_offers_Try_again_which_logs_out_again", async () => {
+    const logout = vi.fn()
+      .mockResolvedValueOnce({ success: false, error: "We could not log you out. Please try again." })
+      .mockResolvedValueOnce({ success: true });
+    vi.mocked(useAuth).mockReturnValue({ user: { name: "Test User", role: "attendee" }, logout });
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter initialEntries={["/dashboard"]}>
+        <Navigation />
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Log out" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("We could not log you out. Please try again.");
+
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    expect(logout).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });

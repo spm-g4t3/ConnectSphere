@@ -14,6 +14,13 @@
 // needsAction ignores the status filter; requests is every status, or the one
 // asked for. Each list is cut at a limit, and *Total is the count before the cut. statuses is the filter's choices, so labels are not kept here.
 // A 400 is a filter the server does not know, a 403 is not Technical Support.
+//
+// getReviewedByMe (SCRUM-582, GET /equipment-requests/reviewed-by-me) is the
+// caller's own review history:
+//   { requests: Row[], total, truncated }
+//   Row = { eventRequestId, eventName, proposedStart, proposedEnd, status,
+//           statusLabel, lastWorkedAt, returnedToPending,
+//           interruptedReason: string | null, interruptedAt: string | null }
 
 import { getData } from "./apiData";
 
@@ -28,4 +35,9 @@ export async function getEquipmentQueue({ status = "", includePast = false } = {
   if (includePast) params.includePast = "true";
 
   return getData("/equipment-requests", { params });
+}
+
+/** The requests the signed-in user has started or taken over, newest work first. */
+export async function getReviewedByMe() {
+  return getData("/equipment-requests/reviewed-by-me");
 }

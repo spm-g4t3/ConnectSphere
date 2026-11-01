@@ -149,6 +149,12 @@ const SCRUM284_FILES = [
   'src/services/eventPeriodFormat.js',
 ]
 
+// SCRUM-582 adds the "Reviewed by me" list beside the queue. The service it
+// calls is gated above under SCRUM-284.
+const SCRUM582_FILES = [
+  'src/components/EquipmentReviewedByMe.jsx',
+]
+
 // SCRUM-258 owns the Venue Staff queue and its decision card outright.
 // VenueStaffDashboard.jsx, which mounts the queue, and the shared services
 // it calls (bookingRequestService.js, already gated under SCRUM-254) are not
@@ -245,6 +251,16 @@ const SCRUM355_FILES = [
 // CoordinatorRequestDetail.jsx, MyEventRequests.jsx and eventRequestService.js
 // stay ungated; notificationDisplay.js and notificationLink.js keep the 100%
 // of SCRUM17_FILES and SCRUM172_FILES.
+// SCRUM-402: the coordinator's review panel and the display helper it shares
+// with the Organiser's list and the notices, new files only this story owns.
+// Its edits to ChangeRequestForm.jsx, ChangeRequestStatusList.jsx,
+// CoordinatorRequestDetail.jsx and MyAssignedEvents.jsx stay ungated, and
+// notificationDisplay.js keeps SCRUM17_FILES' 100%.
+const SCRUM402_FILES = [
+  'src/components/ChangeRequestReviewPanel.jsx',
+  'src/services/changeRequestDisplay.js',
+]
+
 const SCRUM387_FILES = [
   'src/components/EventDetailsEditPanel.jsx',
   'src/components/EventChangeHistory.jsx',
@@ -255,6 +271,22 @@ const SCRUM387_FILES = [
 // CoordinatorRequestDetail.jsx and MyEventRequests.jsx stay ungated.
 const SCRUM347_FILES = [
   'src/components/EventRejectionPanel.jsx',
+]
+
+// SCRUM-478: the registration list page is new and owned outright. Its links in
+// MyEventRequests.jsx and CoordinatorRequestDetail.jsx stay ungated.
+const SCRUM478_FILES = [
+  'src/components/EventRegistrationList.jsx',
+]
+
+// SCRUM-584: the shared ui components, new files only this story owns.
+const SCRUM584_FILES = [
+  'src/components/ui/Button.jsx',
+  'src/components/ui/StatusBadge.jsx',
+  'src/components/ui/LoadingText.jsx',
+  'src/components/ui/EmptyState.jsx',
+  'src/components/ui/ErrorNotice.jsx',
+  'src/components/ui/ConfirmDialog.jsx',
 ]
 
 // https://vite.dev/config/
@@ -299,6 +331,7 @@ export default defineConfig({
         ...SCRUM486_FILES.map((file) => [file, FULL]),
         ...SCRUM487_FILES.map((file) => [file, FULL]),
         ...SCRUM284_FILES.map((file) => [file, FULL]),
+        ...SCRUM582_FILES.map((file) => [file, FULL]),
         ...SCRUM258_FILES.map((file) => [file, FULL]),
         ...SCRUM266_FILES.map((file) => [file, FULL]),
         ...SCRUM495_FILES.map((file) => [file, FULL]),
@@ -311,7 +344,10 @@ export default defineConfig({
         ...SCRUM172_FILES.map((file) => [file, FULL]),
         ...SCRUM355_FILES.map((file) => [file, FULL]),
         ...SCRUM387_FILES.map((file) => [file, FULL]),
+        ...SCRUM402_FILES.map((file) => [file, FULL]),
         ...SCRUM347_FILES.map((file) => [file, FULL]),
+        ...SCRUM478_FILES.map((file) => [file, FULL]),
+        ...SCRUM584_FILES.map((file) => [file, FULL]),
       ]),
     },
   },

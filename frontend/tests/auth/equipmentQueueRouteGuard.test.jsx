@@ -18,6 +18,10 @@ vi.mock("../../src/components/EquipmentRequestQueue", () => ({
   default: () => <p data-testid="queue-stub">Equipment request queue</p>,
 }));
 
+vi.mock("../../src/components/EquipmentReviewedByMe", () => ({
+  default: () => <p data-testid="reviewed-stub">Reviewed by me</p>,
+}));
+
 beforeEach(() => {
   vi.mocked(useAuth).mockReset();
 });
@@ -27,6 +31,7 @@ describe("SCRUM-284 AC1: /equipment is for Technical Support Staff only", () => 
     renderAppAt("/equipment", "technical_support_staff");
 
     expect(screen.getByTestId("queue-stub")).toBeInTheDocument();
+    expect(screen.getByTestId("reviewed-stub")).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 1, name: "Equipment request queue" })).toBeInTheDocument();
     expect(window.location.pathname).toBe("/equipment");
   });

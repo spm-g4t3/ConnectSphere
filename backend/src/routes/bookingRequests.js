@@ -25,6 +25,7 @@
 import express from 'express';
 
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
+import { noopFinalEventGuard, createFinalEventGuard, eventIdFromBody, eventIdFromRecord } from '../middleware/finalEventGuard.js';
 import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
 import { createErrorMiddleware } from '../http/handleError.js';
@@ -51,10 +52,15 @@ const errorMiddleware = createErrorMiddleware('booking requests route');
 export function createBookingRequestRouter({
   client,
   requireAuth = defaultRequireAuth,
+  finalEventGuard = noopFinalEventGuard,
   requireRole = createRequireRole,
   checkSuitability,
 } = {}) {
   const router = express.Router();
+
+  // SCRUM-382: a Completed or Cancelled event, or anything attached to it, is read-only.
+  const guardEventInBody = finalEventGuard(eventIdFromBody('eventRequestId'));
+  const guardBooking = finalEventGuard(eventIdFromRecord('bookings', 'id'));
 
   const coordinatorOnly = requireRole(ROLE.EVENT_COORDINATOR);
   const venueStaffOnly = requireRole(ROLE.VENUE_STAFF);
@@ -123,7 +129,7 @@ export function createBookingRequestRouter({
    * REPLACED_BOOKING_NOT_FLAGGED for a replacesBookingId that is not this
    * event's flagged booking.
    */
-  router.post('/', coordinatorOnly, async (req, res) => {
+  router.post('/', coordinatorOnly, guardEventInBody, async (req, res) => {
     const booking = await createBookingRequest(req.body, req.user.id, {
       client,
       checkSuitability,
@@ -144,7 +150,7 @@ export function createBookingRequestRouter({
    * request that was already withdrawn -- repeating the call is refused, not
    * answered as a success.
    */
-  router.post('/:id/withdraw', coordinatorOnly, async (req, res) => {
+  router.post('/:id/withdraw', coordinatorOnly, guardBooking, async (req, res) => {
     const booking = await withdrawBookingRequest(req.params.id, req.user.id, { client });
     res.status(200).json(booking);
   });
@@ -165,7 +171,7 @@ export function createBookingRequestRouter({
    * EVENT_NOT_APPROVED, BOOKING_NOT_APPROVED (a flagged booking, a request, or
    * one already released or ended), BOOKING_CHANGED.
    */
-  router.post('/:id/release', coordinatorOnly, async (req, res) => {
+  router.post('/:id/release', coordinatorOnly, guardBooking, async (req, res) => {
     const result = await releaseVenueBooking(req.params.id, req.user.id, req.body ?? {}, { client });
     res.status(200).json(result);
   });
@@ -187,7 +193,7 @@ export function createBookingRequestRouter({
    * BOOKING_PERIOD_STALE, VENUE_RETIRED, or BOOKING_PERIOD_CONFLICT with
    * `conflicts` (see approveBookingRequest).
    */
-  router.post('/:id/approve', venueStaffOnly, async (req, res) => {
+  router.post('/:id/approve', venueStaffOnly, guardBooking, async (req, res) => {
     const booking = await approveBookingRequest(req.params.id, req.user.id, { client });
     res.status(200).json(booking);
   });
@@ -205,7 +211,7 @@ export function createBookingRequestRouter({
    * 401; 403 wrong role or no role; 404 no such request; 409
    * BOOKING_NOT_PENDING.
    */
-  router.post('/:id/reject', venueStaffOnly, async (req, res) => {
+  router.post('/:id/reject', venueStaffOnly, guardBooking, async (req, res) => {
     const booking = await rejectBookingRequest(req.params.id, req.user.id, req.body, { client });
     res.status(200).json(booking);
   });
@@ -214,4 +220,4 @@ export function createBookingRequestRouter({
   return router;
 }
 
-export default createBookingRequestRouter();
+export default createBookingRequestRouter({ finalEventGuard: createFinalEventGuard() });

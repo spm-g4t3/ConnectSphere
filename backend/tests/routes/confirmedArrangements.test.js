@@ -107,7 +107,7 @@ describe('SCRUM-363: organiser confirmed arrangements', () => {
     expect(res.status).toBe(id === null ? 404 : 400);
   });
 
-  it.each(['approved', 'safety_review', 'safety_approved', 'cancelled', 'completed'])(
+  it.each(['approved', 'safety_review', 'safety_approved', 'cancelled'])(
     'SCRUM363_AC7_status_%s_does_not_expose_previous_arrangements_as_confirmed', async (status) => {
       const res = await read(clientFor(stored({ status })));
       expect(res.status).toBe(200);
@@ -115,6 +115,38 @@ describe('SCRUM-363: organiser confirmed arrangements', () => {
       expect(res.text).not.toContain('Hall A');
     },
   );
+
+  it('SCRUM379_AC5_a_completed_event_keeps_showing_its_venue_booking_and_arranged_equipment', async () => {
+    const res = await read(clientFor(stored({ status: 'completed' })));
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      status: 'completed', statusDisplay: { label: 'Completed' },
+      startsAt: '2026-11-01T16:00:00Z', endsAt: '2026-11-01T18:00:00Z',
+      venues: [{ bookingId: 'b1', name: 'Hall A' }, { bookingId: 'b2', name: 'Room 2' }],
+      equipment: [{ lineId: 'l1', name: 'Microphone', quantity: 3 }, { lineId: 'l2', name: 'Projector', quantity: 2 }],
+    });
+  });
+
+  it('SCRUM379_AC5_a_completed_event_still_hides_unconfirmed_bookings_and_unarranged_or_removed_equipment', async () => {
+    const res = await read(clientFor(stored({ status: 'completed' })));
+    expect(res.text).not.toContain('Unconfirmed venue');
+    expect(res.text).not.toContain('Unarranged type');
+    expect(res.text).not.toContain('Removed type');
+  });
+
+  it('SCRUM379_AC5_a_completed_event_is_read_for_its_own_organiser_only', async () => {
+    const client = clientFor(stored({ status: 'completed' }));
+    const res = await request(app(client, { id: OTHER })).get(`/api/event-requests/${ID}/confirmed-arrangements`);
+    expect(res.status).toBe(404);
+    expect(client.calls[0].filters).toContainEqual(['organiser_id', OTHER]);
+    expect(res.text).not.toContain('Hall A');
+  });
+
+  it('SCRUM379_AC5_the_arrangements_of_a_completed_event_carry_no_closing_notes', async () => {
+    const res = await read(clientFor(stored({ status: 'completed', closing_notes: 'Private note' })));
+    expect(res.text).not.toContain('Private note');
+    expect(res.text).not.toMatch(/closing/i);
+  });
 
   it('SCRUM363_AC7_no_equipment_is_an_empty_arranged_list_and_never_free_text_requirements', async () => {
     const res = await read(clientFor(stored({ equipment_requests: null, equipment_requirements: 'Original unarranged projectors' })));

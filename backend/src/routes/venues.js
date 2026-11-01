@@ -90,6 +90,7 @@ import {
   validateSearchFilters,
 } from '../validation/venueValidation.js';
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
+import { noopFinalEventGuard, createFinalEventGuard, eventIdFromBody } from '../middleware/finalEventGuard.js';
 import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
 import { createErrorMiddleware } from '../http/handleError.js';
@@ -238,9 +239,13 @@ function changeSet(body) {
  */
 export function createVenueRouter({
   requireAuth = defaultRequireAuth,
+  finalEventGuard = noopFinalEventGuard,
   requireRole = createRequireRole,
 } = {}) {
   const router = express.Router();
+
+  // SCRUM-382: a Completed or Cancelled event, or anything attached to it, is read-only.
+  const guardEventInBody = finalEventGuard(eventIdFromBody('eventRequestId'));
   const venueStaffOnly = requireRole(ROLE.VENUE_STAFF);
   // The internal roles: Venue Staff and Event Coordinators. SCRUM-130 opened
   // block reads to them, wider than block writes; SCRUM-179 gave the calendar
@@ -501,7 +506,7 @@ export function createVenueRouter({
    * (conflicts list each booking, block or hold in the way, with its
    * occupied period); 500.
    */
-  router.post('/:id/holds', venueStaffOnly, async (req, res) => {
+  router.post('/:id/holds', venueStaffOnly, guardEventInBody, async (req, res) => {
     const hold = await placeVenueHold(req.params.id, req.body, actingUser(req));
     res.status(201).json({ hold });
   });
@@ -612,4 +617,4 @@ export function createVenueRouter({
 
 
 /** The instance src/app.js mounts. */
-export default createVenueRouter();
+export default createVenueRouter({ finalEventGuard: createFinalEventGuard() });

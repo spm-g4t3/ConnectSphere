@@ -21,11 +21,17 @@
 // Both sections are components of their own, so this file is only the page
 // around them.
 
+import { useState } from "react";
+import CoordinatorAttentionList from "./CoordinatorAttentionList";
 import MyAssignedEvents from "./MyAssignedEvents";
 import ReviewQueue from "./ReviewQueue";
 import NotificationInbox from "./NotificationInbox";
 
 export default function EventCoordinatorDashboard({ user }) {
+  // SCRUM-384. Bumped when something in My events changes an event (it was completed, say), so
+  // the Needs attention list reads again instead of showing a row that has been dealt with.
+  const [attentionVersion, setAttentionVersion] = useState(0);
+
   return (
     <div className="dashboard dashboard--coordinator">
       {/* user.name does not exist: auth.js returns { id, email, role } and
@@ -58,7 +64,9 @@ export default function EventCoordinatorDashboard({ user }) {
           up the `.dashboard > section` card styling, exactly as VenueCatalogue
           does on the Venue Staff dashboard. Each keeps its own detail panel,
           so opening an event in one leaves the other as it was. */}
-      <MyAssignedEvents />
+      {/* SCRUM-384 (SCRUM-379 AC7): the to-do list, ahead of My events. */}
+      <CoordinatorAttentionList refreshKey={attentionVersion} />
+      <MyAssignedEvents onEventChanged={() => setAttentionVersion((version) => version + 1)} />
       <ReviewQueue />
 
       {/* Also a direct child of .dashboard, for the same card styling. */}

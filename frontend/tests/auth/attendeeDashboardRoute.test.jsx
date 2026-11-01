@@ -309,7 +309,7 @@ describe("SCRUM453_AC3 other roles, unknown roles and signed-out visitors", () =
     restoreSession(role);
     renderAppAt("/dashboard");
 
-    expect(await screen.findByText(/No dashboard available for your role/)).toBeInTheDocument();
+    expect(await screen.findByText("No dashboard is available for your role.")).toBeInTheDocument();
     expect(document.querySelector(".dashboard--attendee")).not.toBeInTheDocument();
     expectNoOtherDashboard();
     expect(within(screen.getByRole("navigation")).queryAllByRole("link")).toHaveLength(0);

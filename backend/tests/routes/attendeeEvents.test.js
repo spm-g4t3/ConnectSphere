@@ -257,7 +257,8 @@ describe('SCRUM-24 protected attendee event read', () => {
     expect(client.calls).toHaveLength(2);
   });
 
-  it.each([STATUS.APPROVED, STATUS.SAFETY_REVIEW, STATUS.SAFETY_APPROVED, STATUS.CANCELLED])(
+  // Cancelled has its own response (SCRUM-434 AC5), tested in scrum434AttendeeCancelledEvent.test.js.
+  it.each([STATUS.APPROVED, STATUS.SAFETY_REVIEW, STATUS.SAFETY_APPROVED])(
     'SCRUM24_AC8_unconfirmed_response_excludes_every_sensitive_category_%s', async status => {
       const row = sensitiveRegistration(status);
       row.event_requests.proposed_start = secrets.schedule;
@@ -399,7 +400,7 @@ describe('SCRUM-24 protected attendee event read', () => {
     expect(client.calls[0].columns).not.toMatch(/layout|room_name|hall_name|address|requirements/);
   });
 
-  it.each([...Object.values(STATUS).filter(status => status !== STATUS.CONFIRMED),
+  it.each([...Object.values(STATUS).filter(status => ![STATUS.CONFIRMED, STATUS.CANCELLED].includes(status)),
     'Confirmed', 'planning', null, undefined, 'future-status'])(
     'SCRUM24_AC2_AC3_non_confirmed_state_never_discloses_arrangements_%s', async status => {
       const response = await read(application(database([registration({

@@ -16,6 +16,7 @@
 import express from 'express';
 
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
+import { noopFinalEventGuard, createFinalEventGuard, eventIdFromRecord } from '../middleware/finalEventGuard.js';
 import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
 import { createErrorMiddleware } from '../http/handleError.js';
@@ -38,9 +39,13 @@ const errorMiddleware = createErrorMiddleware('flagged bookings route');
 export function createFlaggedBookingRouter({
   client,
   requireAuth = defaultRequireAuth,
+  finalEventGuard = noopFinalEventGuard,
   requireRole = createRequireRole,
 } = {}) {
   const router = express.Router();
+
+  // SCRUM-382: a Completed or Cancelled event, or anything attached to it, is read-only.
+  const guardBooking = finalEventGuard(eventIdFromRecord('bookings', 'id'));
 
   const venueStaffOnly = requireRole(ROLE.VENUE_STAFF);
   // Any coordinator passes the gate; 078 refuses one not assigned to the event.
@@ -83,7 +88,7 @@ export function createFlaggedBookingRouter({
    * BOOKING_PERIOD_STALE, VENUE_RETIRED, BOOKING_PERIOD_CONFLICT (with
    * `conflicts`) or BOOKING_CHANGED.
    */
-  router.post('/:id/reinstate', venueStaffOnly, async (req, res) => {
+  router.post('/:id/reinstate', venueStaffOnly, guardBooking, async (req, res) => {
     res.status(200).json(
       await reinstateFlaggedBooking(req.params.id, req.user.id, req.body, { client }),
     );
@@ -98,7 +103,7 @@ export function createFlaggedBookingRouter({
    * event; 404 no such booking; 409 by code BOOKING_NOT_FLAGGED or
    * BOOKING_CHANGED.
    */
-  router.post('/:id/cancel', coordinatorOrVenueStaff, async (req, res) => {
+  router.post('/:id/cancel', coordinatorOrVenueStaff, guardBooking, async (req, res) => {
     res.status(200).json(
       await cancelFlaggedBooking(req.params.id, req.user.id, req.body, { client }),
     );
@@ -108,4 +113,4 @@ export function createFlaggedBookingRouter({
   return router;
 }
 
-export default createFlaggedBookingRouter();
+export default createFlaggedBookingRouter({ finalEventGuard: createFinalEventGuard() });

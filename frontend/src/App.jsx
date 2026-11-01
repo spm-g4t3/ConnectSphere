@@ -7,6 +7,8 @@ import Navigation from "./components/Navigation";
 import { UnreadCountProvider } from "./notifications/UnreadCountContext";
 import Dashboard from "./components/Dashboard";
 import LoginForm from "./components/LoginForm";
+import NotAvailablePage from "./components/NotAvailablePage";
+import LoadingText from "./components/ui/LoadingText";
 import MyEventRequests from "./components/MyEventRequests";
 import VenueSearch from "./components/VenueSearch";
 import VenueCatalogue from "./components/VenueCatalogue";
@@ -25,7 +27,9 @@ import EquipmentAvailabilityCheck from "./components/EquipmentAvailabilityCheck"
 import EquipmentReview from "./components/EquipmentReview";
 import EventRegistrationSettings from "./components/EventRegistrationSettings";
 import RegistrationEventsList from "./components/RegistrationEventsList";
+import EventRegistrationList from "./components/EventRegistrationList";
 import EquipmentRequestQueue from "./components/EquipmentRequestQueue";
+import EquipmentReviewedByMe from "./components/EquipmentReviewedByMe";
 import SafetyOfficerDashboard from "./components/SafetyOfficerDashboard";
 import SafetyReviewHistory from "./components/SafetyReviewHistory";
 import BrowseOpenEvents from "./components/BrowseOpenEvents";
@@ -38,15 +42,9 @@ import { BROWSE_OPEN_EVENTS_PATH, OPEN_EVENT_DETAILS_ROUTE } from "./services/op
 import "./App.css";
 
 function LoadingScreen() {
-  return <main className="loading-screen">Loading ConnectSphere...</main>;
-}
-
-function PagePlaceholder({ title, description }) {
   return (
-    <main className="placeholder-page">
-      <span className="eyebrow">ConnectSphere workspace</span>
-      <h1>{title}</h1>
-      <p>{description}</p>
+    <main className="loading-screen">
+      <LoadingText />
     </main>
   );
 }
@@ -78,6 +76,11 @@ function VenueCalendarRoute() {
 function EventRegistrationSettingsRoute() {
   const { eventId } = useParams();
   return <EventRegistrationSettings key={eventId} eventId={eventId} />;
+}
+
+function EventRegistrationListRoute() {
+  const { eventId } = useParams();
+  return <EventRegistrationList key={eventId} eventId={eventId} />;
 }
 
 function AppRoutes() {
@@ -146,6 +149,14 @@ function AppRoutes() {
           element={
             <ProtectedRoute allowedRoles={["event_organiser"]}>
               <EventRegistrationSettingsRoute />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/events/:eventId/registrations"
+          element={
+            <ProtectedRoute allowedRoles={["event_organiser", "event_coordinator"]}>
+              <EventRegistrationListRoute />
             </ProtectedRoute>
           }
         />
@@ -358,7 +369,7 @@ function AppRoutes() {
             Deliberately unprotected: a signed-out user never reaches it, because
             ProtectedRoute's `!user` branch redirects to /login before the role
             check runs. Wrapping it would only risk a redirect loop. */}
-        <Route path="/unauthorized" element={<PagePlaceholder title="Not available to your role" description="Your account does not have access to that page. If you think it should, ask an administrator to check your role." />} />
+        <Route path="/unauthorized" element={<NotAvailablePage />} />
         {/* SCRUM-258: Venue Staff's queue of open booking requests, the same
             component the Venue Staff dashboard shows, so the nav link and the
             dashboard are two ways into one screen. Gated and wrapped as
@@ -396,6 +407,7 @@ function AppRoutes() {
               <div className="dashboard dashboard--tech-support">
                 <h1>Equipment request queue</h1>
                 <EquipmentRequestQueue />
+                <EquipmentReviewedByMe />
               </div>
             </ProtectedRoute>
           }

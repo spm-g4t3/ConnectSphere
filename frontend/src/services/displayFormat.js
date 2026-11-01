@@ -4,6 +4,8 @@
 // VenueDetail.jsx unchanged by SCRUM-125, when BlockConflictList needed the
 // same identifier and timestamp rendering.
 
+import { VENUE_TIME_ZONE } from "./datetimeFormat";
+
 /** A list response as an array; anything else reads as an empty list. */
 export function asList(data) {
   return Array.isArray(data) ? data : [];
@@ -15,7 +17,8 @@ export function shortId(id) {
 }
 
 /**
- * A timestamp in the reader's locale, or the raw string if it will not parse.
+ * A timestamp as Singapore time in the reader's locale format, or the raw
+ * string if it will not parse. Pinned so every device shows the same time.
  *
  * `fallback` is what a missing value reads as. It defaults to "unknown", which
  * is exactly what VenueDetail has always shown.
@@ -23,7 +26,18 @@ export function shortId(id) {
 export function formatTimestamp(value, fallback = "unknown") {
   if (!value) return fallback;
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+  return Number.isNaN(date.getTime())
+    ? String(value)
+    : date.toLocaleString(undefined, { timeZone: VENUE_TIME_ZONE });
+}
+
+/** As formatTimestamp, but the Singapore calendar date only. */
+export function formatDate(value, fallback = "unknown") {
+  if (!value) return fallback;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? String(value)
+    : date.toLocaleDateString(undefined, { timeZone: VENUE_TIME_ZONE });
 }
 
 /**
@@ -33,14 +47,17 @@ export function formatTimestamp(value, fallback = "unknown") {
 export function formatEventDate(value, fallback = "Date not set") {
   if (!value) return fallback;
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+  return Number.isNaN(date.getTime())
+    ? value
+    : date.toLocaleString(undefined, { timeZone: VENUE_TIME_ZONE });
 }
 
-/** A parsed Date as a medium date and short time in the reader's locale. */
+/** A parsed Date as a medium date and short time, Singapore time in the reader's locale format. */
 export function formatMediumDateTime(date) {
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium",
     timeStyle: "short",
+    timeZone: VENUE_TIME_ZONE,
   }).format(date);
 }
 
@@ -54,6 +71,62 @@ export function formatMediumTimestamp(value, fallback) {
 /** "<start> – <end>", each end formatted as formatTimestamp does. */
 export function formatRange(startsAt, endsAt, fallback) {
   return `${formatTimestamp(startsAt, fallback)} – ${formatTimestamp(endsAt, fallback)}`;
+}
+
+// The display format: a fixed locale as well as a fixed zone, so every device
+// shows identical text. The helpers above follow the device's format.
+const dayFormat = new Intl.DateTimeFormat("en-SG", {
+  timeZone: VENUE_TIME_ZONE,
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+});
+const timeFormat = new Intl.DateTimeFormat("en-SG", {
+  timeZone: VENUE_TIME_ZONE,
+  hour: "numeric",
+  minute: "2-digit",
+});
+const dateTimeFormat = new Intl.DateTimeFormat("en-SG", {
+  timeZone: VENUE_TIME_ZONE,
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+});
+
+/** A parsed Date, or null for a missing or unparseable value. */
+function toDate(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/** "15 Jan 2026, 9:00 am"; missing and unparseable as formatTimestamp. */
+export function formatDateTime(value, fallback = "unknown") {
+  if (!value) return fallback;
+  const date = toDate(value);
+  return date ? dateTimeFormat.format(date) : String(value);
+}
+
+/** "15 Jan 2026"; missing and unparseable as formatDate. */
+export function formatDay(value, fallback = "unknown") {
+  if (!value) return fallback;
+  const date = toDate(value);
+  return date ? dayFormat.format(date) : String(value);
+}
+
+/**
+ * "15 Jan 2026, 9:00 am – 11:00 am" within one Singapore day, both ends in
+ * full across days. An end that is missing or unparseable reads as formatRange.
+ */
+export function formatDateTimeRange(startsAt, endsAt, fallback) {
+  const from = toDate(startsAt);
+  const to = toDate(endsAt);
+  if (from && to && dayFormat.format(from) === dayFormat.format(to)) {
+    return `${dateTimeFormat.format(from)} – ${timeFormat.format(to)}`;
+  }
+  return `${formatDateTime(startsAt, fallback)} – ${formatDateTime(endsAt, fallback)}`;
 }
 
 /** "1 minute" / "15 minutes", "1 active event" / "3 active events". */

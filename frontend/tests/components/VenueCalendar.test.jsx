@@ -16,7 +16,8 @@
 // Time-zone safe: dates are built with the local Date constructor and entry
 // timestamps come from local Dates via toISOString, so bucketing into days is
 // the same in UTC (CI) and Asia/Singapore. Expected headings and time ranges
-// are produced with the same toLocale* calls the component makes, so the
+// are produced with the same toLocale* calls the component makes (time ranges
+// as Singapore time, via sgTime), so the
 // tests survive ICU differences between Node versions.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -29,6 +30,7 @@ import { blockCalendarLabel } from "../../src/services/venueBlockDisplay";
 import { VENUE_BLOCK_REASONS } from "../../src/services/venueBlockReasons";
 import { formatRange } from "../../src/services/displayFormat";
 import { deferred } from "../helpers/async.js";
+import { sgTime } from "../helpers/singaporeTime.js";
 
 vi.mock("../../src/services/venueService", () => ({
   getVenueCalendar: vi.fn(),
@@ -85,7 +87,7 @@ const DAY_TITLE = { weekday: "short", ...FULL_DATE };
 const DAY_BUTTON = { weekday: "long", day: "numeric", month: "long", year: "numeric" };
 
 function expectedRange(entry) {
-  return `${new Date(entry.startsAt).toLocaleString()} – ${new Date(entry.endsAt).toLocaleString()}`;
+  return `${sgTime(entry.startsAt)} – ${sgTime(entry.endsAt)}`;
 }
 
 function dayTitle(date) {

@@ -3,8 +3,8 @@
 // SCRUM-485 (SCRUM-509), AC3 and AC6: which dashboard each role lands on.
 //
 // Dashboard.jsx picks a page by DASHBOARD_BY_ROLE[normaliseRole(user.role)].
-// When that lookup misses, it throws nothing: it shows "No dashboard available
-// for your role". So a misspelt key looks exactly like a user with no role,
+// When that lookup misses, it throws nothing: it shows "No dashboard is
+// available for your role." So a misspelt key looks exactly like a user with no role,
 // and only a test that asserts each role's own page notices. That is this
 // file's main job.
 //
@@ -60,7 +60,7 @@ vi.mock("../../src/components/TechnicalSupportDashboard", () => ({
   default: () => <p data-testid="dashboard-stub">Technical Support dashboard</p>,
 }));
 
-const NO_DASHBOARD = "No dashboard available for your role. Please contact support.";
+const NO_DASHBOARD = "No dashboard is available for your role.";
 // SCRUM-487 (SCRUM-544): the overview is built; the placeholder sentence is replaced.
 const NEW_OVERVIEW_TEXT =
   "See every coordinator's events and workload, and filter them, in Assigned Events.";
@@ -342,6 +342,23 @@ describe("Dashboard role map", () => {
     const { container } = renderAs("guest");
 
     expect(container.querySelector(".dashboard--attendee")).not.toBeInTheDocument();
-    expect(screen.getByText(/No dashboard available for your role/)).toBeInTheDocument();
+    expect(screen.getByText(NO_DASHBOARD)).toBeInTheDocument();
+  });
+});
+
+describe("SCRUM584 AC5 the dashboard shell's wording", () => {
+  it("SCRUM584_AC5_shows_Loading_while_there_is_no_user", () => {
+    vi.mocked(useAuth).mockReturnValue({ user: null });
+    inRouter(<Dashboard />);
+
+    expect(screen.getByRole("status")).toHaveTextContent(/^Loading\.\.\.$/);
+  });
+
+  it("SCRUM584_AC5_an_unknown_role_says_what_is_missing_and_who_to_ask", () => {
+    renderDashboardAs("guest");
+
+    expect(screen.getByText(NO_DASHBOARD)).toBeInTheDocument();
+    expect(screen.getByText("Ask your Event Coordinator Lead to check your role.")).toBeInTheDocument();
+    expect(screen.queryByText(/support|administrator/i)).not.toBeInTheDocument();
   });
 });

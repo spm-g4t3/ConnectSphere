@@ -5,13 +5,15 @@
  *   GET /    ?status=pending_review|under_review|arranged|cannot_be_fully_arranged|cancelled
  *            ?includePast=true   also events that have ended
  *
+ *   GET /reviewed-by-me   the requests the caller started or took over before
+ *
  * Technical Support Staff only; reading changes nothing.
- * Statuses: 200; 400 bad status or includePast; 401; 403; 500.
+ * Statuses: 200; 400 bad status or includePast (queue only); 401; 403; 500.
  */
 
 import express from 'express';
 
-import { getEquipmentRequestQueue } from '../services/equipmentQueueService.js';
+import { getEquipmentRequestQueue, getRequestsReviewedByMe } from '../services/equipmentQueueService.js';
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
 import { createRequireRole } from '../middleware/requireRole.js';
 import { ROLE } from '../domain/userRole.js';
@@ -42,6 +44,12 @@ export function createEquipmentQueueRouter({
 
   router.get('/', requireRole(ROLE.TECHNICAL_SUPPORT_STAFF), async (req, res) => {
     res.status(200).json(await getEquipmentRequestQueue(req.query, { callerId: req.user.id, client }));
+  });
+
+  router.get('/reviewed-by-me', requireRole(ROLE.TECHNICAL_SUPPORT_STAFF), async (req, res) => {
+    // One person's history, so no shared cache keeps it.
+    res.set('Cache-Control', 'no-store');
+    res.status(200).json(await getRequestsReviewedByMe({ callerId: req.user.id, client }));
   });
 
   router.use(errorMiddleware);

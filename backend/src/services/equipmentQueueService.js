@@ -14,6 +14,14 @@
  *
  * SQLSTATEs: 42501 not Technical Support (403), 22023 unknown status (400).
  * Anything else is untyped and reaches the API as a 500.
+ *
+ * "Reviewed by me" (SCRUM-582, 041_equipment_reviewed_by_me.sql) is a second
+ * read-only function for the same dashboard:
+ *   { requests, total, truncated }
+ *   Row = { eventRequestId, eventName, proposedStart, proposedEnd, status,
+ *           statusLabel, lastWorkedAt, returnedToPending,
+ *           interruptedReason, interruptedAt }
+ * Only the caller's own history is read, and nothing is assigned or locked.
  */
 
 import { ForbiddenError, ValidationError } from '../errors.js';
@@ -97,4 +105,45 @@ export async function getEquipmentRequestQueue(query, { callerId, client } = {})
   if (error) throw translateError(error);
 
   return toQueue(data);
+}
+
+
+/** One "reviewed by me" row, in camelCase. */
+export function toReviewedRow(row) {
+  return {
+    // An event can have more than one equipment request (one cancelled, a new
+    // one made), so the request id is what tells two rows for it apart.
+    requestId: row.request_id,
+    eventRequestId: row.event_request_id,
+    eventName: row.event_name,
+    proposedStart: row.proposed_start ?? null,
+    proposedEnd: row.proposed_end ?? null,
+    status: row.status,
+    statusLabel: equipmentRequestStatusLabel(row.status),
+    lastWorkedAt: row.last_worked_at ?? null,
+    returnedToPending: row.returned_to_pending === true,
+    interruptedReason: row.interrupted_reason ?? null,
+    interruptedAt: row.interrupted_at ?? null,
+  };
+}
+
+/**
+ * The requests the caller has started or taken over, newest work first.
+ *
+ * @param {object} options
+ * @param {string} options.callerId the signed-in user, from the token
+ * @param {object} [options.client] a Supabase client, usually a test double
+ * @throws {ForbiddenError} the caller is not Technical Support (403)
+ */
+export async function getRequestsReviewedByMe({ callerId, client } = {}) {
+  const db = await resolveClient(client);
+  const { data, error } = await db.rpc('equipment_reviewed_by_me', { p_caller: callerId ?? null });
+
+  if (error) throw translateError(error);
+
+  return {
+    requests: (data?.requests ?? []).map(toReviewedRow),
+    total: Number(data?.total ?? 0),
+    truncated: data?.truncated === true,
+  };
 }
