@@ -230,7 +230,6 @@ describe("SCRUM495_AC8 no internal planning information", () => {
 
 describe("SCRUM495 errors and retry", () => {
   it.each([
-    [401, "Your session has expired. Please sign in again."],
     [403, "Only Attendees can browse open events."],
     [500, "Open events could not be loaded. Please try again."],
     [503, "Event registration is temporarily unavailable. Please try again later."],
@@ -367,7 +366,6 @@ describe("SCRUM495_AC6_AC7_AC8 the list is refreshed from the server", () => {
   });
 
   it.each([
-    [401, "Your session has expired. Please sign in again."],
     [403, "Only Attendees can browse open events."],
   ])("SCRUM495_AC6_AC7_AC8_replaces_the_list_with_the_error_when_a_refresh_is_refused_with_%i", async (status, message) => {
     vi.mocked(getOpenEvents)

@@ -258,7 +258,7 @@ reviewed, beside its buttons (D17):
 | Response | The panel says | Why it happens |
 |---|---|---|
 | 400 | "This change request can't be applied as it stands. Review it again to see which values are refused, or decline it." | A value refused at accept time (AC5) |
-| 401 | "Your session has expired. Please sign in again." | — |
+| 401 | No wording of its own: SCRUM-583 sends the user to login with "Your session expired. Please sign in again.". | — |
 | 403 | "You're no longer the coordinator for this event." | Handed over while the review was open (AC2) |
 | 404 | "This change request no longer exists." | — |
 | 409 `REVIEW_NOT_STARTED` | "Start the review of this event before processing its change requests." | A Submitted event (AC2) |

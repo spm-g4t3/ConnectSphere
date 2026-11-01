@@ -127,7 +127,6 @@ describe("SCRUM486_AC3 the picker when the list cannot be shown", () => {
   });
 
   it.each([
-    [401, "Your session has expired. Please sign in again."],
     [403, "Only the Event Coordinator Lead can assign event requests."],
     [500, "The list of coordinators could not be loaded. Please try again."],
     [undefined, "The list of coordinators could not be loaded. Please try again."],
@@ -205,7 +204,6 @@ describe("SCRUM486_AC4 a refused assignment", () => {
     [409, { code: null, conflicts: [] }, "This request can no longer be assigned. It may have been withdrawn or cancelled.", true],
     [404, undefined, "This request no longer exists.", true],
     [400, undefined, "That person cannot be assigned this request.", false],
-    [401, undefined, "Your session has expired. Please sign in again.", false],
     [403, undefined, "Only the Event Coordinator Lead can assign event requests.", false],
     [500, undefined, "The request could not be assigned. Please try again.", false],
     [undefined, undefined, "The request could not be assigned. Please try again.", false],

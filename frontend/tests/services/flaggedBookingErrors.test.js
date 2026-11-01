@@ -81,7 +81,6 @@ describe("resolutionErrorMessage", () => {
 
   it.each([
     [400, "The reason was not accepted. A reason is required, and it must be at most 1000 characters."],
-    [401, "Your session has expired. Please sign in again."],
     [403, "Only Venue Staff can resolve flagged bookings."],
     [404, "That booking no longer exists. The list has been refreshed."],
   ])("SCRUM266_AC2_explains_status_%i", (status, message) => {

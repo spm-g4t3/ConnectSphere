@@ -148,7 +148,6 @@ describe("SCRUM17_AC3 loading and empty states", () => {
 
 describe("SCRUM17_AC3 list errors", () => {
   it.each([
-    ["a 401", httpError(401), "Your session has expired. Please sign in again."],
     ["a 500", httpError(500), "Notifications could not be loaded."],
     ["a 403", httpError(403), "Notifications could not be loaded."],
     ["a 503", httpError(503), "Notifications could not be loaded."],
@@ -198,13 +197,15 @@ describe("SCRUM17_AC3 list errors", () => {
     expect(listNotifications).toHaveBeenCalledTimes(2);
   });
 
-  it("SCRUM584_AC5_an_expired_session_offers_no_Try_again", async () => {
+  it("SCRUM583_AC1_a_401_has_no_wording_of_its_own_in_the_inbox", async () => {
+    // The app words an expiry once and signs the user out; if a 401 ever reached this screen it is a plain failure.
     vi.mocked(listNotifications).mockRejectedValue(httpError(401));
 
     render(<NotificationInbox />, { wrapper: MemoryRouter });
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("Your session has expired. Please sign in again.");
-    expect(within(alert).queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+    expect(alert).toHaveTextContent("Notifications could not be loaded.");
+    expect(alert).not.toHaveTextContent(/session/i);
+    expect(within(alert).getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });
 
@@ -415,7 +416,6 @@ describe("SCRUM17_AC3 marking a notification read", () => {
   // Only a 404 refetches; it has its own test below.
   it.each([
     ["a_500", httpError(500), "This notification could not be marked as read. Please try again."],
-    ["a_401", httpError(401), "Your session has expired. Please sign in again."],
     ["a_network_error", new Error("Network Error"), "This notification could not be marked as read. Please try again."],
   ])("SCRUM17_AC3_%s_shows_its_row_message_re_enables_the_button_and_does_not_refetch", async (_label, error, message) => {
     const user = userEvent.setup();

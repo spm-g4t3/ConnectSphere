@@ -60,7 +60,6 @@ describe("SCRUM486_AC6 an event's screen by its address", () => {
   });
 
   it.each([
-    [401, "Your session has expired. Please sign in again."],
     [403, "Only Event Coordinators and the Event Coordinator Lead can open an event here."],
     [404, "There is no submitted event request at this address."],
     [500, "This event request could not be loaded. Please try again."],

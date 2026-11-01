@@ -7,10 +7,8 @@ import { EVENT_TIME_NOTE, formatEventDate, formatEventStartTime, formatEventEndT
 import useOpenEventRead from "./useOpenEventRead";
 import WithdrawRegistration from "./WithdrawRegistration";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
-import { SESSION_EXPIRED } from "../services/apiErrors";
 
 const MESSAGES = {
-  401: SESSION_EXPIRED,
   403: "Only Attendees can view this event information.",
 };
 const FALLBACK = "Event information could not be loaded. Please try again.";

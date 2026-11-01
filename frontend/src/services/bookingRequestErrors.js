@@ -8,7 +8,7 @@
 // uuids, which is not something to put in front of a user. The only server text
 // shown is a 400's details[].message, and that goes beside its field.
 
-import { codeOf, SESSION_EXPIRED } from "./apiErrors";
+import { codeOf } from "./apiErrors";
 
 const CODE_MESSAGES = {
   EVENT_NOT_BOOKABLE:
@@ -41,7 +41,6 @@ const CODE_MESSAGES = {
 
 const STATUS_MESSAGES = {
   400: "Some details were not accepted. Please check the form.",
-  401: SESSION_EXPIRED,
   403: "Only the coordinator assigned to this event can request a venue for it.",
   404: "That event or venue no longer exists.",
   503: "Venue suitability checking is not available yet, so a venue cannot be requested right now.",
@@ -166,7 +165,6 @@ const WITHDRAW_CODE_MESSAGES = {
 };
 
 const WITHDRAW_STATUS_MESSAGES = {
-  401: SESSION_EXPIRED,
   403: "Only the coordinator assigned to this event can withdraw its venue requests. The list has been refreshed.",
   404: "That request no longer exists. The list has been refreshed.",
 };
@@ -213,7 +211,6 @@ const RELEASE_CODE_MESSAGES = {
 
 const RELEASE_STATUS_MESSAGES = {
   400: "Give a reason of up to 1,000 characters.",
-  401: SESSION_EXPIRED,
   403: "Only the coordinator assigned to this event can release its venues.",
   404: "This booking no longer exists.",
 };
@@ -251,7 +248,6 @@ const DECISION_CODE_MESSAGES = {
 
 const DECISION_STATUS_MESSAGES = {
   400: "The decision was not accepted. A reason is required, and each text must be at most 1000 characters.",
-  401: SESSION_EXPIRED,
   403: "Only Venue Staff can approve or reject booking requests.",
   404: "That request no longer exists. The list has been refreshed.",
 };

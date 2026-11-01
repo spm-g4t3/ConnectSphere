@@ -28,7 +28,6 @@ describe("SCRUM-191 suitabilityErrorMessage", () => {
 
   it.each([
     [400, /could not be checked with these requirements/],
-    [401, /sign in again/],
     [403, /^Only the coordinator assigned to this event can check a venue for it\.$/],
     [404, /no longer exists/],
   ])("SCRUM188_AC1_explains_a_%i", (status, pattern) => {

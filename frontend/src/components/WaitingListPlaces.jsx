@@ -2,18 +2,15 @@ import { useRef, useState } from "react";
 import { getWaitlist, leaveWaitlist } from "../services/attendeeEventService";
 import useOpenEventRead from "./useOpenEventRead";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
-import { SESSION_EXPIRED } from "../services/apiErrors";
 import { WaitlistedBadge } from "./OpenEventAvailability";
 
 const MESSAGES = {
-  401: SESSION_EXPIRED,
   403: "Only Attendees can view waiting lists.",
 };
 const FALLBACK = "Your waiting lists could not be loaded. Please try again.";
 
 function leaveFailureMessage(error) {
   const response = error?.response;
-  if (response?.status === 401) return SESSION_EXPIRED;
   if (response?.status === 404) return "This waiting-list place could not be found. It may already have been removed.";
   // Promoted while the request was on its way: the place is now a registration.
   if (response?.status === 409 && response.data?.code === "ALREADY_REGISTERED") {

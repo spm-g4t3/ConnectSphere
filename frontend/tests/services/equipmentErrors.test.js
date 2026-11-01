@@ -43,7 +43,6 @@ describe("equipmentErrorMessages", () => {
   });
 
   it.each([
-    [401, "Your session has expired. Please sign in again."],
     [403, "Only Technical Support Staff can manage the equipment catalogue."],
     [404, "That equipment type no longer exists. The list has been refreshed."],
   ])("SCRUM280_explains_status_%s", (status, message) => {

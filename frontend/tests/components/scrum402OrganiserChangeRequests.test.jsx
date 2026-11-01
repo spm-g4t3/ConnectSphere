@@ -184,7 +184,8 @@ describe("SCRUM-402 the Organiser's form", () => {
 
   it.each([
     ["a_400_with_no_details", httpError(400, { error: SERVER_TEXT }), "can't be submitted as written"],
-    ["a_401", httpError(401, { error: SERVER_TEXT }), "Your session has expired."],
+    // SCRUM-583: an expiry is worded once, by the app; a 401 reaching the form gets no wording of its own.
+    ["a_401_has_no_wording_of_its_own", httpError(401, { error: SERVER_TEXT }), "Could not submit your change request. Please try again."],
     ["a_403", httpError(403, { error: SERVER_TEXT }), "This event can't be changed from your account."],
     ["a_404", httpError(404, { error: SERVER_TEXT }), "This event can't be found."],
     ["a_500", httpError(500, { error: SERVER_TEXT }), "Could not submit your change request. Please try again."],
