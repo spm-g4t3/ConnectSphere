@@ -265,7 +265,6 @@ button { cursor: pointer; }
 .dashboard--venue-staff .block-conflicts__list li { border-top: 1px solid rgba(138, 90, 0, 0.18); display: flex; flex-wrap: wrap; gap: 6px 12px; justify-content: flex-start; padding: 8px 0; }
 .dashboard--venue-staff .block-conflicts__list li:first-child { border-top: 0; }
 .dashboard--venue-staff .block-conflicts__actions { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
-.dashboard--venue-staff .block-conflicts__actions span { color: #8a5a00; font-size: 0.9rem; }
 /* The badge follows the venue's location inline, so it needs its own gap. */
 .dashboard--venue-staff .venue-catalogue__item-main .ui-status-badge { margin-left: var(--space-2); }
 /* A row's own error sits on its own line under the row's details. */
@@ -298,7 +297,6 @@ button { cursor: pointer; }
 .dashboard--venue-staff .venue-blocks__clash-note { color: #8a5a00; font-size: 0.86rem; }
 .dashboard--venue-staff .venue-blocks__ended-note { font-size: 0.84rem; }
 .dashboard--venue-staff .venue-blocks__item-actions { align-items: center; display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: 8px; }
-.dashboard--venue-staff .venue-blocks__item-actions span { color: #a43c32; font-size: 0.86rem; }
 .dashboard--venue-staff .venue-blocks__item--ended { opacity: 0.7; }
 /* The clashing block, in the same amber as the booking-conflict warning. */
 .dashboard--venue-staff .venue-blocks__item--clash { border-left: 3px solid #8a5a00; padding-left: 10px; }

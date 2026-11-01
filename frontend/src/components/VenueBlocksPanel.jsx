@@ -29,7 +29,7 @@
 // AuthProvider, and this panel's tests render without one. Without it, the
 // signed-in user's own changes show as a short id instead of "you".
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   createVenueBlock,
   listVenueBlocks,
@@ -50,6 +50,7 @@ import StatusBadge from "./ui/StatusBadge";
 import LoadingText from "./ui/LoadingText";
 import EmptyState from "./ui/EmptyState";
 import ErrorNotice from "./ui/ErrorNotice";
+import ConfirmDialog from "./ui/ConfirmDialog";
 import { SESSION_EXPIRED } from "../services/apiErrors";
 import { BLOCK_PHASE_TONES, toneFor } from "../services/venueStatusTones";
 
@@ -88,6 +89,10 @@ export default function VenueBlocksPanel({ venue, currentUserId }) {
   const [confirmingRemoveId, setConfirmingRemoveId] = useState(null);
   const [removingId, setRemovingId] = useState(null);
   const [removeError, setRemoveError] = useState(null); // { id, message }
+  // The Remove button that opened the dialog, and the list heading that takes
+  // focus instead once that button's row has gone.
+  const removeOpener = useRef(null);
+  const listHeading = useRef(null);
 
   // The block whose history is open, if any. One at a time, so the list
   // does not grow a trail under every row.
@@ -109,6 +114,19 @@ export default function VenueBlocksPanel({ venue, currentUserId }) {
   useEffect(() => {
     fetchBlocks();
   }, [fetchBlocks]);
+
+  // Runs once the dialog has closed: focus cannot move out of an open modal.
+  useEffect(() => {
+    if (confirmingRemoveId !== null || !removeOpener.current) return;
+    const button = removeOpener.current;
+    removeOpener.current = null;
+    (button.isConnected ? button : listHeading.current)?.focus();
+  }, [confirmingRemoveId]);
+
+  function openRemove(block, event) {
+    removeOpener.current = event.currentTarget;
+    setConfirmingRemoveId(block.id);
+  }
 
   // The error clears first, so a second failure is visibly a new one.
   function retryBlocks() {
@@ -226,8 +244,8 @@ export default function VenueBlocksPanel({ venue, currentUserId }) {
     if (removingId) return; // closes the double-click window before it opens
 
     // confirmingRemoveId stays set until the finally, for the reason
-    // VenueCatalogue's handleRetire gives: "Removing..." lives inside the
-    // confirm block, which would otherwise unmount as the request starts.
+    // VenueCatalogue's handleRetire gives: the dialog stays open and busy
+    // while the request is in flight.
     setRemovingId(block.id);
     setRemoveError(null);
     setNotice(null);
@@ -255,6 +273,7 @@ export default function VenueBlocksPanel({ venue, currentUserId }) {
 
   const now = new Date();
   const rowActionsDisabled = Boolean(formMode) || Boolean(removingId);
+  const confirmingBlock = blocks.find((block) => block.id === confirmingRemoveId);
 
   function renderNotice() {
     if (!notice) return null;
@@ -322,8 +341,6 @@ export default function VenueBlocksPanel({ venue, currentUserId }) {
     const phase = blockPhase(block, now);
     const ended = phase === "ended";
     const clashing = clashingBlockIds.includes(block.id);
-    const confirming = confirmingRemoveId === block.id;
-    const removing = removingId === block.id;
     const historyOpen = historyBlockId === block.id;
     const historyId = `block-history-${block.id}`;
 
@@ -353,7 +370,7 @@ export default function VenueBlocksPanel({ venue, currentUserId }) {
               Ended blocks are kept as a record and can&apos;t be changed.
             </p>
           )}
-          {/* No Try again on an action: Remove and its confirm are still there. */}
+          {/* No Try again on an action: Remove is still there. */}
           {removeError?.id === block.id && <ErrorNotice message={removeError.message} />}
         </div>
 
@@ -361,7 +378,7 @@ export default function VenueBlocksPanel({ venue, currentUserId }) {
           {/* No Edit or Remove on an ended block: the server refuses both
               with BLOCK_ENDED, and a past closure is a record, not a
               setting. History stays -- it is a read. */}
-          {!ended && !confirming && (
+          {!ended && (
             <>
               {/* A change on a retired venue is refused with VENUE_RETIRED,
                   so Edit goes; Remove stays, because removing a block only
@@ -376,22 +393,10 @@ export default function VenueBlocksPanel({ venue, currentUserId }) {
               </Button>
               <Button
                 variant="danger"
-                onClick={() => setConfirmingRemoveId(block.id)}
+                onClick={(event) => openRemove(block, event)}
                 disabled={rowActionsDisabled}
               >
                 Remove
-              </Button>
-            </>
-          )}
-
-          {!ended && confirming && (
-            <>
-              <span>Remove this block? Bookings it flagged stay flagged for review.</span>
-              <Button variant="danger" onClick={() => handleRemove(block)} disabled={removing}>
-                {removing ? "Removing..." : "Yes, remove"}
-              </Button>
-              <Button variant="secondary" onClick={() => setConfirmingRemoveId(null)} disabled={removing}>
-                Cancel
               </Button>
             </>
           )}
@@ -468,7 +473,10 @@ export default function VenueBlocksPanel({ venue, currentUserId }) {
       )}
 
       <section className="venue-blocks__current">
-        <h3>Current and upcoming blocks</h3>
+        {/* tabIndex -1: focus lands here after a removed block's row goes. */}
+        <h3 ref={listHeading} tabIndex={-1}>
+          Current and upcoming blocks
+        </h3>
 
         {loadingBlocks && blocks.length === 0 && <LoadingText />}
         {listError && (
@@ -492,6 +500,28 @@ export default function VenueBlocksPanel({ venue, currentUserId }) {
           <ul className="venue-blocks__list">{blocks.map(renderRow)}</ul>
         )}
       </section>
+
+      {confirmingBlock && (
+        <ConfirmDialog
+          open
+          title="Remove this block?"
+          confirmLabel={removingId ? "Removing..." : "Remove block"}
+          cancelLabel="Keep block"
+          danger
+          busy={Boolean(removingId)}
+          onConfirm={() => handleRemove(confirmingBlock)}
+          onCancel={() => setConfirmingRemoveId(null)}
+        >
+          <p>
+            {reasonLabel(confirmingBlock.reason)}:{" "}
+            {formatDateTimeRange(confirmingBlock.startsAt, confirmingBlock.endsAt)}
+          </p>
+          <p>
+            {venue.name} is no longer blocked for this period. Bookings it flagged stay flagged
+            for review.
+          </p>
+        </ConfirmDialog>
+      )}
     </div>
   );
 }

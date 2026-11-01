@@ -14,10 +14,9 @@
 // with three panels about to hang off it, and the catalogue is the only part
 // of it with its own route in Phase 3 -- without the split, /venue-catalogue
 // would have to render a second copy of the greeting and the pending-requests
-// stub. The retire flow below is a move, not a rewrite: same two-step
-// confirm, same error map, same refetch-rather-than-splice, same finally.
+// stub.
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { getVenueCatalogue, retireVenue } from "../services/venueService";
 import VenueForm from "./VenueForm";
@@ -30,6 +29,7 @@ import StatusBadge from "./ui/StatusBadge";
 import LoadingText from "./ui/LoadingText";
 import EmptyState from "./ui/EmptyState";
 import ErrorNotice from "./ui/ErrorNotice";
+import ConfirmDialog from "./ui/ConfirmDialog";
 import { formatDateTimeRange } from "../services/displayFormat";
 import { VENUE_TONES } from "../services/venueStatusTones";
 import { flaggedBookingsHeading, venueSaveFlagReasons } from "../services/flaggedBookingDisplay";
@@ -63,18 +63,21 @@ export default function VenueCatalogue({ currentUserId, asPage = false } = {}) {
   // generalised: a shared boolean would grey out every other row's button
   // while one row was mid-request. retireError carries its row's id for the
   // same reason — one state variable, rendered under the row it belongs to.
-  const [confirmingId, setConfirmingId] = useState(null); // row awaiting confirmation
+  const [confirmingId, setConfirmingId] = useState(null); // row whose dialog is open
   const [retiringId, setRetiringId] = useState(null);     // row whose retire is in flight
   const [retireError, setRetireError] = useState(null);   // { id, message }
 
   // Which panel is open, if any: { mode: "create" } | { mode: "edit", venue }
   // | { mode: "detail", venue } | { mode: "blocks", venue }
-  // | { mode: "holds", venue } (SCRUM-491) | null. Copied from MyEventRequests, which is
-  // where this app decided that a full-page panel with a Back button is what
-  // it does instead of a modal — there is not one modal, <dialog> or
-  // window.confirm anywhere in this frontend and this is not the place to
-  // introduce the first.
+  // | { mode: "holds", venue } (SCRUM-491) | null. A full-page panel with a
+  // Back button, as in MyEventRequests: each is a screen of its own, not a
+  // question to answer.
   const [activePanel, setActivePanel] = useState(null);
+
+  // The Retire button that opened the dialog, and each row's main text, so
+  // focus can go back to the button, or to the row once it has no button.
+  const retireOpener = useRef(null); // { id, button }
+  const rowMains = useRef(new Map());
 
   // SCRUM-484 (AC8). The bookings the last save flagged for review, because a
   // new setup or turnaround time made them overlap. Kept until dismissed or
@@ -115,6 +118,20 @@ export default function VenueCatalogue({ currentUserId, asPage = false } = {}) {
     fetchVenues();
   }, [fetchVenues]);
 
+  // Runs once the dialog has closed: focus cannot move out of an open modal.
+  // A retired row has no Retire button, so its name and Retired badge take it.
+  useEffect(() => {
+    if (confirmingId !== null || !retireOpener.current) return;
+    const { id, button } = retireOpener.current;
+    retireOpener.current = null;
+    (button.isConnected ? button : rowMains.current.get(id))?.focus();
+  }, [confirmingId]);
+
+  function openRetire(venue, event) {
+    retireOpener.current = { id: venue.id, button: event.currentTarget };
+    setConfirmingId(venue.id);
+  }
+
   // Close the panel, then refetch. Refetch rather than splice for the same
   // reason handleRetire does it: create and update both answer with
   // getVenueById's fat shape while these rows are the flat five-field one.
@@ -137,14 +154,9 @@ export default function VenueCatalogue({ currentUserId, asPage = false } = {}) {
   async function handleRetire(venue) {
     if (retiringId) return; // closes the double-click window before it opens
 
-    // confirmingId is deliberately NOT cleared here. The "Retiring..." label
-    // and the two disabled buttons live inside the confirm block, so clearing
-    // it now -- batched with setRetiringId into one render -- would unmount
-    // that block the instant the request started and put the plain, enabled
-    // "Retire venue" button back in its place. The in-flight state would be
-    // unreachable by construction. The row stays in confirm mode until the
-    // finally below, which is the only thing that makes the disabled state
-    // visible at all.
+    // confirmingId is deliberately NOT cleared here: the dialog stays open,
+    // busy and labelled "Retiring...", until the finally below, so the request
+    // is visibly in flight and cannot be cancelled or sent twice.
     setRetiringId(venue.id);
     setRetireError(null);
 
@@ -168,11 +180,9 @@ export default function VenueCatalogue({ currentUserId, asPage = false } = {}) {
       // Either of these means our copy of the row is stale, whoever made it so.
       if (status === 409 || status === 404) await fetchVenues();
     } finally {
-      // Both flags drop together, once there is something new to show. On the
-      // success path the refetched row is retired, so !retired hides the
-      // confirm block regardless; on the error path this returns the row to
-      // the plain "Retire venue" button with the message beside it, which is
-      // the state someone would want to retry from.
+      // Both flags drop together, once there is something new to show: the
+      // refetched, retired row, or the row's error beside its Retire button,
+      // which is the state someone would want to retry from.
       setRetiringId(null);
       setConfirmingId(null);
     }
@@ -182,6 +192,7 @@ export default function VenueCatalogue({ currentUserId, asPage = false } = {}) {
   // section under the greeting's h1. The page keeps its h1 while a panel is
   // open, since the panel replaces the list.
   const Title = asPage ? "h1" : "h2";
+  const confirmingVenue = venues.find((venue) => venue.id === confirmingId);
   const pageTitle = asPage && <h1>Venue catalogue</h1>;
 
   if (activePanel?.mode === "create") {
@@ -291,12 +302,18 @@ export default function VenueCatalogue({ currentUserId, asPage = false } = {}) {
           // all — an older server, a stale cache — then reads as active
           // rather than being badged Retired on the strength of undefined.
           const retired = Boolean(venue.retiredAt);
-          const confirming = confirmingId === venue.id;
-          const retiring = retiringId === venue.id;
 
           return (
             <li key={venue.id}>
-              <div className="venue-catalogue__item-main">
+              {/* tabIndex -1: focus lands here after the venue is retired. */}
+              <div
+                className="venue-catalogue__item-main"
+                tabIndex={-1}
+                ref={(element) => {
+                  rowMains.current.set(venue.id, element);
+                  return () => rowMains.current.delete(venue.id);
+                }}
+              >
                 <strong>{venue.name}</strong> — {venue.location}
                 <StatusBadge tone={retired ? VENUE_TONES.retired : VENUE_TONES.active}>
                   {retired ? "Retired" : "Active"}
@@ -364,34 +381,16 @@ export default function VenueCatalogue({ currentUserId, asPage = false } = {}) {
                   Place hold
                 </Button>
 
-                {/* Two-step inline confirmation rather than a modal or
-                    window.confirm. Retirement is the first irreversible
-                    action in this app — 005_venue_retirement.sql defines no
-                    un-retire — so it warrants confirming; but there is not
-                    one modal, dialog element or window.confirm anywhere in
-                    this frontend, and introducing the first of them for a
-                    single button is a new primitive to maintain. A state
-                    variable and two buttons are neither. */}
-                {!retired && !confirming && (
+                {/* Retirement cannot be undone (005_venue_retirement.sql has
+                    no un-retire), so the button only opens the dialog. */}
+                {!retired && (
                   <Button
                     variant="danger"
-                    onClick={() => setConfirmingId(venue.id)}
+                    onClick={(event) => openRetire(venue, event)}
                     title="A retired venue stops appearing in searches. Its past bookings stay viewable. This cannot be undone."
                   >
                     Retire venue
                   </Button>
-                )}
-
-                {!retired && confirming && (
-                  <>
-                    <span>Retire this venue? It cannot be undone.</span>
-                    <Button variant="danger" onClick={() => handleRetire(venue)} disabled={retiring}>
-                      {retiring ? "Retiring..." : "Yes, retire"}
-                    </Button>
-                    <Button variant="secondary" onClick={() => setConfirmingId(null)} disabled={retiring}>
-                      Cancel
-                    </Button>
-                  </>
                 )}
               </div>
             </li>
@@ -400,6 +399,22 @@ export default function VenueCatalogue({ currentUserId, asPage = false } = {}) {
       </ul>
 
       <Button onClick={() => setActivePanel({ mode: "create" })}>+ Add new venue</Button>
+
+      {confirmingVenue && (
+        <ConfirmDialog
+          open
+          title={`Retire ${confirmingVenue.name}?`}
+          confirmLabel={retiringId ? "Retiring..." : "Retire venue"}
+          cancelLabel="Keep venue"
+          danger
+          busy={Boolean(retiringId)}
+          onConfirm={() => handleRetire(confirmingVenue)}
+          onCancel={() => setConfirmingId(null)}
+        >
+          It stops appearing in searches. Its past bookings stay viewable. This cannot be
+          undone.
+        </ConfirmDialog>
+      )}
     </section>
   );
 }

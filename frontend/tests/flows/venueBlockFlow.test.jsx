@@ -27,6 +27,7 @@ import * as venueService from "../../src/services/venueService";
 import { formatDateTime, formatDateTimeRange } from "../../src/services/displayFormat";
 import { toDatetimeLocalValue } from "../../src/services/datetimeFormat";
 import { reasonLabel } from "../../src/services/venueBlockReasons";
+import { stubDialogElement } from "../helpers/dialog.js";
 
 vi.mock("../../src/services/venueService", () => ({
   searchActiveVenues: vi.fn(),
@@ -293,6 +294,8 @@ function noticeEl() {
   return document.querySelector(".venue-blocks__notice");
 }
 
+stubDialogElement();
+
 describe("SCRUM-17 venue block flow (SCRUM-132)", () => {
   it("SCRUM17_AC1_AC3_AC4_staff_block_override_amend_and_remove_flow", async () => {
     const user = userEvent.setup();
@@ -352,7 +355,7 @@ describe("SCRUM-17 venue block flow (SCRUM-132)", () => {
     expect(
       screen.getByText("Flag these bookings for review and notify each event's coordinator?"),
     ).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Yes, override" }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Override and flag" }));
 
     // ---- 5. The flagged notice, and the new row's audit line -----------------
     await waitFor(() => expect(noticeEl()).not.toBeNull());
@@ -441,10 +444,9 @@ describe("SCRUM-17 venue block flow (SCRUM-132)", () => {
     // ---- 8. AC4: two-step remove ---------------------------------------------
     await user.click(within(row).getByRole("button", { name: "Remove" }));
     expect(venueService.removeVenueBlock).not.toHaveBeenCalled();
-    expect(
-      within(row).getByText("Remove this block? Bookings it flagged stay flagged for review."),
-    ).toBeInTheDocument();
-    await user.click(within(row).getByRole("button", { name: "Yes, remove" }));
+    const removeDialog = screen.getByRole("dialog", { name: "Remove this block?" });
+    expect(removeDialog).toHaveTextContent("Bookings it flagged stay flagged for review.");
+    await user.click(within(removeDialog).getByRole("button", { name: "Remove block" }));
 
     expect(await screen.findByText("Block removed.")).toBeInTheDocument();
     expect(venueService.removeVenueBlock).toHaveBeenCalledTimes(1);

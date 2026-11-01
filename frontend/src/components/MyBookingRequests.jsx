@@ -21,8 +21,7 @@
 // server checks again under a lock, and a refusal is shown and the list
 // refetched, so a stale button is harmless.
 //
-// Withdrawing is a two-step inline confirm, the pattern BlockConflictList and
-// the venue retire button use: this frontend has no modal. One request is sent
+// Withdrawing is a two-step inline confirm. One request is sent
 // at a time, guarded by a ref as well as by disabled buttons. There are no
 // staff approve or reject controls here (PendingBookingRequests has them); a
 // rejected request shows the reason and any suggested alternative.

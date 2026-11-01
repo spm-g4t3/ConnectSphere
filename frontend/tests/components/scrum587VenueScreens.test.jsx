@@ -1,10 +1,13 @@
 // The venue screens on the shared UI standard: one h1 per page, the shared
-// Button for every button, StatusBadge with one tone per meaning, and the
-// shared loading, empty, error and date formats. The venue service is
-// mocked; the components are real.
+// Button for every button, StatusBadge with one tone per meaning, the shared
+// loading, empty, error and date formats, and ConfirmDialog for every
+// confirmation. The venue service is mocked; the components are real.
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 
@@ -19,6 +22,7 @@ import VenueHoldForm from "../../src/components/VenueHoldForm.jsx";
 import VenueCalendar from "../../src/components/VenueCalendar.jsx";
 import BlockHistory from "../../src/components/BlockHistory.jsx";
 import {
+  createVenueBlock,
   getHoldCandidates,
   getVenueBlockHistory,
   getVenueBookings,
@@ -30,7 +34,11 @@ import {
   listVenueHolds,
   removeVenueBlock,
   retireVenue,
+  updateVenue,
 } from "../../src/services/venueService";
+import { toDatetimeLocalValue, toOffsetIsoString } from "../../src/services/datetimeFormat";
+import { httpError } from "../helpers/async.js";
+import { pressEscape, stubDialogElement } from "../helpers/dialog.js";
 
 vi.mock("../../src/services/venueService", () => ({
   getVenueCatalogue: vi.fn(),
@@ -122,6 +130,8 @@ const CONFLICTS = [
 ];
 
 const WED_7_OCT = new Date(2026, 9, 7, 10);
+
+stubDialogElement();
 
 beforeEach(() => {
   vi.mocked(getVenueCatalogue).mockReset().mockResolvedValue([VENUE, RETIRED]);
@@ -557,7 +567,7 @@ describe("SCRUM587_AC4 venue screens use the shared loading, empty, error and da
         vi.mocked(retireVenue).mockRejectedValue(serverError);
         const { user } = await renderCatalogue();
         await user.click(screen.getAllByRole("button", { name: "Retire venue" })[0]);
-        await user.click(screen.getByRole("button", { name: "Yes, retire" }));
+        await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Retire venue" }));
       },
       "Could not retire this venue. Please try again.",
     ],
@@ -580,7 +590,7 @@ describe("SCRUM587_AC4 venue screens use the shared loading, empty, error and da
         render(<VenueBlocksPanel venue={VENUE} currentUserId="d1" />);
         await screen.findByText("Upcoming");
         await user.click(screen.getAllByRole("button", { name: "Remove" })[0]);
-        await user.click(screen.getByRole("button", { name: "Yes, remove" }));
+        await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Remove block" }));
       },
       "Could not remove this block. Please try again.",
     ],
@@ -709,4 +719,249 @@ describe("SCRUM587_AC4 venue screens use the shared loading, empty, error and da
     expect(dates().textContent).toMatch(/(^| · )no date( · |$)/);
     expect(dates().textContent).not.toContain("no date – no date");
   });
+});
+
+describe("SCRUM587_AC6 and AC9 venue confirmations use the shared ConfirmDialog", () => {
+  const OVERRIDE_TEXT = "Flag these bookings for review and notify each event's coordinator?";
+  const HOURS_TEXT =
+    "Save the new hours, flag these bookings for review and notify each event's coordinator?";
+  const NEW_START = fromNow(20 * DAY);
+  const NEW_END = fromNow(21 * DAY);
+  const BLOCK_PAYLOAD = {
+    startsAt: toOffsetIsoString(toDatetimeLocalValue(NEW_START)),
+    endsAt: toOffsetIsoString(toDatetimeLocalValue(NEW_END)),
+    reason: "renovation",
+  };
+  const SHORTER_HOURS = [{ day_of_week: 1, opens_at: "09:00", closes_at: "17:00" }];
+
+  function dialogButton(name) {
+    return within(screen.getByRole("dialog")).getByRole("button", { name });
+  }
+
+  // Each confirmation, driven up to its open dialog. `before` is how many
+  // calls the service has had by then: an override follows a refused save.
+  const RETIRE = {
+    name: "retire a venue",
+    title: "Retire Hall A?",
+    confirm: "Retire venue",
+    cancel: "Keep venue",
+    service: retireVenue,
+    before: 0,
+    args: [VENUE.id],
+    async open() {
+      const { user } = await renderCatalogue();
+      const opener = screen.getAllByRole("button", { name: "Retire venue" })[0];
+      await user.click(opener);
+      return { user, opener };
+    },
+  };
+  const REMOVE = {
+    name: "remove a block",
+    title: "Remove this block?",
+    confirm: "Remove block",
+    cancel: "Keep block",
+    service: removeVenueBlock,
+    before: 0,
+    args: [VENUE.id, BLOCKS[0].id],
+    async open() {
+      const user = userEvent.setup();
+      render(<VenueBlocksPanel venue={VENUE} currentUserId="d1" />);
+      await screen.findByText("Upcoming");
+      const opener = screen.getAllByRole("button", { name: "Remove" })[0];
+      await user.click(opener);
+      return { user, opener };
+    },
+  };
+  const BLOCK_OVERRIDE = {
+    name: "override a block's conflicts",
+    title: OVERRIDE_TEXT,
+    confirm: "Override and flag",
+    cancel: "Cancel",
+    service: createVenueBlock,
+    before: 1,
+    args: [VENUE.id, { ...BLOCK_PAYLOAD, confirmOverride: true, acknowledgedBookingIds: ["c1"] }],
+    async open() {
+      vi.mocked(createVenueBlock).mockRejectedValueOnce(
+        httpError(409, { code: "BLOCK_BOOKING_CONFLICT", conflicts: CONFLICTS }),
+      );
+      const user = userEvent.setup();
+      render(<VenueBlocksPanel venue={VENUE} currentUserId="d1" />);
+      await screen.findByText("Upcoming");
+      await user.click(screen.getByRole("button", { name: "+ Add a block" }));
+      fireEvent.change(screen.getByLabelText("Start"), { target: { value: toDatetimeLocalValue(NEW_START) } });
+      fireEvent.change(screen.getByLabelText("End"), { target: { value: toDatetimeLocalValue(NEW_END) } });
+      await user.selectOptions(screen.getByLabelText("Reason"), "renovation");
+      await user.click(screen.getByRole("button", { name: "Block venue" }));
+      const opener = await screen.findByRole("button", { name: "Override and flag 1 booking" });
+      await user.click(opener);
+      return { user, opener };
+    },
+  };
+  const HOURS_OVERRIDE = {
+    name: "save new hours over conflicts",
+    title: HOURS_TEXT,
+    confirm: "Save and flag",
+    cancel: "Cancel",
+    service: updateVenue,
+    before: 1,
+    args: [VENUE.id, { hours: SHORTER_HOURS, confirmHoursChange: ["c1"] }],
+    async open() {
+      vi.mocked(getVenueDetails).mockResolvedValue({
+        ...VENUE,
+        layouts: [],
+        accessibility: [],
+        facilities: [],
+        hours: [{ day_of_week: 1, opens_at: "09:00:00", closes_at: "18:00:00" }],
+      });
+      vi.mocked(updateVenue).mockRejectedValueOnce(
+        httpError(409, { code: "VENUE_HOURS_BOOKING_CONFLICT", conflicts: CONFLICTS }),
+      );
+      const user = userEvent.setup();
+      render(<VenueForm venueId={VENUE.id} onSaved={() => {}} />);
+      await screen.findByRole("heading", { name: "Edit venue" });
+      fireEvent.change(screen.getByLabelText("Monday closes at"), { target: { value: "17:00" } });
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
+      const opener = await screen.findByRole("button", { name: "Confirm new hours" });
+      await user.click(opener);
+      return { user, opener };
+    },
+  };
+  const ALL = [RETIRE, REMOVE, BLOCK_OVERRIDE, HOURS_OVERRIDE];
+
+  let confirmSpy;
+
+  beforeEach(() => {
+    vi.mocked(retireVenue).mockReset().mockResolvedValue({});
+    vi.mocked(removeVenueBlock).mockReset().mockResolvedValue(undefined);
+    vi.mocked(createVenueBlock).mockReset().mockResolvedValue({ block: BLOCKS[0], flaggedBookings: [] });
+    vi.mocked(updateVenue).mockReset().mockResolvedValue({ ...VENUE, flaggedBookings: [] });
+    confirmSpy = vi.spyOn(window, "confirm").mockImplementation(() => true);
+  });
+
+  afterEach(() => {
+    confirmSpy.mockRestore();
+  });
+
+  it("SCRUM587_AC6_retire_asks_in_the_shared_dialog_before_anything_is_sent", async () => {
+    const { user } = await RETIRE.open();
+
+    const dialog = screen.getByRole("dialog", { name: "Retire Hall A?" });
+    expect(dialog).toHaveClass("ui-confirm-dialog");
+    expect(dialog).toHaveTextContent("This cannot be undone.");
+    expect(retireVenue).not.toHaveBeenCalled();
+
+    vi.mocked(getVenueCatalogue).mockResolvedValue([{ ...VENUE, retiredAt: "2026-11-01T00:00:00Z" }, RETIRED]);
+    await user.click(dialogButton("Retire venue"));
+
+    expect(retireVenue).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    // The Retire button has gone with the retirement, so the row takes focus.
+    const row = screen.getByText("Hall A").closest(".venue-catalogue__item-main");
+    expect(row).toHaveTextContent("Retired");
+    expect(row).toHaveFocus();
+  });
+
+  it("SCRUM587_AC6_remove_block_asks_in_the_shared_dialog_before_anything_is_sent", async () => {
+    const { user } = await REMOVE.open();
+
+    const dialog = screen.getByRole("dialog", { name: "Remove this block?" });
+    expect(dialog).toHaveClass("ui-confirm-dialog");
+    expect(dialog).toHaveTextContent("Bookings it flagged stay flagged for review.");
+    expect(removeVenueBlock).not.toHaveBeenCalled();
+
+    vi.mocked(listVenueBlocks).mockResolvedValue(BLOCKS.slice(1));
+    await user.click(dialogButton("Remove block"));
+
+    expect(removeVenueBlock).toHaveBeenCalledTimes(1);
+    await screen.findByText("Block removed.");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    // The removed block's row has gone, so its list heading takes focus.
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Current and upcoming blocks" })).toHaveFocus(),
+    );
+  });
+
+  it.each([
+    [BLOCK_OVERRIDE.name, BLOCK_OVERRIDE],
+    [HOURS_OVERRIDE.name, HOURS_OVERRIDE],
+  ])("SCRUM587_AC6_override_asks_in_the_shared_dialog_before_flagging (%s)", async (_name, flow) => {
+    const { user } = await flow.open();
+
+    const dialog = screen.getByRole("dialog", { name: flow.title });
+    expect(dialog).toHaveClass("ui-confirm-dialog");
+    expect(dialog).toHaveTextContent("1 booking will be flagged for review, not cancelled.");
+    expect(flow.service).toHaveBeenCalledTimes(1);
+
+    await user.click(dialogButton(flow.confirm));
+    expect(flow.service).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    [RETIRE.name, RETIRE, "button"],
+    [REMOVE.name, REMOVE, "Escape"],
+    [BLOCK_OVERRIDE.name, BLOCK_OVERRIDE, "button"],
+  ])("SCRUM587_AC6_cancelling_a_confirmation_sends_nothing_and_returns_focus (%s by %s)", async (_name, flow, how) => {
+    const { user, opener } = await flow.open();
+    // Focus starts inside the dialog, on its cancel button.
+    expect(dialogButton(flow.cancel)).toHaveFocus();
+
+    if (how === "Escape") pressEscape(screen.getByRole("dialog"));
+    else await user.click(dialogButton(flow.cancel));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(flow.service).toHaveBeenCalledTimes(flow.before);
+    expect(opener).toHaveFocus();
+  });
+
+  it("SCRUM587_AC6_a_new_set_of_conflicts_closes_the_override_confirmation", async () => {
+    const user = userEvent.setup();
+    const second = { ...CONFLICTS[0], bookingId: "c2", eventName: "Career Fair" };
+    const onConfirmOverride = vi.fn();
+    const list = (conflicts) => (
+      <BlockConflictList conflicts={conflicts} onChangePeriod={() => {}} onConfirmOverride={onConfirmOverride} />
+    );
+    const { rerender } = render(list([CONFLICTS[0], second]));
+    await user.click(screen.getByRole("button", { name: "Override and flag 2 bookings" }));
+
+    // The same bookings in another order are still the ones on screen.
+    rerender(list([second, CONFLICTS[0]]));
+    expect(screen.getByRole("dialog", { name: OVERRIDE_TEXT })).toBeInTheDocument();
+
+    // A booking the user has not seen closes it.
+    rerender(list([CONFLICTS[0], second, { ...second, bookingId: "c3", eventName: "Hackathon" }]));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(onConfirmOverride).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM587_AC6_no_venue_screen_uses_an_inline_confirm_or_the_browser_popup", async () => {
+    const noYesButton = () =>
+      expect(screen.queryAllByRole("button", { name: /^Yes,/ })).toEqual([]);
+
+    for (const flow of ALL) {
+      const { user } = await flow.open();
+      noYesButton();
+      await user.click(dialogButton(flow.confirm));
+      noYesButton();
+      cleanup();
+    }
+    expect(confirmSpy).not.toHaveBeenCalled();
+
+    // The listed components never reach for window.confirm, on any path.
+    const components = resolve(dirname(fileURLToPath(import.meta.url)), "../../src/components");
+    for (const file of ["VenueCatalogue.jsx", "VenueBlocksPanel.jsx", "VenueForm.jsx", "BlockConflictList.jsx"]) {
+      const source = readFileSync(join(components, file), "utf8");
+      expect(source, file).not.toMatch(/(?<![\w.])confirm\s*\(|\bwindow\.confirm\b/);
+    }
+  });
+
+  it.each(ALL.map((flow) => [flow.name, flow]))(
+    "SCRUM587_AC9_each_confirmation_sends_the_same_request_as_before (%s)",
+    async (_name, flow) => {
+      const { user } = await flow.open();
+      await user.click(dialogButton(flow.confirm));
+
+      expect(flow.service).toHaveBeenCalledTimes(flow.before + 1);
+      expect(flow.service).toHaveBeenLastCalledWith(...flow.args);
+    },
+  );
 });

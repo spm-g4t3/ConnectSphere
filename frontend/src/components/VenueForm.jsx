@@ -652,7 +652,7 @@ export default function VenueForm({ venueId = null, onSaved }) {
         changeLabel="Change hours"
         overrideLabel="Confirm new hours"
         confirmText="Save the new hours, flag these bookings for review and notify each event's coordinator?"
-        confirmLabel="Yes, save and flag"
+        confirmLabel="Save and flag"
         formatPart={formatVenuePeriod}
         onChangePeriod={handleChangeHours}
         onConfirmOverride={(ids) => save(ids)}

@@ -26,6 +26,7 @@ import { formatOccupiedPeriod } from "../../src/services/occupiedPeriodDisplay";
 import { toDatetimeLocalValue } from "../../src/services/datetimeFormat";
 import { getVenueBlockHistory } from "../../src/services/venueService";
 import { deferred } from "../helpers/async.js";
+import { stubDialogElement } from "../helpers/dialog.js";
 
 vi.mock("../../src/services/venueService", () => ({
   listVenueBlocks: vi.fn(),
@@ -120,7 +121,7 @@ const MSG = {
   blockGone: "That block no longer exists. The list has been refreshed.",
   unknown409: "This block changed while you were working on it. The list has been refreshed.",
   removeFailed: "Could not remove this block. Please try again.",
-  confirmRemove: "Remove this block? Bookings it flagged stay flagged for review.",
+  confirmRemove: "Bookings it flagged stay flagged for review.",
   endedNote: "Ended blocks are kept as a record and can't be changed.",
   retiredTitle: "A retired venue cannot be blocked.",
 };
@@ -151,6 +152,17 @@ async function renderPanel(venue = VENUE) {
 }
 
 /** The <li> for a block, found by its formatted range. */
+/** A button inside the open confirmation dialog. */
+function dialogButton(name) {
+  return within(screen.getByRole("dialog")).getByRole("button", { name });
+}
+
+function removeDialog() {
+  return screen.getByRole("dialog", { name: "Remove this block?" });
+}
+
+stubDialogElement();
+
 function rowFor(block) {
   return screen.getByText(formatDateTimeRange(block.startsAt, block.endsAt)).closest("li");
 }
@@ -207,7 +219,7 @@ async function reachConflict(user, conflicts = [BOOKING_A, BOOKING_B]) {
 async function confirmOverride(user, count) {
   const noun = count === 1 ? "booking" : "bookings";
   await user.click(screen.getByRole("button", { name: `Override and flag ${count} ${noun}` }));
-  await user.click(screen.getByRole("button", { name: "Yes, override" }));
+  await user.click(dialogButton("Override and flag"));
 }
 
 function noticeEl() {
@@ -494,7 +506,7 @@ describe("VenueBlocksPanel conflicts and override (AC3)", () => {
     expect(
       screen.getByText("Flag these bookings for review and notify each event's coordinator?"),
     ).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Yes, override" }));
+    await user.click(dialogButton("Override and flag"));
 
     expect(createVenueBlock).toHaveBeenCalledTimes(2);
     const [venueId, second] = vi.mocked(createVenueBlock).mock.calls[1];
@@ -632,7 +644,7 @@ describe("VenueBlocksPanel conflicts and override (AC3)", () => {
     expect(screen.getByText(MSG.changedSince)).toBeInTheDocument();
     expect(screen.getByText(MSG.changedSince).closest('[role="alert"]')).toHaveClass("ui-error-notice");
     // The confirm closed itself: nobody confirms bookings they have not seen.
-    expect(screen.queryByRole("button", { name: "Yes, override" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Override and flag 1 booking" })).toBeEnabled();
     expect(noticeEl()).toBeNull();
 
@@ -727,12 +739,12 @@ describe("VenueBlocksPanel conflicts and override (AC3)", () => {
     vi.mocked(createVenueBlock).mockReturnValueOnce(pending.promise);
     await confirmOverride(user, 2);
 
-    expect(screen.getByRole("button", { name: "Flagging..." })).toBeDisabled();
+    expect(dialogButton("Flagging...")).toBeDisabled();
     expect(screen.getByRole("button", { name: "Choose a different period" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Saving..." })).toBeDisabled();
 
     // A second click while in flight sends nothing.
-    fireEvent.click(screen.getByRole("button", { name: "Flagging..." }));
+    fireEvent.click(dialogButton("Flagging..."));
     expect(createVenueBlock).toHaveBeenCalledTimes(2);
 
     await act(async () => pending.resolve({ block: UPCOMING, flaggedBookings: [BOOKING_A] }));
@@ -1007,46 +1019,44 @@ describe("VenueBlocksPanel remove (AC4)", () => {
     const { user } = await renderPanel();
     await askToRemove(user);
 
-    const row = rowFor(UPCOMING);
-    expect(within(row).getByText(MSG.confirmRemove)).toBeInTheDocument();
-    expect(within(row).getByRole("button", { name: "Yes, remove" })).toBeEnabled();
-    expect(within(row).getByRole("button", { name: "Cancel" })).toBeEnabled();
-    expect(within(row).queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+    const dialog = removeDialog();
+    expect(dialog).toHaveTextContent(MSG.confirmRemove);
+    // It names this row's block, not another's.
+    expect(dialog).toHaveTextContent(`Maintenance: ${formatDateTimeRange(UPCOMING.startsAt, UPCOMING.endsAt)}`);
+    expect(within(dialog).getByRole("button", { name: "Remove block" })).toBeEnabled();
+    expect(within(dialog).getByRole("button", { name: "Keep block" })).toBeEnabled();
     expect(removeVenueBlock).not.toHaveBeenCalled();
-    // Only this row asks.
-    expect(within(rowFor(IN_EFFECT)).queryByText(MSG.confirmRemove)).not.toBeInTheDocument();
   });
 
   it("SCRUM17_AC4_Cancel_backs_out_without_a_request", async () => {
     const { user } = await renderPanel();
     await askToRemove(user);
-    await user.click(within(rowFor(UPCOMING)).getByRole("button", { name: "Cancel" }));
+    await user.click(dialogButton("Keep block"));
 
-    expect(screen.queryByText(MSG.confirmRemove)).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(within(rowFor(UPCOMING)).getByRole("button", { name: "Remove" })).toBeEnabled();
     expect(removeVenueBlock).not.toHaveBeenCalled();
   });
 
-  it("SCRUM17_AC4_Yes_remove_calls_removeVenueBlock_shows_Removing_then_refetches", async () => {
+  it("SCRUM17_AC4_confirming_remove_calls_removeVenueBlock_shows_Removing_then_refetches", async () => {
     const { user } = await renderPanel();
     const pending = deferred();
     vi.mocked(removeVenueBlock).mockReturnValue(pending.promise);
 
     await askToRemove(user);
-    await user.click(within(rowFor(UPCOMING)).getByRole("button", { name: "Yes, remove" }));
+    await user.click(dialogButton("Remove block"));
 
     expect(removeVenueBlock).toHaveBeenCalledTimes(1);
     expect(removeVenueBlock).toHaveBeenCalledWith(VENUE.id, UPCOMING.id);
 
-    const row = rowFor(UPCOMING);
-    expect(within(row).getByRole("button", { name: "Removing..." })).toBeDisabled();
-    expect(within(row).getByRole("button", { name: "Cancel" })).toBeDisabled();
+    expect(dialogButton("Removing...")).toBeDisabled();
+    expect(dialogButton("Keep block")).toBeDisabled();
     // Other rows' actions are disabled while a removal is in flight.
     expect(within(rowFor(IN_EFFECT)).getByRole("button", { name: "Edit" })).toBeDisabled();
     expect(within(rowFor(IN_EFFECT)).getByRole("button", { name: "Remove" })).toBeDisabled();
 
     // A second click while in flight sends nothing.
-    fireEvent.click(within(row).getByRole("button", { name: "Removing..." }));
+    fireEvent.click(dialogButton("Removing..."));
     expect(removeVenueBlock).toHaveBeenCalledTimes(1);
 
     vi.mocked(listVenueBlocks).mockResolvedValue([IN_EFFECT, ENDED]);
@@ -1074,7 +1084,7 @@ describe("VenueBlocksPanel remove (AC4)", () => {
       vi.mocked(removeVenueBlock).mockRejectedValue(err());
 
       await askToRemove(user);
-      await user.click(within(rowFor(UPCOMING)).getByRole("button", { name: "Yes, remove" }));
+      await user.click(dialogButton("Remove block"));
 
       await waitFor(() => expect(panelAlert()).toHaveTextContent(message));
       expect(within(rowFor(UPCOMING)).queryByRole("alert")).not.toBeInTheDocument();
@@ -1089,7 +1099,7 @@ describe("VenueBlocksPanel remove (AC4)", () => {
     vi.mocked(removeVenueBlock).mockRejectedValue(httpError(500));
 
     await askToRemove(user);
-    await user.click(within(rowFor(UPCOMING)).getByRole("button", { name: "Yes, remove" }));
+    await user.click(dialogButton("Remove block"));
 
     const row = rowFor(UPCOMING);
     await waitFor(() => expect(within(row).getByRole("alert")).toHaveTextContent(MSG.removeFailed));
@@ -1098,7 +1108,7 @@ describe("VenueBlocksPanel remove (AC4)", () => {
     expect(listVenueBlocks).toHaveBeenCalledTimes(1);
     // Back to the plain buttons, ready to retry.
     expect(within(row).getByRole("button", { name: "Remove" })).toBeEnabled();
-    expect(within(row).queryByText(MSG.confirmRemove)).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expectNoUuidInText();
   });
 
@@ -1107,7 +1117,7 @@ describe("VenueBlocksPanel remove (AC4)", () => {
     vi.mocked(removeVenueBlock).mockRejectedValue(httpError(403));
 
     await askToRemove(user, IN_EFFECT);
-    await user.click(within(rowFor(IN_EFFECT)).getByRole("button", { name: "Yes, remove" }));
+    await user.click(dialogButton("Remove block"));
 
     await waitFor(() =>
       expect(within(rowFor(IN_EFFECT)).getByRole("alert")).toHaveTextContent(
@@ -1121,7 +1131,7 @@ describe("VenueBlocksPanel remove (AC4)", () => {
     const { user } = await renderPanel();
     vi.mocked(removeVenueBlock).mockRejectedValue(httpError(500));
     await askToRemove(user);
-    await user.click(within(rowFor(UPCOMING)).getByRole("button", { name: "Yes, remove" }));
+    await user.click(dialogButton("Remove block"));
     await waitFor(() => expect(within(rowFor(UPCOMING)).getByRole("alert")).toBeInTheDocument());
 
     await user.click(screen.getByRole("button", { name: "+ Add a block" }));
@@ -1368,13 +1378,13 @@ describe("VenueBlocksPanel audit line and history (SCRUM-131, AC4)", () => {
   it("SCRUM17_AC4_History_stays_enabled_during_a_remove_confirm_and_while_it_is_in_flight", async () => {
     const { user } = await renderWithUser();
     await user.click(within(rowFor(UPCOMING)).getByRole("button", { name: "Remove" }));
-    expect(within(rowFor(UPCOMING)).getByText(MSG.confirmRemove)).toBeInTheDocument();
+    expect(removeDialog()).toBeInTheDocument();
     expect(historyButton(UPCOMING)).toBeEnabled();
 
     const pending = deferred();
     vi.mocked(removeVenueBlock).mockReturnValue(pending.promise);
-    await user.click(within(rowFor(UPCOMING)).getByRole("button", { name: "Yes, remove" }));
-    expect(within(rowFor(UPCOMING)).getByRole("button", { name: "Removing..." })).toBeDisabled();
+    await user.click(dialogButton("Remove block"));
+    expect(dialogButton("Removing...")).toBeDisabled();
 
     for (const block of BLOCKS) expect(historyButton(block)).toBeEnabled();
     await user.click(historyButton(UPCOMING));
@@ -1444,7 +1454,7 @@ describe("VenueBlocksPanel audit line and history (SCRUM-131, AC4)", () => {
     vi.mocked(removeVenueBlock).mockResolvedValue(undefined);
     vi.mocked(listVenueBlocks).mockResolvedValue([audited(UPCOMING)]);
     await user.click(within(rowFor(IN_EFFECT)).getByRole("button", { name: "Remove" }));
-    await user.click(within(rowFor(IN_EFFECT)).getByRole("button", { name: "Yes, remove" }));
+    await user.click(dialogButton("Remove block"));
     await waitFor(() => expect(noticeEl()).toHaveTextContent(MSG.removed));
     await waitFor(() => expect(listVenueBlocks).toHaveBeenCalledTimes(2));
 

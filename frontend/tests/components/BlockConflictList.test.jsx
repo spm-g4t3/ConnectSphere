@@ -13,6 +13,7 @@ import userEvent from "@testing-library/user-event";
 
 import BlockConflictList from "../../src/components/BlockConflictList.jsx";
 import { formatDateTimeRange } from "../../src/services/displayFormat";
+import { stubDialogElement } from "../helpers/dialog.js";
 
 const CONFLICT_A = {
   bookingId: "a1b2c3d4-0000-4000-8000-000000000001",
@@ -58,6 +59,13 @@ function renderList(props = {}) {
 }
 
 const CONFIRM_TEXT = "Flag these bookings for review and notify each event's coordinator?";
+
+/** A button inside the open confirmation dialog. */
+function dialogButton(name) {
+  return within(screen.getByRole("dialog")).getByRole("button", { name });
+}
+
+stubDialogElement();
 
 let confirmSpy;
 
@@ -159,9 +167,11 @@ describe("SCRUM17_AC3 the override", () => {
 
     expect(onConfirmOverride).not.toHaveBeenCalled();
     expect(screen.getByText(CONFIRM_TEXT)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Override and flag/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: CONFIRM_TEXT })).toHaveTextContent(
+      "2 bookings will be flagged for review, not cancelled.",
+    );
 
-    await user.click(screen.getByRole("button", { name: "Yes, override" }));
+    await user.click(dialogButton("Override and flag"));
     expect(onConfirmOverride).toHaveBeenCalledTimes(1);
     expect(onConfirmOverride).toHaveBeenCalledWith([CONFLICT_A.bookingId, CONFLICT_B.bookingId]);
   });
@@ -169,7 +179,7 @@ describe("SCRUM17_AC3 the override", () => {
   it("passes the ids in on-screen order", async () => {
     const { user, onConfirmOverride } = renderList({ conflicts: [CONFLICT_B, CONFLICT_A] });
     await user.click(screen.getByRole("button", { name: "Override and flag 2 bookings" }));
-    await user.click(screen.getByRole("button", { name: "Yes, override" }));
+    await user.click(dialogButton("Override and flag"));
     expect(onConfirmOverride).toHaveBeenCalledWith([CONFLICT_B.bookingId, CONFLICT_A.bookingId]);
   });
 
@@ -181,11 +191,11 @@ describe("SCRUM17_AC3 the override", () => {
   it("SCRUM17_AC3_cancel_closes_the_confirm_without_overriding", async () => {
     const { user, onConfirmOverride } = renderList();
     await user.click(screen.getByRole("button", { name: "Override and flag 2 bookings" }));
-    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await user.click(dialogButton("Cancel"));
 
     expect(onConfirmOverride).not.toHaveBeenCalled();
     expect(screen.queryByText(CONFIRM_TEXT)).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Yes, override" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Override and flag 2 bookings" })).toBeInTheDocument();
   });
 
@@ -202,10 +212,11 @@ describe("SCRUM17_AC3 the override", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Flagging..." })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Yes, override" })).not.toBeInTheDocument();
+    expect(dialogButton("Flagging...")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Override and flag" })).not.toBeInTheDocument();
+    // The two list buttons and the dialog's two.
     const buttons = screen.getAllByRole("button");
-    expect(buttons).toHaveLength(3);
+    expect(buttons).toHaveLength(4);
     for (const button of buttons) expect(button).toBeDisabled();
   });
 
@@ -230,13 +241,13 @@ describe("SCRUM17_AC3 the override", () => {
     );
 
     expect(screen.queryByText(CONFIRM_TEXT)).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Yes, override" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Override and flag 3 bookings" })).toBeInTheDocument();
     expect(onConfirmOverride).not.toHaveBeenCalled();
 
     // Going through the confirm again hands back the new list.
     await user.click(screen.getByRole("button", { name: "Override and flag 3 bookings" }));
-    await user.click(screen.getByRole("button", { name: "Yes, override" }));
+    await user.click(dialogButton("Override and flag"));
     expect(onConfirmOverride).toHaveBeenCalledWith([
       CONFLICT_A.bookingId,
       CONFLICT_B.bookingId,
@@ -273,14 +284,14 @@ describe("SCRUM17_AC3 the override", () => {
     );
 
     expect(screen.getByText(CONFIRM_TEXT)).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Yes, override" }));
+    await user.click(dialogButton("Override and flag"));
     expect(onConfirmOverride).toHaveBeenCalledWith([CONFLICT_B.bookingId, CONFLICT_A.bookingId]);
   });
 
   it("SCRUM17_AC3_never_uses_window_confirm", async () => {
     const { user } = renderList();
     await user.click(screen.getByRole("button", { name: "Override and flag 2 bookings" }));
-    await user.click(screen.getByRole("button", { name: "Yes, override" }));
+    await user.click(dialogButton("Override and flag"));
     expect(confirmSpy).not.toHaveBeenCalled();
   });
 });
@@ -334,7 +345,7 @@ describe("SCRUM484_AC7 the conflict list shows setup and turnaround", () => {
     expect(within(row).getByText("0a1b2c3d")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Override and flag 1 booking" }));
-    await user.click(screen.getByRole("button", { name: "Yes, override" }));
+    await user.click(dialogButton("Override and flag"));
     expect(onConfirmOverride).toHaveBeenCalledWith([PADDED.bookingId]);
   });
 
@@ -364,7 +375,7 @@ describe("SCRUM575_AC7 custom wording", () => {
       changeLabel: "Change hours",
       overrideLabel: "Confirm new hours",
       confirmText: "Save the new hours?",
-      confirmLabel: "Yes, save and flag",
+      confirmLabel: "Save and flag",
       formatPart: (startsAt) => `from ${startsAt}`,
     });
 
@@ -380,7 +391,7 @@ describe("SCRUM575_AC7 custom wording", () => {
 
     await user.click(screen.getByRole("button", { name: "Confirm new hours" }));
     expect(screen.getByText("Save the new hours?")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Yes, save and flag" }));
+    await user.click(dialogButton("Save and flag"));
     expect(onConfirmOverride).toHaveBeenCalledWith([CONFLICT_A.bookingId, CONFLICT_B.bookingId]);
   });
 });
