@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { withdrawRegistration } from "../services/attendeeEventService";
 import { withdrawalFailure } from "../services/withdrawalErrors";
 import { REGISTRATION_STATUS } from "../services/registrationStatus";
@@ -20,6 +20,30 @@ export default function WithdrawRegistration({ registrationId, refusal, onWithdr
   const [failure, setFailure] = useState(null);
   // State updates are async, so a fast second click could pass a disabled check.
   const sending = useRef(false);
+  const withdrawButtonRef = useRef(null);
+  const failureRef = useRef(null);
+  const refusalRef = useRef(null);
+  const refocusWithdraw = useRef(false);
+  const wasRefused = useRef(Boolean(refusal));
+
+  // Cancelling closes the dialog, so focus goes back to the button that opened it.
+  useEffect(() => {
+    if (confirming || !refocusWithdraw.current) return;
+    refocusWithdraw.current = false;
+    withdrawButtonRef.current?.focus();
+  }, [confirming]);
+
+  // The button that had focus is replaced by the failure, so focus moves to it.
+  useEffect(() => {
+    if (failure) failureRef.current?.focus();
+  }, [failure]);
+
+  // Only a refusal that arrives here moves focus; one already shown after a
+  // reload is part of the page as it loads.
+  useEffect(() => {
+    if (refusal && !wasRefused.current) refusalRef.current?.focus();
+    wasRefused.current = Boolean(refusal);
+  }, [refusal]);
 
   async function handleConfirm() {
     if (sending.current) return;
@@ -46,18 +70,24 @@ export default function WithdrawRegistration({ registrationId, refusal, onWithdr
     // Final, so there is nothing to try again.
     return (
       <section className="withdraw-registration" aria-label="Withdraw registration">
-        <ErrorNotice message={refusal} />
+        <div ref={refusalRef} tabIndex={-1}>
+          <ErrorNotice message={refusal} />
+        </div>
       </section>
     );
   }
 
   return (
     <section className="withdraw-registration" aria-label="Withdraw registration">
-      {failure && <ErrorNotice message={failure.message} onRetry={handleConfirm} />}
+      {failure && (
+        <div ref={failureRef} tabIndex={-1}>
+          <ErrorNotice message={failure.message} onRetry={handleConfirm} />
+        </div>
+      )}
       {/* A retry sends from here, outside the dialog, so its progress shows here too. */}
       {submitting && !confirming && <p role="status">Withdrawing...</p>}
       {!failure && !submitting && (
-        <Button variant="danger" onClick={() => setConfirming(true)}>
+        <Button ref={withdrawButtonRef} variant="danger" onClick={() => setConfirming(true)}>
           Withdraw registration
         </Button>
       )}
@@ -69,7 +99,10 @@ export default function WithdrawRegistration({ registrationId, refusal, onWithdr
         danger
         busy={submitting}
         onConfirm={handleConfirm}
-        onCancel={() => setConfirming(false)}
+        onCancel={() => {
+          refocusWithdraw.current = true;
+          setConfirming(false);
+        }}
       >
         Your place will be released to other attendees.
       </ConfirmDialog>

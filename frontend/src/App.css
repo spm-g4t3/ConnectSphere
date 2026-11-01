@@ -410,6 +410,9 @@ button { cursor: pointer; }
 /* ui.css styles a <button>; these let a router Link carry the same classes. */
 .dashboard--attendee a.ui-button { display: inline-block; }
 .dashboard--attendee a.ui-button--primary { text-decoration: none; }
+/* Plain in-text links match the event-name links instead of browser blue;
+   link-styled buttons keep their own colours from ui.css. */
+.dashboard--attendee a:not(.ui-button) { color: var(--color-accent-dark); }
 .browse-open-events__row { padding-block: 10px; }
 .browse-open-events__summary { display: grid; gap: 2px; min-width: 0; }
 .browse-open-events__meta > span:last-child { flex-basis: 100%; font-size: 0.75rem; font-style: italic; opacity: 0.8; white-space: normal; }
@@ -437,6 +440,12 @@ button { cursor: pointer; }
 .dashboard .browse-open-events__notice p { color: var(--color-warning); margin: 0; }
 .browse-event-details__success { background: var(--color-success-soft); border-radius: var(--radius-control); margin: 0 0 var(--space-3); padding: var(--space-2) var(--space-3); }
 .dashboard .browse-event-details__success p { color: var(--color-success); margin: 0; }
+/* One clear ring for every attendee control, links styled as buttons included,
+   and for the notices that take focus after an action. */
+.dashboard--attendee :is(a, button, [tabindex="-1"]):focus-visible { outline: 3px solid var(--color-accent); outline-offset: 2px; }
+.dashboard--attendee .ui-error-notice { margin: 0 0 var(--space-3); }
+/* Event names can be one long word; wrap them inside a 360px screen. */
+.dashboard--attendee li, .dashboard--attendee .browse-event-details__success, .dashboard--attendee .ui-error-notice { overflow-wrap: anywhere; }
 .dashboard--coordinator .my-booking-requests button:disabled { cursor: not-allowed; opacity: 0.55; }
 .dashboard--coordinator .status--booking-pending { background: #fff6e5; color: #8a5a00; }
 .dashboard--coordinator .status--booking-conflicting { background: #fff0ee; color: #a43c32; }

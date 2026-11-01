@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { getAttendeeEvent } from "../services/attendeeEventService";
 import { REGISTERED_EVENTS_PATH } from "../services/attendeeEventRoutes";
@@ -12,6 +12,7 @@ import EmptyState from "./ui/EmptyState";
 import ErrorNotice from "./ui/ErrorNotice";
 import LoadingText from "./ui/LoadingText";
 import StatusBadge from "./ui/StatusBadge";
+import useFocusAfterRetry from "./useFocusAfterRetry";
 
 const MESSAGES = {
   401: SESSION_EXPIRED,
@@ -86,17 +87,24 @@ function EventInformation({ eventId }) {
   // Only while the server shows no active registration; a later read that
   // shows one again (registered anew) must not sit beside a withdrawn notice.
   const withdrawn = withdrawal && !current ? withdrawal : null;
+  const withdrawnRef = useRef(null);
+  // The withdraw section that had focus is replaced by this notice, so focus moves to it.
+  useEffect(() => {
+    if (withdrawn) withdrawnRef.current?.focus();
+  }, [withdrawn]);
+  // Focus goes to the page title after Try again: this section has no heading.
+  const { headingRef, retry } = useFocusAfterRetry(load);
   // One state decides the body: cancelled, confirmed, or anything else (not confirmed).
   // A reply for another event, or a state this screen does not know, reads as not confirmed.
   const view = !loading && !error && data ? bodyState(current) : null;
   return (
     <>
-      <h1>{current?.eventName?.trim() || withdrawn?.eventName?.trim() || "Event information"}</h1>
+      <h1 ref={headingRef} tabIndex={-1}>{current?.eventName?.trim() || withdrawn?.eventName?.trim() || "Event information"}</h1>
       <section aria-label="Registered event information">
         {loading && <LoadingText />}
         {/* From the backend's reply alone, so a failed reload cannot hide it. */}
         {withdrawn && (
-          <div className="browse-event-details__success" role="status">
+          <div ref={withdrawnRef} tabIndex={-1} className="browse-event-details__success" role="status">
             <p>Your registration has been withdrawn.</p>
             <dl className="browse-event-details__facts">
               <div><dt>Registration status</dt><dd><StatusBadge tone="neutral">Withdrawn</StatusBadge></dd></div>
@@ -106,7 +114,7 @@ function EventInformation({ eventId }) {
         )}
         {/* A missing registration is the answer, not a failure, so there is nothing to try again. */}
         {!withdrawn && notFound && <ErrorNotice message="Event information is unavailable. An active registration is required." />}
-        {error && <ErrorNotice message={error} onRetry={error === SESSION_EXPIRED ? undefined : load} />}
+        {error && <ErrorNotice message={error} onRetry={error === SESSION_EXPIRED ? undefined : retry} />}
         {view && <EventBody state={view} current={current} />}
         {/* SCRUM-434 AC5: a cancelled event shows the cancellation and the message only, so no withdrawal is offered. */}
         {!loading && !error && current?.registrationId && view !== "cancelled" && (

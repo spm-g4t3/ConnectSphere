@@ -13,6 +13,7 @@ import Button from "./ui/Button";
 import EmptyState from "./ui/EmptyState";
 import ErrorNotice from "./ui/ErrorNotice";
 import LoadingText from "./ui/LoadingText";
+import useFocusAfterRetry from "./useFocusAfterRetry";
 
 const LIST_ERROR_MESSAGES = {
   401: SESSION_EXPIRED,
@@ -51,26 +52,27 @@ export default function BrowseOpenEvents() {
   });
   const events = data ?? [];
   useRefetchOnReturn(fetchEvents);
+  const { headingRef, retry } = useFocusAfterRetry(fetchEvents);
   return (
     <>
       <h1>Browse Open Events</h1>
 
       <section className="browse-open-events" aria-labelledby="browse-open-events-heading">
-        <h2 id="browse-open-events-heading">Events open for registration</h2>
+        <h2 ref={headingRef} tabIndex={-1} id="browse-open-events-heading">Events open for registration</h2>
 
         {loading && <LoadingText />}
 
         {error && (
           <ErrorNotice
             message={error}
-            onRetry={error === SESSION_EXPIRED ? undefined : fetchEvents}
+            onRetry={error === SESSION_EXPIRED ? undefined : retry}
           />
         )}
 
         {refreshFailed && (
           <div className="browse-open-events__notice" role="status">
             <p>Could not refresh the list. Showing the events as last loaded.</p>
-            <Button variant="secondary" onClick={fetchEvents}>
+            <Button variant="secondary" onClick={retry}>
               Try again
             </Button>
           </div>

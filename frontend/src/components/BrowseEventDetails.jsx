@@ -18,6 +18,7 @@ import { SESSION_EXPIRED } from "../services/apiErrors";
 import Button from "./ui/Button";
 import ErrorNotice from "./ui/ErrorNotice";
 import LoadingText from "./ui/LoadingText";
+import useFocusAfterRetry from "./useFocusAfterRetry";
 
 const LOAD_ERROR_MESSAGES = {
   401: SESSION_EXPIRED,
@@ -127,6 +128,17 @@ export default function BrowseEventDetails({ onRegister, onJoinWaitlist }) {
   const isRegistered = event?.isRegistered || registeredEventId === eventId;
   const sending = useRef(false);
   const currentEventId = useRef(eventId);
+  // The Register or Join button had focus and is disabled while the attempt
+  // runs (and often after it), so focus moves to whatever reports the outcome.
+  const [outcomeFocusRequest, setOutcomeFocusRequest] = useState(0);
+  const noticeRef = useRef(null);
+  const registerErrorRef = useRef(null);
+  const notOpenRef = useRef(null);
+
+  useEffect(() => {
+    if (!outcomeFocusRequest) return;
+    (noticeRef.current ?? registerErrorRef.current ?? notOpenRef.current)?.focus();
+  }, [outcomeFocusRequest]);
 
   useEffect(() => {
     currentEventId.current = eventId;
@@ -156,6 +168,8 @@ export default function BrowseEventDetails({ onRegister, onJoinWaitlist }) {
     }
   }, [refreshEvent]);
   useRefetchOnReturn(refreshUnlessRegistering);
+
+  const { headingRef, retry } = useFocusAfterRetry(refreshUnlessRegistering);
   async function handleRegister() {
     if (!onRegister || sending.current || !event || isRegistered) return;
     sending.current = true;
@@ -204,6 +218,7 @@ export default function BrowseEventDetails({ onRegister, onJoinWaitlist }) {
     // Overtaken by another read (the reader moved on): this attempt's outcome
     // belongs to a page that is no longer shown.
     if (fresh.kind === "superseded") return;
+    setOutcomeFocusRequest((count) => count + 1);
 
     if (registered || failureMessage) return;
     if (fresh.kind === "ok" && fresh.data.isRegistered) {
@@ -251,9 +266,10 @@ export default function BrowseEventDetails({ onRegister, onJoinWaitlist }) {
     }
 
     setAvailabilityInvalidated(true);
-    await refreshEvent();
+    const fresh = await refreshEvent();
     sending.current = false;
     setRegistering(false);
+    if (fresh.kind !== "superseded") setOutcomeFocusRequest((count) => count + 1);
   }
 
   return (
@@ -261,17 +277,21 @@ export default function BrowseEventDetails({ onRegister, onJoinWaitlist }) {
       <h1>{event ? event.eventName || "Unnamed event" : "Event details"}</h1>
 
       <section className="browse-event-details" aria-labelledby="browse-event-details-heading">
-        <h2 id="browse-event-details-heading">Event details</h2>
+        <h2 ref={headingRef} tabIndex={-1} id="browse-event-details-heading">Event details</h2>
 
         {loading && <LoadingText />}
 
         {/* Final for this event, so there is nothing to try again. */}
-        {!loading && notOpen && !registerError && <ErrorNotice message={NOT_OPEN_MESSAGE} />}
+        {!loading && notOpen && !registerError && (
+          <div ref={notOpenRef} tabIndex={-1}>
+            <ErrorNotice message={NOT_OPEN_MESSAGE} />
+          </div>
+        )}
 
         {/* Outside the details: the reload after registering can find the event
             closed, and the attendee must still be told they are registered. */}
         {notice && (
-          <div className="browse-event-details__success" role="status">
+          <div ref={noticeRef} tabIndex={-1} className="browse-event-details__success" role="status">
             <p>{notice}</p>
           </div>
         )}
@@ -279,14 +299,14 @@ export default function BrowseEventDetails({ onRegister, onJoinWaitlist }) {
         {!loading && error && (
           <ErrorNotice
             message={error}
-            onRetry={error === SESSION_EXPIRED ? undefined : refreshUnlessRegistering}
+            onRetry={error === SESSION_EXPIRED ? undefined : retry}
           />
         )}
 
         {refreshFailed && (
           <div className="browse-open-events__notice" role="status">
             <p>Could not refresh this event. Showing the details as last loaded.</p>
-            <Button variant="secondary" onClick={refreshUnlessRegistering} disabled={registering}>
+            <Button variant="secondary" onClick={retry} disabled={registering}>
               Try again
             </Button>
           </div>
@@ -336,7 +356,11 @@ export default function BrowseEventDetails({ onRegister, onJoinWaitlist }) {
         )}
 
         {/* The Register or Join button is the retry, as for any form error. */}
-        {registerError && registerError !== error && <ErrorNotice message={registerError} />}
+        {registerError && registerError !== error && (
+          <div ref={registerErrorRef} tabIndex={-1}>
+            <ErrorNotice message={registerError} />
+          </div>
+        )}
 
         <BackLink />
       </section>
