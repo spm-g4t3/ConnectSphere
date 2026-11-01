@@ -24,7 +24,7 @@
 // Every call answers with the whole review state and that replaces what is on
 // screen. Nothing is spliced by hand.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import {
@@ -50,6 +50,7 @@ import ConfirmDialog from "./ui/ConfirmDialog";
 import ErrorNotice from "./ui/ErrorNotice";
 import LoadingText from "./ui/LoadingText";
 import StatusBadge from "./ui/StatusBadge";
+import useFocusAfterRetry from "./useFocusAfterRetry";
 import "./EquipmentReview.css";
 
 // The one load failure worth retrying; a missing event stays missing.
@@ -307,6 +308,45 @@ export default function EquipmentReview() {
   useEffect(() => {
     load();
   }, [load]);
+  // The error view has no section heading, so Try again focuses the page title.
+  const { headingRef, retry } = useFocusAfterRetry(load);
+
+  // Most actions disable or remove the button that was pressed, so once one
+  // settles, focus moves to what reports it: the notice, the page error, or the
+  // open form's error. Counted, so the same message twice still moves focus.
+  const [outcomeFocus, setOutcomeFocus] = useState(0);
+  const noticeRef = useRef(null);
+  const errorRef = useRef(null);
+  const actionErrorRef = useRef(null);
+  useEffect(() => {
+    if (outcomeFocus) (noticeRef.current ?? errorRef.current ?? actionErrorRef.current)?.focus();
+  }, [outcomeFocus]);
+
+  // Opening a form replaces the button that opened it, so the form's heading takes
+  // focus; its Cancel sends focus back to the open line's toggle.
+  const openForm = editor ? `${editor.kind}:${editor.reservationId}` : markingId;
+  const formHeadingRef = useRef(null);
+  const openToggleRef = useRef(null);
+  const [toggleFocus, setToggleFocus] = useState(0);
+  useEffect(() => {
+    if (openForm) formHeadingRef.current?.focus();
+  }, [openForm]);
+  useEffect(() => {
+    if (toggleFocus) openToggleRef.current?.focus();
+  }, [toggleFocus]);
+  function cancelForm() {
+    resetEditors();
+    setToggleFocus((count) => count + 1);
+  }
+
+  // Not yet or Escape closes the dialog, so focus goes back to Complete review.
+  const completeButtonRef = useRef(null);
+  const refocusComplete = useRef(false);
+  useEffect(() => {
+    if (confirmingComplete || !refocusComplete.current) return;
+    refocusComplete.current = false;
+    completeButtonRef.current?.focus();
+  }, [confirmingComplete]);
 
   const request = review?.request ?? null;
   const event = review?.event ?? null;
@@ -315,8 +355,11 @@ export default function EquipmentReview() {
   const isReviewer = Boolean(user?.id) && request?.reviewerId === user.id;
   const reviewing = status === "under_review" && isReviewer;
 
-  /** Run one write: replace the state on success, say why on failure. */
-  async function run(action, { onError, success } = {}) {
+  /**
+   * Run one write: replace the state on success, say why on failure. Focus then
+   * moves to the outcome, unless the caller still has a dialog to close first.
+   */
+  async function run(action, { onError, success, focusOutcome = true } = {}) {
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -330,6 +373,7 @@ export default function EquipmentReview() {
       return false;
     } finally {
       setBusy(false);
+      if (focusOutcome) setOutcomeFocus((count) => count + 1);
     }
   }
 
@@ -477,10 +521,12 @@ export default function EquipmentReview() {
   }
 
   async function handleComplete() {
-    const ok = await run(() => completeEquipmentReview(eventId), { success: "Review completed." });
+    const ok = await run(() => completeEquipmentReview(eventId), { success: "Review completed.", focusOutcome: false });
     if (ok) resetEditors();
     // A refusal shows on the page, where Complete review is the retry.
     else setConfirmingComplete(false);
+    // With the dialog closing in the same render, so it cannot pull focus back.
+    setOutcomeFocus((count) => count + 1);
   }
 
   if (loading) {
@@ -495,11 +541,11 @@ export default function EquipmentReview() {
   if (loadError || !request) {
     return (
       <div className="dashboard dashboard--tech-support equipment-review">
-        <h1>Equipment request review</h1>
+        <h1 ref={headingRef} tabIndex={-1}>Equipment request review</h1>
         {/* Nothing to retry when the event is not found or has no equipment request. */}
         <ErrorNotice
           message={loadError ?? "This event has no equipment request to review."}
-          onRetry={loadError === LOAD_FAILED ? load : undefined}
+          onRetry={loadError === LOAD_FAILED ? retry : undefined}
         />
       </div>
     );
@@ -532,7 +578,7 @@ export default function EquipmentReview() {
 
   return (
     <div className="dashboard dashboard--tech-support equipment-review">
-      <h1>Equipment request review</h1>
+      <h1 ref={headingRef} tabIndex={-1}>Equipment request review</h1>
 
       <section className="equipment-review__event">
         <div className="er-event-head">
@@ -592,9 +638,13 @@ export default function EquipmentReview() {
       </section>
 
       {/* The action's own button is the retry. */}
-      {error && <ErrorNotice message={error} />}
+      {error && (
+        <div ref={errorRef} tabIndex={-1}>
+          <ErrorNotice message={error} />
+        </div>
+      )}
       {notice && (
-        <p className="equipment-review__notice" role="status">
+        <p ref={noticeRef} tabIndex={-1} className="equipment-review__notice" role="status">
           {notice}
         </p>
       )}
@@ -650,6 +700,7 @@ export default function EquipmentReview() {
               <li key={line.id} className={`equipment-review__line er-line--${lineState(line)}`}>
                 <h3 className="er-line__heading">
                   <button
+                    ref={isOpen ? openToggleRef : undefined}
                     type="button"
                     className="er-line__toggle"
                     aria-expanded={isOpen}
@@ -821,7 +872,7 @@ export default function EquipmentReview() {
                                 noValidate
                                 onSubmit={(e) => handleEditorSubmit(e, line, reservation)}
                               >
-                                <h4>
+                                <h4 ref={formHeadingRef} tabIndex={-1}>
                                   {editor.kind === "release"
                                     ? `Release the ${line.name} reservation`
                                     : editor.kind === "change"
@@ -863,7 +914,7 @@ export default function EquipmentReview() {
                                   </label>
                                 )}
                                 {editorError && (
-                                  <p className="equipment-review__error" role="alert">
+                                  <p ref={actionErrorRef} tabIndex={-1} className="equipment-review__error" role="alert">
                                     {editorError}
                                   </p>
                                 )}
@@ -881,7 +932,7 @@ export default function EquipmentReview() {
                                           ? `Reserve ${Number(quantityInput) - reservation.quantity} more`
                                           : "Reduce"}
                                   </Button>
-                                  <Button variant="secondary" disabled={busy} onClick={resetEditors}>
+                                  <Button variant="secondary" disabled={busy} onClick={cancelForm}>
                                     Cancel
                                   </Button>
                                 </div>
@@ -936,7 +987,7 @@ export default function EquipmentReview() {
                         <p className="equipment-review__muted">{`Only ${canReserveNow} can be reserved right now.`}</p>
                       )}
                       {reserveError?.lineId === line.id && (
-                        <p className="equipment-review__error" role="alert">
+                        <p ref={actionErrorRef} tabIndex={-1} className="equipment-review__error" role="alert">
                           {reserveError.message}
                         </p>
                       )}
@@ -966,7 +1017,7 @@ export default function EquipmentReview() {
 
                 {reviewing && markingId === line.id && (
                   <form className="equipment-review__form" noValidate onSubmit={(e) => handleMark(e, line)}>
-                    <h4>{`${line.name} cannot be provided`}</h4>
+                    <h4 ref={formHeadingRef} tabIndex={-1}>{`${line.name} cannot be provided`}</h4>
                     <label>
                       {`Why can ${line.name} not be provided?`}
                       <textarea
@@ -977,7 +1028,7 @@ export default function EquipmentReview() {
                       />
                     </label>
                     {markError && (
-                      <p className="equipment-review__error" role="alert">
+                      <p ref={actionErrorRef} tabIndex={-1} className="equipment-review__error" role="alert">
                         {markError}
                       </p>
                     )}
@@ -985,7 +1036,7 @@ export default function EquipmentReview() {
                       <Button type="submit" disabled={busy}>
                         {busy ? "Saving..." : "Save note"}
                       </Button>
-                      <Button variant="secondary" disabled={busy} onClick={resetEditors}>
+                      <Button variant="secondary" disabled={busy} onClick={cancelForm}>
                         Cancel
                       </Button>
                     </div>
@@ -1030,6 +1081,7 @@ export default function EquipmentReview() {
           ) : (
             <>
               <Button
+                ref={completeButtonRef}
                 disabled={busy || flaggedTotal > 0}
                 onClick={() => {
                   setNotice(null);
@@ -1047,7 +1099,10 @@ export default function EquipmentReview() {
                 cancelLabel="Not yet"
                 busy={busy}
                 onConfirm={handleComplete}
-                onCancel={() => setConfirmingComplete(false)}
+                onCancel={() => {
+                  refocusComplete.current = true;
+                  setConfirmingComplete(false);
+                }}
               >
                 {`${shortLines.length} item${shortLines.length === 1 ? " is" : "s are"} not fully reserved. Each needs a "Cannot be provided" note, and the request will be marked Cannot be fully arranged. Reservations already made are kept.`}
               </ConfirmDialog>

@@ -18,6 +18,7 @@ import EmptyState from "./ui/EmptyState";
 import ErrorNotice from "./ui/ErrorNotice";
 import LoadingText from "./ui/LoadingText";
 import StatusBadge from "./ui/StatusBadge";
+import useFocusAfterRetry from "./useFocusAfterRetry";
 import "./EquipmentRequestQueue.css";
 
 const LOAD_ERRORS = {
@@ -72,13 +73,14 @@ export default function EquipmentReviewedByMe() {
   useEffect(() => {
     load();
   }, [load]);
+  const { headingRef, retry } = useFocusAfterRetry(load);
 
   return (
     <section className="equipment-queue" aria-labelledby="equipment-reviewed-by-me" aria-busy={loading}>
-      <h2 id="equipment-reviewed-by-me">Reviewed by me</h2>
+      <h2 ref={headingRef} tabIndex={-1} id="equipment-reviewed-by-me">Reviewed by me</h2>
       {loading && !list && !error && <LoadingText />}
       {/* A 403 gives the same answer again, so only the generic failure offers a retry. */}
-      {error && <ErrorNotice message={error} onRetry={error === GENERIC_LOAD_ERROR ? load : undefined} />}
+      {error && <ErrorNotice message={error} onRetry={error === GENERIC_LOAD_ERROR ? retry : undefined} />}
       {list && list.requests.length === 0 && (
         <EmptyState
           message="You have not reviewed any equipment requests yet."

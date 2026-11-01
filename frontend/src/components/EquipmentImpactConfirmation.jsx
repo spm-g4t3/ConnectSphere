@@ -7,6 +7,7 @@
 //
 // It only draws what it is given. The flow lives in useConfirmedChange.
 
+import { useEffect, useRef } from "react";
 import { describeAffected, impactHeading } from "../services/equipmentImpactDisplay";
 import Button from "./ui/Button";
 import StatusBadge from "./ui/StatusBadge";
@@ -25,12 +26,20 @@ export default function EquipmentImpactConfirmation({
   headingLevel = 3,
 }) {
   const Heading = `h${headingLevel}`;
+  const headingRef = useRef(null);
+  // This step replaces the button that led here (a form's Save, the retire
+  // dialog), so its heading takes focus. It only appears after an action.
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, []);
   const items = impact.affected.map(describeAffected);
   const none = items.length === 0;
 
   return (
     <section className="equipment-impact" aria-label={`Reservations affected: ${typeName}`}>
-      <Heading className="equipment-impact__heading">Check before you save</Heading>
+      <Heading ref={headingRef} tabIndex={-1} className="equipment-impact__heading">
+        Check before you save
+      </Heading>
 
       {stale && (
         <p className="equipment-errors" role="alert">

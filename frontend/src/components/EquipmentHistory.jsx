@@ -13,7 +13,7 @@ import EmptyState from "./ui/EmptyState";
 import ErrorNotice from "./ui/ErrorNotice";
 import LoadingText from "./ui/LoadingText";
 
-export default function EquipmentHistory({ type }) {
+export default function EquipmentHistory({ type, titleRef }) {
   const [entries, setEntries] = useState(null);
   const [error, setError] = useState(null); // { message, retryable }
   // A response that arrives after the panel closes is dropped.
@@ -42,9 +42,12 @@ export default function EquipmentHistory({ type }) {
     load();
   }, [load]);
 
-  function retry() {
+  // Try again goes away while the read reloads. This panel has no heading of its
+  // own, so focus goes to the panel's title rather than the page body.
+  async function retry() {
     setError(null);
-    load();
+    await load();
+    titleRef?.current?.focus();
   }
 
   return (

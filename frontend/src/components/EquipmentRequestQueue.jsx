@@ -17,6 +17,7 @@ import EmptyState from "./ui/EmptyState";
 import ErrorNotice from "./ui/ErrorNotice";
 import LoadingText from "./ui/LoadingText";
 import StatusBadge from "./ui/StatusBadge";
+import useFocusAfterRetry from "./useFocusAfterRetry";
 import "./EquipmentRequestQueue.css";
 
 const LOAD_ERRORS = {
@@ -135,12 +136,15 @@ export default function EquipmentRequestQueue() {
   const needsAction = needsList?.rows ?? [];
   const requests = requestList?.rows ?? [];
   const firstLoad = loading && statuses === null;
+  const { headingRef, retry } = useFocusAfterRetry(load);
 
   return (
     <>
+      {/* After Try again focus goes to Needs action, or to this notice when a first
+          load fails again and there is no heading yet. */}
       {error && (
-        <section className="equipment-queue">
-          <ErrorNotice message={error} onRetry={isRetryable(error) ? load : undefined} />
+        <section className="equipment-queue" ref={needsList ? undefined : headingRef} tabIndex={-1}>
+          <ErrorNotice message={error} onRetry={isRetryable(error) ? retry : undefined} />
         </section>
       )}
 
@@ -152,7 +156,7 @@ export default function EquipmentRequestQueue() {
 
       {needsList && (
         <section className="equipment-queue" aria-labelledby="equipment-queue-needs-action" aria-busy={loading}>
-          <h2 id="equipment-queue-needs-action">{`Needs action (${needsList.total})`}</h2>
+          <h2 ref={headingRef} tabIndex={-1} id="equipment-queue-needs-action">{`Needs action (${needsList.total})`}</h2>
           {needsAction.length === 0 ? (
             <EmptyState
               message="Nothing needs your action."

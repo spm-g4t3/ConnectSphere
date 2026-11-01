@@ -35,7 +35,7 @@
    the app's `.dashboard li`, `.dashboard p` and `.dashboard section` rules. */
 .equipment-review .er-event-head { align-items: center; display: flex; flex-wrap: wrap; gap: var(--space-2) 14px; justify-content: space-between; }
 .equipment-review .er-event-head h2 { font-size: 1.4rem; margin: 0; }
-.equipment-review .er-facts { display: grid; gap: 10px 28px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); margin: 14px 0 6px; }
+.equipment-review .er-facts { display: grid; gap: 10px 28px; grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr)); margin: 14px 0 6px; }
 .equipment-review .er-facts dt, .equipment-review .er-compare dt { color: var(--color-muted); display: block; font-size: var(--font-size-xs); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
 .equipment-review .er-facts dd, .equipment-review .er-compare dd { margin: 2px 0 0; }
 
@@ -66,7 +66,7 @@
 .equipment-review .er-conflict { display: grid; gap: 10px; }
 .equipment-review .er-conflict h4 { color: var(--color-warning); font-size: var(--font-size-base); margin: 0; }
 .equipment-review .er-conflict p { margin: 0; }
-.equipment-review .er-compare { display: grid; gap: var(--space-2) var(--space-5); grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin: 0; }
+.equipment-review .er-compare { display: grid; gap: var(--space-2) var(--space-5); grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); margin: 0; }
 .equipment-review .er-compare > div { background: var(--color-paper); border: 1px solid color-mix(in srgb, var(--color-warning) 25%, transparent); border-radius: var(--radius-card); padding: var(--space-2) var(--space-3); }
 .equipment-review .er-choices { display: grid; gap: 10px; list-style: none; margin: var(--space-1) 0 0; padding: 0; }
 .equipment-review .er-choices li { align-items: center; display: grid; gap: 6px 14px; grid-template-columns: minmax(150px, 190px) 1fr; }
@@ -105,16 +105,14 @@
 .equipment-review .er-line--cannot { border-left: 8px solid var(--color-danger); }
 
 /* App.css fills every `.dashboard button:hover` teal, which hid the label on the tabs.
-   Each native control gets its own hover and focus state. */
+   Each native control gets its own hover state; the focus ring is shared, below. */
 .equipment-review button.er-tab:hover:not(:disabled) { background: var(--color-accent-soft); color: var(--color-accent-dark); }
 .equipment-review button.er-tab--active:hover:not(:disabled) { background: var(--color-paper); color: var(--color-accent-dark); }
-.equipment-review button.er-tab:focus-visible { outline: 3px solid color-mix(in srgb, var(--color-accent) 40%, transparent); outline-offset: 2px; }
 
 /* Each line is a closed row until it is opened, and only one is open at a time. */
 .equipment-review .er-line__heading { font-size: var(--font-size-base); margin: 0; }
 .equipment-review button.er-line__toggle { background: none; border: 0; border-radius: var(--radius-card); color: inherit; cursor: pointer; display: grid; font: inherit; gap: var(--space-1); padding: 2px 0; text-align: left; width: 100%; }
 .equipment-review button.er-line__toggle:hover:not(:disabled) { background: var(--color-accent-soft); color: inherit; }
-.equipment-review button.er-line__toggle:focus-visible { outline: 3px solid color-mix(in srgb, var(--color-accent) 40%, transparent); outline-offset: 2px; }
 .equipment-review .er-line__top { align-items: center; display: flex; flex-wrap: wrap; gap: 6px var(--space-3); }
 .equipment-review .er-line__top strong { font-size: 1.1rem; }
 .equipment-review .er-line__chevron { color: var(--color-accent-dark); font-size: var(--font-size-sm); font-weight: 700; margin-left: auto; }
@@ -139,8 +137,8 @@
 
 .equipment-review .equipment-review__form { gap: var(--space-3); }
 .equipment-review .equipment-review__form label[for^="er-qty-"] { color: var(--color-neutral); font-size: var(--font-size-md); }
-.equipment-review .er-stepper { align-items: center; display: inline-flex; gap: var(--space-2); }
-.equipment-review .er-stepper input[type="number"] { -moz-appearance: textfield; font-size: 1.6rem; font-weight: 700; max-width: 90px; padding: 6px var(--space-1); text-align: center; }
+.equipment-review .er-stepper { align-items: center; display: inline-flex; gap: var(--space-2); max-width: 100%; }
+.equipment-review .er-stepper input[type="number"] { -moz-appearance: textfield; flex: 0 1 90px; font-size: 1.6rem; font-weight: 700; min-width: 0; padding: 6px var(--space-1); text-align: center; }
 .equipment-review .er-stepper input[type="number"]::-webkit-outer-spin-button, .equipment-review .er-stepper input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .equipment-review button.er-stepper__btn { background: var(--color-paper); border: 1px solid var(--color-accent-dark); border-radius: 50%; color: var(--color-accent-dark); font-size: 1.3rem; font-weight: 700; height: 42px; line-height: 1; padding: 0; width: 42px; }
 .equipment-review button.er-stepper__btn:hover:not(:disabled) { background: var(--color-accent-soft); color: var(--color-accent-dark); }
@@ -151,3 +149,16 @@
 .equipment-review .er-quick__reserve { align-items: center; display: flex; flex-wrap: wrap; gap: var(--space-3); }
 .equipment-review .er-quick__label { border: 0; clip: rect(0 0 0 0); height: 1px; margin: -1px; overflow: hidden; padding: 0; position: absolute; white-space: nowrap; width: 1px; }
 .equipment-review .er-quick .equipment-review__muted { margin: 0; }
+
+/* One clear ring on every control, the tabs, steppers and line toggles included, and
+   on the heading or notice that takes focus after an action. */
+.equipment-review :is(a, button, input, select, textarea, summary, [tabindex="-1"]):focus-visible { outline: 3px solid var(--color-accent); outline-offset: 2px; }
+
+/* A 360px screen: names can be one long word, and the nested cards give back some padding. */
+.equipment-review { overflow-wrap: anywhere; }
+.equipment-review .er-line__top, .equipment-review .er-res__main, .equipment-review .er-check { min-width: 0; }
+@media (max-width: 480px) {
+  .equipment-review .equipment-review__line { padding: 14px var(--space-3); }
+  .equipment-review .equipment-review__reservation { padding: var(--space-2); }
+  .equipment-review .equipment-review__form { padding: var(--space-3); }
+}

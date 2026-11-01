@@ -25,6 +25,7 @@ import EmptyState from "./ui/EmptyState";
 import ErrorNotice from "./ui/ErrorNotice";
 import LoadingText from "./ui/LoadingText";
 import StatusBadge from "./ui/StatusBadge";
+import useFocusAfterRetry from "./useFocusAfterRetry";
 import "./EquipmentAvailabilityCheck.css";
 
 const RESULT_CLASS = {
@@ -158,10 +159,11 @@ export default function EquipmentAvailabilityCheck() {
     loadTypes();
   }, [loadTypes]);
 
-  function retryTypes() {
+  const reloadTypes = useCallback(() => {
     setTypesError(null);
-    loadTypes();
-  }
+    return loadTypes();
+  }, [loadTypes]);
+  const { headingRef, retry: retryTypes } = useFocusAfterRetry(reloadTypes);
 
   function bind(field) {
     return {
@@ -217,7 +219,7 @@ export default function EquipmentAvailabilityCheck() {
       )}
 
       <form onSubmit={handleSubmit} noValidate>
-        <h2>Choose equipment and period</h2>
+        <h2 ref={headingRef} tabIndex={-1}>Choose equipment and period</h2>
 
         <div className="availability-check__field">
           <label htmlFor="availability-type">Equipment type</label>
