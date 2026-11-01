@@ -2,7 +2,7 @@
  * Tests for the registration opening and closing job.
  *
  * SCRUM-177 (AC1), SCRUM-237. The job calls process_registration_window_notices()
- * (047) once on start and then every interval. What that function announces,
+ * (053) once on start and then every interval. What that function announces,
  * and when, is proved against Postgres in
  * tests/db/scrum237RegistrationWindowJobDatabase.test.js. These tests prove the
  * timer and the logging, with fake timers, a fake client and a fake logger.
@@ -34,7 +34,7 @@ describe('runRegistrationWindowNoticesOnce', () => {
     expect(logger.info).toHaveBeenCalledWith('Registration window: 3 notification(s) sent');
   });
 
-  it('stays quiet when nothing was due', async () => {
+  it('SCRUM177_AC1_stays_quiet_when_nothing_was_due', async () => {
     const logger = fakeLogger();
     expect(await runRegistrationWindowNoticesOnce({ client: clientAnswering(answer(0)), logger })).toBe(0);
     expect(logger.info).not.toHaveBeenCalled();
@@ -49,13 +49,13 @@ describe('runRegistrationWindowNoticesOnce', () => {
     expect(logger.error).toHaveBeenCalledWith('Registration window notice failed for event e1:', 'deadlock');
   });
 
-  it('reads an unexpected answer as nothing sent', async () => {
+  it('SCRUM177_AC1_reads_an_unexpected_answer_as_nothing_sent', async () => {
     const logger = fakeLogger();
     expect(await runRegistrationWindowNoticesOnce({ client: clientAnswering({ data: null, error: null }), logger })).toBe(0);
     expect(await runRegistrationWindowNoticesOnce({ client: clientAnswering({ data: { notified: 'x' }, error: null }), logger })).toBe(0);
   });
 
-  it('logs a database error and returns null, never throwing', async () => {
+  it('SCRUM177_AC1_logs_a_database_error_and_returns_null_never_throwing', async () => {
     const logger = fakeLogger();
     const client = clientAnswering({ data: null, error: { message: 'down' } });
 
@@ -63,7 +63,7 @@ describe('runRegistrationWindowNoticesOnce', () => {
     expect(logger.error).toHaveBeenCalledWith('Registration window notices failed:', 'down');
   });
 
-  it('logs a thrown error without a message as itself', async () => {
+  it('SCRUM177_AC1_logs_a_thrown_error_without_a_message_as_itself', async () => {
     const logger = fakeLogger();
     const client = { rpc: vi.fn().mockRejectedValue('boom') };
 
@@ -71,7 +71,7 @@ describe('runRegistrationWindowNoticesOnce', () => {
     expect(logger.error).toHaveBeenCalledWith('Registration window notices failed:', 'boom');
   });
 
-  it('defaults to the console logger', async () => {
+  it('SCRUM177_AC1_defaults_to_the_console_logger', async () => {
     const spy = vi.spyOn(console, 'info').mockImplementation(() => {});
     try {
       await runRegistrationWindowNoticesOnce({ client: clientAnswering(answer(1)) });
@@ -91,7 +91,7 @@ describe('startRegistrationWindowScheduler', () => {
     vi.useRealTimers();
   });
 
-  it('runs once a minute by default', () => {
+  it('SCRUM177_AC1_runs_once_a_minute_by_default', () => {
     expect(DEFAULT_INTERVAL_MS).toBe(60_000);
   });
 
@@ -110,7 +110,7 @@ describe('startRegistrationWindowScheduler', () => {
     expect(client.rpc).toHaveBeenCalledTimes(4);
   });
 
-  it('never runs two calls at once', async () => {
+  it('SCRUM177_AC1_never_runs_two_calls_at_once', async () => {
     let release;
     const client = {
       rpc: vi.fn().mockImplementationOnce(
@@ -144,7 +144,7 @@ describe('startRegistrationWindowScheduler', () => {
     stop();
   });
 
-  it('uses the defaults when given nothing, and never keeps Node alive', async () => {
+  it('SCRUM177_AC1_uses_the_defaults_when_given_nothing_and_never_keeps_node_alive', async () => {
     vi.useRealTimers();
     const client = { rpc: vi.fn().mockResolvedValue(answer(0)) };
     vi.doMock('../../src/config/supabaseClient.js', () => ({ supabase: client, default: client }));

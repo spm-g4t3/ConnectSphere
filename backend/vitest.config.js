@@ -94,6 +94,8 @@ export default defineConfig({
         // SCRUM-237: announces registration opening and closing; and which jobs start.
         'src/jobs/registrationWindowScheduler.js': FULL,
         'src/jobs/backgroundJobs.js': FULL,
+        // The timer the minute jobs share.
+        'src/jobs/repeatingJob.js': FULL,
         // SCRUM-284 (SCRUM-285): the queue route, validation and service are new and owned outright.
         'src/routes/equipmentQueue.js': FULL,
         'src/validation/equipmentQueueValidation.js': FULL,

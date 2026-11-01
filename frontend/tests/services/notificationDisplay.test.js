@@ -1200,7 +1200,7 @@ const FIXTURES = {
   // SCRUM-175 (042).
   event_confirmed: { audience: "organiser", eventName: "Tech Talk", reconfirmed: false, venues: [] },
   event_venue_changed: { audience: "attendee", eventName: "Tech Talk", previousVenueName: "Hall A", venueName: "Hall B" },
-  // SCRUM-177 (044).
+  // SCRUM-177 (051).
   registration_opened: { audience: "organiser", eventName: "Tech Talk", cause: "opening_time" },
   registration_closed: { audience: "organiser", eventName: "Tech Talk", cause: "closing_time" },
   registration_capacity_reached: { audience: "organiser", eventName: "Tech Talk", capacity: 2, registeredCount: 2 },

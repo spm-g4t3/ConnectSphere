@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { createSchemaDb, seedEvent } from './helpers/schemaDb.js';
 
-// Registration notices are sent once per occurrence (049): repeated and
+// Registration notices are sent once per occurrence (052): repeated and
 // retried runs, a stale writer, both paths for one transition, edited dates
 // and later windows, on an injected clock (test.now). Simultaneous workers on
 // separate connections are in registrationNoticeRaces.realdb.test.js.

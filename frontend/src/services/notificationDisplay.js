@@ -102,7 +102,7 @@
 //   registration_promoted (037, SCRUM-460): { eventRequestId, eventName,
 //     registrationId }
 //   registration_opened / registration_closed / registration_capacity_reached
-//     / registration_place_released (044, SCRUM-177): { audience,
+//     / registration_place_released (051, SCRUM-177): { audience,
 //     eventRequestId, eventName, occurrenceKey }, plus opensAt, closesAt and
 //     cause; closedAt and cause; capacity and registeredCount; and capacity,
 //     registeredCount and cause. audience is organiser, coordinator or (opened
@@ -128,7 +128,7 @@ const PREVIOUS_COORDINATOR = "the previous coordinator";
 // Week 7: a flagged booking tells its coordinator another plan is needed.
 const ALTERNATIVE_ARRANGEMENTS = " Alternative arrangements are required.";
 const VENUE_RETIRED = "The venue has been retired.";
-// registration_closed causes (044, 045); the same reasons registration_closed_reason gives.
+// registration_closed causes (051, 052); the same reasons registration_closed_reason gives.
 const REGISTRATION_CLOSED_CAUSES = Object.freeze({
   closing_time: "The closing time passed.",
   switched_off: "Registration was switched off.",

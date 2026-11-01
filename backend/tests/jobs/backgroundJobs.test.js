@@ -25,7 +25,7 @@ describe('startBackgroundJobs', () => {
     expect(starters.venueHoldExpiry).toHaveBeenCalledWith({});
   });
 
-  it('starts nothing under test', () => {
+  it('SCRUM177_AC1_starts_no_job_under_test', () => {
     const starters = fakeStarters();
 
     expect(startBackgroundJobs({ env: { NODE_ENV: 'test' }, starters })).toEqual([]);
@@ -36,7 +36,7 @@ describe('startBackgroundJobs', () => {
     ['REGISTRATION_WINDOW_JOB', 'registrationWindow'],
     ['WAITLIST_PROMOTION_JOB', 'waitlistPromotion'],
     ['VENUE_HOLD_EXPIRY_JOB', 'venueHoldExpiry'],
-  ])('%s=off turns off only %s', (variable, job) => {
+  ])('SCRUM177_AC1_%s_off_turns_off_only_%s', (variable, job) => {
     const starters = fakeStarters();
 
     const started = startBackgroundJobs({ env: { [variable]: 'off' }, starters });
@@ -46,7 +46,7 @@ describe('startBackgroundJobs', () => {
     expect(starters[job]).not.toHaveBeenCalled();
   });
 
-  it('passes a positive VENUE_HOLD_REMINDER_HOURS to the hold job and ignores anything else', () => {
+  it('SCRUM491_AC8_passes_only_a_positive_venue_hold_reminder_hours_to_the_hold_job', () => {
     const starters = fakeStarters();
     startBackgroundJobs({ env: { VENUE_HOLD_REMINDER_HOURS: '6' }, starters });
     startBackgroundJobs({ env: { VENUE_HOLD_REMINDER_HOURS: '-1' }, starters });
@@ -55,7 +55,7 @@ describe('startBackgroundJobs', () => {
     expect(starters.venueHoldExpiry.mock.calls).toEqual([[{ reminderLeadHours: 6 }], [{}], [{}]]);
   });
 
-  it('reads process.env and the real jobs by default, which start nothing under test', () => {
+  it('SCRUM177_AC1_reads_process_env_and_the_real_jobs_by_default_starting_none_under_test', () => {
     expect(startBackgroundJobs()).toEqual([]);
   });
 });

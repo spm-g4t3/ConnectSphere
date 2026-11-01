@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { createSchemaDb, seedEvent, rerunMigrationsFrom } from './helpers/schemaDb.js';
 import { withSafetyReviewTransitionGuardDisabled } from '../fixtures/safetyReviewTestHelpers.js';
+import { STATUS, ACTIVE_EVENT_STATUSES } from '../../src/domain/eventRequestStatus.js';
 
-// The transition rules (045): announce_registration_window and
+// The transition rules (052): announce_registration_window and
 // announce_registration_capacity, and the recipient resolution under them.
 // Times are relative to the real clock: a handler reads clock_timestamp().
 const ORGANISER = '11111111-1111-4111-8111-111111111111';
@@ -150,6 +151,16 @@ describe('announce_registration_window: closing', () => {
 
     await window_('settings_changed');
     expect((await notices('registration_closed'))[0].payload.cause).toBe('settings_changed');
+    expect(await recipients('registration_closed')).toEqual([['coordinator', COORDINATOR], ['waitlisted', B]]);
+  });
+
+  // Only a settings save moves the opening time; without one there is no true cause to give.
+  it('SCRUM177_AC1_an_opening_time_moved_later_without_a_settings_save_is_not_reported_as_one', async () => {
+    await setEvent({ registration_opens_at: ahead(1) });
+
+    expect(await window_()).toBe(0);
+    expect(await notices('registration_closed')).toEqual([]);
+    expect(await window_()).toBe(0);
   });
 
   it('SCRUM177_AC3_an_event_that_started_does_not_tell_its_queue_it_is_paused', async () => {
@@ -169,7 +180,7 @@ describe('announce_registration_window: closing', () => {
   });
 
   it('SCRUM177_AC1_leaving_confirmed_closes_with_event_not_confirmed', async () => {
-    // Since 048 the status change announces it itself, so the handler then finds it settled.
+    // Since 054 the status change announces it itself, so the handler then finds it settled.
     await withSafetyReviewTransitionGuardDisabled(db, () => setEvent({ status: 'approved' }));
 
     expect(await notices('registration_closed')).toHaveLength(3);
@@ -184,6 +195,43 @@ describe('announce_registration_window: closing', () => {
     expect(await window_()).toBe(0);
     expect(await notices('registration_closed')).toEqual([]);
   });
+
+  // An event announced open, now in the given status. Seeded rather than moved
+  // there, so no status trigger settles it first.
+  async function announcedOpenEventIn(status) {
+    event = await seedEvent(db, {
+      status, organiser_id: ORGANISER, reviewing_coordinator_id: COORDINATOR,
+      event_name: 'Moved event', proposed_start: ahead(10),
+      registration_enabled: true, registration_opens_at: ago(1), registration_waitlist_enabled: true,
+    });
+    await enrol(B, 'waitlisted');
+    await db.query('insert into registration_notice_state (event_request_id, open_announced) values ($1, true)', [event]);
+  }
+
+  // The repo's own split of live and finished events, so a status added later is a decision made there.
+  it.each(Object.values(STATUS).filter((status) => !ACTIVE_EVENT_STATUSES.includes(status)))(
+    'SCRUM177_AC1_a_%s_event_settles_its_window_without_a_notice',
+    async (status) => {
+      await announcedOpenEventIn(status);
+
+      expect(await window_()).toBe(0);
+      expect(await window_()).toBe(0);
+      expect(await notices('registration_closed')).toEqual([]);
+    },
+  );
+
+  it.each(ACTIVE_EVENT_STATUSES.filter((status) => status !== STATUS.CONFIRMED))(
+    'SCRUM177_AC1_an_event_back_in_%s_closes_with_event_not_confirmed',
+    async (status) => {
+      await announcedOpenEventIn(status);
+
+      expect(await window_()).toBeGreaterThan(0);
+      expect(await recipients('registration_closed')).toEqual(expect.arrayContaining([
+        ['organiser', ORGANISER], ['waitlisted', B],
+      ]));
+      expect((await notices('registration_closed'))[0].payload.cause).toBe('event_not_confirmed');
+    },
+  );
 
   it('SCRUM177_AC1_reopening_after_a_close_is_a_new_occurrence', async () => {
     await setEvent({ registration_enabled: false });
@@ -229,6 +277,7 @@ describe('announce_registration_capacity', () => {
 
   it('SCRUM177_AC4_a_withdrawal_that_frees_a_place_tells_staff_with_counts_only', async () => {
     await capacity('registration');
+    await enrol(B, 'withdrawn');
     await enrol(A, 'withdrawn');
 
     expect(await capacity('withdrawal')).toBe(2);
@@ -238,6 +287,15 @@ describe('announce_registration_capacity', () => {
       occurrenceKey: payload.occurrenceKey, cause: 'withdrawal', capacity: 1, registeredCount: 0,
     });
     expect(await capacity('withdrawal')).toBe(0);
+  });
+
+  // The place belongs to the queue even when it cannot be handed out yet.
+  it('SCRUM177_AC4_a_place_freed_while_someone_is_queued_is_not_reported_free', async () => {
+    await capacity('registration');
+    await enrol(A, 'withdrawn');
+
+    expect(await capacity('withdrawal')).toBe(0);
+    expect(await notices('registration_place_released')).toEqual([]);
   });
 
   it('SCRUM177_AC4_a_place_the_queue_took_straight_away_is_not_reported_free', async () => {
@@ -272,6 +330,7 @@ describe('announce_registration_capacity', () => {
 
   it('SCRUM177_AC2_filling_again_after_a_place_was_freed_is_a_new_occurrence', async () => {
     await capacity('registration');
+    await enrol(B, 'withdrawn');
     await enrol(A, 'withdrawn');
     await capacity('withdrawal');
     await enrol(A, 'registered');
@@ -320,10 +379,10 @@ describe('registration_notification_recipients (the SCRUM-238 interface)', () =>
   });
 });
 
-describe('migration 045', () => {
+describe('migrations 051-054', () => {
   it('SCRUM177_AC1_a_rerun_keeps_what_was_already_announced', async () => {
     await window_();
-    await rerunMigrationsFrom(db, '045_registration_notification_handlers.sql');
+    await rerunMigrationsFrom(db, '051_registration_notification_contract.sql');
 
     expect(await window_()).toBe(0);
   });

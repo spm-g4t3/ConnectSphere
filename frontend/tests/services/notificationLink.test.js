@@ -147,26 +147,45 @@ describe("SCRUM177 registration notifications", () => {
     "registration_capacity_reached",
     "registration_place_released",
   ];
+  const sentTo = (type, audience) => ({ ...note(type), payload: { audience } });
 
   it.each(STAFF_TYPES)("SCRUM177_AC5_%s_opens_the_organisers_registration_page", (type) => {
-    expect(notificationLink(note(type), "event_organiser")).toEqual({ to: `/events/${EVENT}/registration` });
+    expect(notificationLink(sentTo(type, "organiser"), "event_organiser")).toEqual({
+      to: `/events/${EVENT}/registration`,
+    });
   });
 
   it.each(STAFF_TYPES)("SCRUM177_AC5_%s_opens_the_coordinators_event_review_page", (type) => {
-    expect(notificationLink(note(type), "event_coordinator")).toEqual({ to: `/event-requests/${EVENT}` });
+    expect(notificationLink(sentTo(type, "coordinator"), "event_coordinator")).toEqual({
+      to: `/event-requests/${EVENT}`,
+    });
   });
 
   it.each(["registration_opened", "registration_closed"])(
     "SCRUM177_AC6_%s_opens_a_waiting_attendees_own_places_not_the_registered_only_event_page",
     (type) => {
-      expect(notificationLink(note(type), "attendee")).toEqual({ to: "/registered-events" });
+      expect(notificationLink(sentTo(type, "waitlisted"), "attendee")).toEqual({ to: "/registered-events" });
     },
   );
 
-  it.each(["registration_capacity_reached", "registration_place_released"])(
-    "SCRUM177_AC6_%s_gives_an_attendee_no_link",
-    (type) => {
-      expect(notificationLink(note(type), "attendee")).toBeNull();
-    },
-  );
+  // A user may hold several roles: the notice says who it was for, the role does not.
+  it.each([
+    ["event_organiser", "registration_opened"],
+    ["event_organiser", "registration_closed"],
+    ["event_coordinator", "registration_opened"],
+    ["event_coordinator_lead", "registration_closed"],
+  ])("SCRUM177_AC6_%s_on_another_events_waiting_list_opens_their_places_for_%s", (role, type) => {
+    expect(notificationLink(sentTo(type, "waitlisted"), role)).toEqual({ to: "/registered-events" });
+  });
+
+  it("SCRUM177_AC5_an_organiser_who_reads_as_a_coordinator_still_opens_their_registration_page", () => {
+    expect(notificationLink(sentTo("registration_capacity_reached", "organiser"), "event_coordinator")).toEqual({
+      to: `/events/${EVENT}/registration`,
+    });
+  });
+
+  it.each(STAFF_TYPES)("SCRUM177_AC5_%s_without_a_known_audience_gives_no_link", (type) => {
+    expect(notificationLink(note(type), "event_organiser")).toBeNull();
+    expect(notificationLink(sentTo(type, "attendee"), "attendee")).toBeNull();
+  });
 });

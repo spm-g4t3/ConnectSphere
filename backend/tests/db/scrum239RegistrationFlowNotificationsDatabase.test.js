@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from
 import { createSchemaDb, seedEvent, functionSources } from './helpers/schemaDb.js';
 import { withSafetyReviewTransitionGuardDisabled } from '../fixtures/safetyReviewTestHelpers.js';
 
-// The registration flows sending their notices (048), driven through the real
+// The registration flows sending their notices (054), driven through the real
 // functions the API calls, on an injected clock (test.now). PGlite has one
 // connection, so concurrent releases are run back to back here and the lock
 // order that makes them safe is checked from the sources; the two-session
@@ -156,14 +156,15 @@ describe('withdrawal', () => {
     expect(await sentExcept('registration_capacity_reached')).toEqual([['registration_promoted', null, B]]);
   });
 
-  it('SCRUM177_AC4_while_registration_is_closed_the_queue_waits_and_the_managers_are_told', async () => {
+  // The place is the queue's once registration reopens, so it is not free.
+  it('SCRUM177_AC4_while_registration_is_closed_the_queue_waits_and_the_managers_are_not_told_a_place_is_free', async () => {
     await register(A);
     await join(B);
     await at('2026-11-12T10:00:00Z');
 
     await withdraw(A);
     expect(await statuses()).toMatchObject({ [B]: 'waitlisted' });
-    expect(await sentExcept('registration_capacity_reached')).toEqual(STAFF('registration_place_released'));
+    expect(await sentExcept('registration_capacity_reached')).toEqual([]);
   });
 
   it('SCRUM177_AC4_withdrawing_from_an_event_that_was_not_full_sends_nothing', async () => {
@@ -263,20 +264,30 @@ describe('event status', () => {
   it('SCRUM177_AC2_the_promotion_job_announces_a_capacity_its_promotion_filled', async () => {
     await register(A);
     await join(B);
-    // Freed while closed: nobody is promoted, so the managers hear a place is free.
+    // A place added while closed: nobody is promoted, and the event is no longer full.
     await at('2026-11-12T10:00:00Z');
-    await withdraw(A);
+    await setup({ capacity: 2 });
     // Reopened with no registration write: only the job hands the place out.
     await setEvent({ registration_closes_at: '2026-11-14T10:00:00Z' });
 
     expect((await db.query('select process_waitlist_promotions() as n')).rows[0].n).toBe(1);
     expect((await db.query(
-      "select count(*)::int as n from notifications where type = 'registration_capacity_reached'",
-    )).rows[0].n).toBe(4);
-    expect(await sentExcept('registration_capacity_reached')).toEqual([
-      ...STAFF('registration_place_released'),
+      "select count(distinct payload->>'occurrenceKey')::int as n from notifications where type = 'registration_capacity_reached'",
+    )).rows[0].n).toBe(2);
+    expect((await sent()).filter(([type]) => type === 'registration_promoted')).toEqual([
       ['registration_promoted', null, B],
     ]);
+  });
+
+  it('SCRUM177_AC2_a_place_the_queue_held_while_closed_is_not_announced_full_again', async () => {
+    await register(A);
+    await join(B);
+    await at('2026-11-12T10:00:00Z');
+    await withdraw(A);
+    await setEvent({ registration_closes_at: '2026-11-14T10:00:00Z' });
+
+    expect((await db.query('select process_waitlist_promotions() as n')).rows[0].n).toBe(1);
+    expect(await sentExcept('registration_promoted')).toEqual(STAFF('registration_capacity_reached'));
   });
 });
 

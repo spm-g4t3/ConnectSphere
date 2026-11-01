@@ -1,5 +1,5 @@
--- Migration 048: the registration flows send their notices (SCRUM-177, SCRUM-239).
--- The 037 flows, restated with calls to the shared handlers (045-047) after
+-- Migration 054: the registration flows send their notices (SCRUM-177, SCRUM-239).
+-- The 037 flows, restated with calls to the shared handlers (052) after
 -- their own writes. Nothing else in them changes: the same eligibility, the
 -- same event lock taken first, the same single promotion operation. Each
 -- handler runs in the flow's transaction under the lock it already holds, so
@@ -179,7 +179,7 @@ $$;
 revoke execute on function join_event_waitlist(uuid, uuid) from public, anon, authenticated;
 
 -- Withdrawing releases a place: promoted, it reaches the next in the queue
--- (who is told); otherwise the managers are told a place is free.
+-- (who is told); with nobody queued the managers are told a place is free.
 
 create or replace function withdraw_registration(
   p_registration_id uuid,
