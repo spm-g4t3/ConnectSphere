@@ -144,11 +144,18 @@ export async function getCoordinatorChangeRequests(eventRequestId) {
   );
 }
 
+// SCRUM-402: the whole group is decided. `decision` is { decision,
+// decisionNotes, expectedImpact? }, the impact the preview returned.
 export async function processCoordinatorChangeRequest(changeRequestId, decision) {
   return postData(
     `/event-requests/change-requests/${changeRequestId}/decision`,
     decision,
   );
+}
+
+// SCRUM-402 AC4: what accepting the group would do; changes nothing.
+export async function previewCoordinatorChangeRequest(changeRequestId) {
+  return getData(`/event-requests/change-requests/${changeRequestId}/preview`);
 }
 
 /**

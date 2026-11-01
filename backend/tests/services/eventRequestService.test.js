@@ -2694,7 +2694,10 @@ describe('SCRUM-327 AC11: a coordinator lists the events assigned to them', () =
     ]);
   });
 
-  it('SCRUM333_AC11_selects_the_same_columns_as_every_other_read', async () => {
+  it('SCRUM402_AC1_selects_every_other_reads_columns_plus_the_change_request_count', async () => {
+    // Was SCRUM333_AC11_selects_the_same_columns_as_every_other_read. SCRUM-404
+    // adds each event's open change requests to /mine, in the same query, for
+    // My events' count; the columns every other read selects are still all here.
     const client = createQueueFakeClient([
       ok([myEventRow()]),
       ok([profileRow(ORGANISER_ID, 'Aisha Rahman')]),
@@ -2709,7 +2712,7 @@ describe('SCRUM-327 AC11: a coordinator lists the events assigned to them', () =
     // frontend can open a detail panel from a row it already holds. SCRUM-384:
     // plus the closing notes, which only the coordinator's reads select.
     const [mine, , organisers] = client.calls;
-    expect(mine.select).toBe(`${organisers.select}, closing_notes`);
+    expect(mine.select).toBe(`${organisers.select}, closing_notes, event_change_requests(request_group_id, status)`);
   });
 
   it('SCRUM333_AC11_returns_events_from_more_than_one_organiser', async () => {

@@ -45,7 +45,7 @@
 // Confirmed event that has ended (EventCompletionPanel), and "Closing notes" on a completed
 // event, shown to coordinators only.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { normaliseRole } from "../auth/normaliseRole";
@@ -63,6 +63,7 @@ import ReassignEventPanel from "./ReassignEventPanel";
 import ClarificationHistoryDialog from "./ClarificationHistoryDialog";
 import EventEquipmentSection from "./EventEquipmentSection";
 import EventCancellationPanel from "./EventCancellationPanel";
+import ChangeRequestReviewPanel from "./ChangeRequestReviewPanel";
 import EventRejectionPanel from "./EventRejectionPanel";
 import SignificantEventChangePanel from "./SignificantEventChangePanel";
 import EventDetailsEditPanel from "./EventDetailsEditPanel";
@@ -75,8 +76,6 @@ import RegistrationCounts from "./RegistrationCounts";
 import { isRegistrationConfigurable } from "../services/registrationStatuses";
 import {
   decideEventRequest,
-  getCoordinatorChangeRequests,
-  processCoordinatorChangeRequest,
   requestEventClarification,
   startEventReview,
   closeEventClarification,
@@ -90,7 +89,6 @@ import { formatTimestamp, orNotSpecified } from "../services/displayFormat";
 import { STATUSES_ALLOWING_ORDINARY_EDITS, detailFieldList } from "../services/eventDetailFields";
 import { formatVenueTimestamp, isReplyOverdue, venueTomorrow } from "../services/datetimeFormat";
 import { canMarkCompleted, closingNotesOf, eventHasEnded } from "../services/eventCompletion";
-import { changeRequestOutcomeLabel } from "../services/changeRequestOutcome";
 
 const CLARIFICATION_FIELDS = [
   ["eventName", "Event name"],
@@ -215,13 +213,10 @@ export default function CoordinatorRequestDetail({
   const [closureNote, setClosureNote] = useState("");
   const [closingClarification, setClosingClarification] = useState(false);
   const [closureError, setClosureError] = useState(null);
-  const [changeRequests, setChangeRequests] = useState([]);
-  const [changeRequestsLoading, setChangeRequestsLoading] = useState(true);
-  const [changeRequestsError, setChangeRequestsError] = useState(null);
-  const [processingChangeRequestId, setProcessingChangeRequestId] = useState(null);
-  const [rejectingChangeRequestId, setRejectingChangeRequestId] = useState(null);
-  const [rejectionNote, setRejectionNote] = useState("");
-  const [changeRequestActionError, setChangeRequestActionError] = useState(null);
+  // SCRUM-402 AC8: the Organiser's text for an accepted equipment change, shown
+  // above the equipment section the screen then moves to.
+  const [equipmentHandOff, setEquipmentHandOff] = useState(null);
+  const equipmentSectionRef = useRef(null);
 
   // SCRUM-334. reassigning swaps this panel for ReassignEventPanel.
   // handedOverTo is who the event went to, if this coordinator handed it over
@@ -311,22 +306,10 @@ export default function CoordinatorRequestDetail({
   const [decisionError, setDecisionError] = useState(null);
 
   useEffect(() => {
-    let cancelled = false;
-    getCoordinatorChangeRequests(request.id)
-      .then((items) => {
-        if (!cancelled) setChangeRequests(items);
-      })
-      .catch(() => {
-        if (!cancelled) setChangeRequestsError("Could not load organiser change requests.");
-      })
-      .finally(() => {
-        if (!cancelled) setChangeRequestsLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [request.id]);
+    if (!equipmentHandOff) return;
+    equipmentSectionRef.current?.scrollIntoView?.({ block: "start" });
+    equipmentSectionRef.current?.focus();
+  }, [equipmentHandOff]);
 
   async function handleReturnForAmendment() {
     const note = reviewNote.trim();
@@ -455,29 +438,6 @@ export default function CoordinatorRequestDetail({
       );
     } finally {
       setClosingClarification(false);
-    }
-  }
-
-  async function handleChangeRequestDecision(changeRequest, decision, decisionNotes) {
-    setProcessingChangeRequestId(changeRequest.id);
-    setChangeRequestActionError(null);
-    try {
-      const processed = await processCoordinatorChangeRequest(changeRequest.id, {
-        decision,
-        decisionNotes,
-      });
-      setChangeRequests((current) =>
-        current.map((item) => item.id === processed.id ? { ...item, ...processed } : item),
-      );
-      setRejectingChangeRequestId(null);
-      setRejectionNote("");
-      onChangeRequestProcessed?.();
-    } catch (error) {
-      setChangeRequestActionError(
-        error.response?.data?.error || "Could not process this change request.",
-      );
-    } finally {
-      setProcessingChangeRequestId(null);
     }
   }
 
@@ -769,116 +729,28 @@ export default function CoordinatorRequestDetail({
         </ul>
       </section>
 
-      <EventEquipmentSection
-        requestId={request.id}
-        status={current.status}
-        canEdit={isAssignedCoordinator && current.status !== "cancelled"}
+      {/* SCRUM-402 AC8: an accepted equipment change moves the screen here, with
+          what the Organiser asked for above the lines it is to be made on. */}
+      <div className="change-request-review__equipment" ref={equipmentSectionRef} tabIndex={-1} aria-label="Equipment">
+        {equipmentHandOff && (
+          <p className="change-request-review__notice" role="status">
+            The organiser asked for this equipment change: {equipmentHandOff}
+          </p>
+        )}
+        <EventEquipmentSection
+          requestId={request.id}
+          status={current.status}
+          canEdit={isAssignedCoordinator && current.status !== "cancelled"}
+        />
+      </div>
+
+      {/* SCRUM-402: the Organiser's change requests, a submission at a time. */}
+      <ChangeRequestReviewPanel
+        eventRequest={current}
+        canProcess={isAssignedCoordinator}
+        onProcessed={() => onChangeRequestProcessed?.()}
+        onEquipmentAccepted={setEquipmentHandOff}
       />
-
-      <section>
-        <h3>Organiser change requests</h3>
-        {changeRequestsLoading && <p>Loading change requests...</p>}
-        {changeRequestsError && (
-          <p className="coordinator-clarification__error" role="alert">
-            {changeRequestsError}
-          </p>
-        )}
-        {!changeRequestsLoading && !changeRequestsError && changeRequests.length === 0 && (
-          <p>No change requests have been submitted for this event.</p>
-        )}
-        {!changeRequestsLoading && !changeRequestsError && changeRequests.length > 0 && (
-          <ul className="coordinator-change-requests">
-            {changeRequests.map((changeRequest) => {
-              const isOpen = !changeRequest.decision;
-              const isRejecting = rejectingChangeRequestId === changeRequest.id;
-
-              return (
-                <li key={changeRequest.id}>
-                  <strong>{changeRequest.fieldLabel}</strong>
-                  <p>{changeRequest.details}</p>
-                  <small>
-                    {changeRequest.status.replaceAll("_", " ")} | Requested{" "}
-                    {formatTimestamp(changeRequest.createdAt, "Not recorded")}
-                  </small>
-                  {changeRequest.decision && (
-                    <p className="coordinator-change-requests__outcome">
-                      Outcome: {changeRequestOutcomeLabel(changeRequest.decision)}
-                      {changeRequest.decisionNotes && (
-                        <span> | Reason: {changeRequest.decisionNotes}</span>
-                      )}
-                    </p>
-                  )}
-                  {isOpen && current.status !== "cancelled" && isAssignedCoordinator && (
-                    <div className="coordinator-change-requests__actions">
-                      <button
-                        type="button"
-                        disabled={processingChangeRequestId === changeRequest.id}
-                        onClick={() => handleChangeRequestDecision(changeRequest, "approved")}
-                      >
-                        {processingChangeRequestId === changeRequest.id ? "Processing..." : "Approve"}
-                      </button>
-                      {!isRejecting && (
-                        <button
-                          type="button"
-                          disabled={processingChangeRequestId === changeRequest.id}
-                          onClick={() => {
-                            setRejectingChangeRequestId(changeRequest.id);
-                            setRejectionNote("");
-                            setChangeRequestActionError(null);
-                          }}
-                        >
-                          Reject
-                        </button>
-                      )}
-                      {isRejecting && (
-                        <form
-                          className="coordinator-change-requests__reject-form"
-                          onSubmit={(event) => {
-                            event.preventDefault();
-                            handleChangeRequestDecision(
-                              changeRequest,
-                              "rejected",
-                              rejectionNote.trim(),
-                            );
-                          }}
-                        >
-                          <label>
-                            Reason for rejection
-                            <textarea
-                              value={rejectionNote}
-                              onChange={(event) => setRejectionNote(event.target.value)}
-                              rows={3}
-                              maxLength={2000}
-                              required
-                            />
-                          </label>
-                          <button
-                            type="submit"
-                            disabled={processingChangeRequestId === changeRequest.id || !rejectionNote.trim()}
-                          >
-                            {processingChangeRequestId === changeRequest.id ? "Processing..." : "Confirm rejection"}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setRejectingChangeRequestId(null)}
-                          >
-                            Cancel
-                          </button>
-                        </form>
-                      )}
-                    </div>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        )}
-        {changeRequestActionError && (
-          <p className="coordinator-clarification__error" role="alert">
-            {changeRequestActionError}
-          </p>
-        )}
-      </section>
 
       <section>
         <h3>Provenance</h3>
