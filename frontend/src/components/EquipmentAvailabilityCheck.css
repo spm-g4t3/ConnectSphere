@@ -44,3 +44,6 @@
 .availability-check .availability-breakdown tr:last-child th, .availability-check .availability-breakdown tr:last-child td { color: var(--color-accent-dark); font-weight: 800; }
 .availability-check .availability-reservations thead th { border-bottom: 2px solid var(--color-line); color: var(--color-muted); font-size: var(--font-size-xs); letter-spacing: 0.05em; text-transform: uppercase; }
 .availability-check .availability-reservations td.availability-reservations__number { font-variant-numeric: tabular-nums; text-align: right; }
+
+/* The empty state's catalogue link is drawn as a primary button. */
+.availability-check a.ui-button { display: inline-block; text-decoration: none; }

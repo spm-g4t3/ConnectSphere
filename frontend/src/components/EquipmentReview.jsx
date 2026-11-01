@@ -42,12 +42,18 @@ import {
 } from "../services/equipmentReviewService";
 import { isStaleRefusal, reviewErrorMessage } from "../services/equipmentReviewErrors";
 import { equipmentStatusTone } from "../services/equipmentRequestStatus";
-import { formatTimestamp } from "../services/displayFormat";
+import { formatDateTime } from "../services/displayFormat";
 import { SERVER_TEXT_MAX_LENGTH } from "../services/textLimits";
-import { formatEventPeriod } from "../services/eventPeriodFormat";
+import { formatEventDateTimeRange } from "../services/eventPeriodFormat";
 import Button from "./ui/Button";
+import ConfirmDialog from "./ui/ConfirmDialog";
+import ErrorNotice from "./ui/ErrorNotice";
+import LoadingText from "./ui/LoadingText";
 import StatusBadge from "./ui/StatusBadge";
 import "./EquipmentReview.css";
+
+// The one load failure worth retrying; a missing event stays missing.
+const LOAD_FAILED = "Could not load this equipment request.";
 
 const RESULT_CLASS = {
   "Fully available": "fully",
@@ -143,7 +149,7 @@ function Availability({ availability }) {
                   <li key={reservation.id}>
                     {`${reservation.eventName ?? "Another event"}: ${reservation.quantity} ${
                       reservation.quantity === 1 ? "unit" : "units"
-                    }, ${formatEventPeriod(reservation.startAt, reservation.endAt)}`}
+                    }, ${formatEventDateTimeRange(reservation.startAt, reservation.endAt)}`}
                     {reservation.flagged ? " (flagged for review)" : ""}
                   </li>
                 ))}
@@ -291,7 +297,7 @@ export default function EquipmentReview() {
       setLoadError(
         err?.response?.status === 404 || err?.response?.status === 400
           ? "That event could not be found."
-          : "Could not load this equipment request.",
+          : LOAD_FAILED,
       );
     } finally {
       setLoading(false);
@@ -473,13 +479,15 @@ export default function EquipmentReview() {
   async function handleComplete() {
     const ok = await run(() => completeEquipmentReview(eventId), { success: "Review completed." });
     if (ok) resetEditors();
+    // A refusal shows on the page, where Complete review is the retry.
+    else setConfirmingComplete(false);
   }
 
   if (loading) {
     return (
       <div className="dashboard dashboard--tech-support equipment-review">
         <h1>Equipment request review</h1>
-        <p>Loading equipment request...</p>
+        <LoadingText />
       </div>
     );
   }
@@ -488,12 +496,11 @@ export default function EquipmentReview() {
     return (
       <div className="dashboard dashboard--tech-support equipment-review">
         <h1>Equipment request review</h1>
-        <p role="alert">{loadError ?? "This event has no equipment request to review."}</p>
-        {loadError && (
-          <Button variant="secondary" onClick={load}>
-            Try again
-          </Button>
-        )}
+        {/* Nothing to retry when the event is not found or has no equipment request. */}
+        <ErrorNotice
+          message={loadError ?? "This event has no equipment request to review."}
+          onRetry={loadError === LOAD_FAILED ? load : undefined}
+        />
       </div>
     );
   }
@@ -511,7 +518,7 @@ export default function EquipmentReview() {
     resetEditors();
     setOpenLineId(openId === id ? null : id);
   }
-  const eventPeriod = formatEventPeriod(event?.proposedStart, event?.proposedEnd);
+  const eventPeriod = formatEventDateTimeRange(event?.proposedStart, event?.proposedEnd);
   const next = nextStep({
     status,
     isReviewer,
@@ -562,8 +569,8 @@ export default function EquipmentReview() {
         {status === "under_review" && (
           <p className="er-next__who">
             {isReviewer
-              ? `You are reviewing this request (since ${formatTimestamp(request.reviewStartedAt)}).`
-              : `Being reviewed by ${request.reviewerName ?? "another staff member"} since ${formatTimestamp(
+              ? `You are reviewing this request (since ${formatDateTime(request.reviewStartedAt)}).`
+              : `Being reviewed by ${request.reviewerName ?? "another staff member"} since ${formatDateTime(
                   request.reviewStartedAt,
                 )}.`}
           </p>
@@ -584,11 +591,8 @@ export default function EquipmentReview() {
         )}
       </section>
 
-      {error && (
-        <p className="equipment-review__error" role="alert">
-          {error}
-        </p>
-      )}
+      {/* The action's own button is the retry. */}
+      {error && <ErrorNotice message={error} />}
       {notice && (
         <p className="equipment-review__notice" role="status">
           {notice}
@@ -690,7 +694,7 @@ export default function EquipmentReview() {
                     <ul>
                       {reservations.map((reservation) => {
                         const editingThis = editor?.reservationId === reservation.id;
-                        const period = formatEventPeriod(reservation.startAt, reservation.endAt);
+                        const period = formatEventDateTimeRange(reservation.startAt, reservation.endAt);
                         return (
                           <li
                             key={reservation.id}
@@ -1023,32 +1027,31 @@ export default function EquipmentReview() {
               Every line is fully reserved, so there is nothing to complete. The request is marked Arranged as soon
               as no reservation is flagged.
             </p>
-          ) : !confirmingComplete ? (
-            <Button
-              disabled={busy || flaggedTotal > 0}
-              onClick={() => {
-                setNotice(null);
-                setError(null);
-                setMarkingId(null);
-                setConfirmingComplete(true);
-              }}
-            >
-              Complete review
-            </Button>
           ) : (
-            <div className="equipment-review__confirm">
-              <p>
+            <>
+              <Button
+                disabled={busy || flaggedTotal > 0}
+                onClick={() => {
+                  setNotice(null);
+                  setError(null);
+                  setMarkingId(null);
+                  setConfirmingComplete(true);
+                }}
+              >
+                Complete review
+              </Button>
+              <ConfirmDialog
+                open={confirmingComplete}
+                title="Complete this review?"
+                confirmLabel={busy ? "Completing..." : "Yes, complete review"}
+                cancelLabel="Not yet"
+                busy={busy}
+                onConfirm={handleComplete}
+                onCancel={() => setConfirmingComplete(false)}
+              >
                 {`${shortLines.length} item${shortLines.length === 1 ? " is" : "s are"} not fully reserved. Each needs a "Cannot be provided" note, and the request will be marked Cannot be fully arranged. Reservations already made are kept.`}
-              </p>
-              <div className="equipment-review__actions">
-                <Button disabled={busy} onClick={handleComplete}>
-                  {busy ? "Completing..." : "Yes, complete review"}
-                </Button>
-                <Button variant="secondary" disabled={busy} onClick={() => setConfirmingComplete(false)}>
-                  Not yet
-                </Button>
-              </div>
-            </div>
+              </ConfirmDialog>
+            </>
           )}
         </section>
       )}

@@ -22,6 +22,7 @@ import {
   takeOverEquipmentReview,
 } from "../../src/services/equipmentReviewService";
 import { useAuth } from "../../src/auth/AuthContext";
+import { stubDialogElement } from "../helpers/dialog.js";
 
 vi.mock("../../src/services/equipmentReviewService", () => ({
   clearEquipmentLineOutcome: vi.fn(),
@@ -119,6 +120,9 @@ beforeEach(() => {
   vi.resetAllMocks();
   useAuth.mockReturnValue({ user: { id: ME, role: "technical_support_staff" } });
 });
+
+// ConfirmDialog calls showModal and close, which jsdom lacks.
+stubDialogElement();
 
 describe("EquipmentReview: what is shown", () => {
   it("SCRUM290_AC4_shows_event_venue_coordinator_and_status", async () => {
@@ -344,7 +348,9 @@ describe("EquipmentReview: completing", () => {
     await userEvent.click(screen.getByRole("button", { name: "Complete review" }));
     await userEvent.click(screen.getByRole("button", { name: "Yes, complete review" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Projector needs a note");
-    expect(screen.getByRole("button", { name: "Yes, complete review" })).toBeInTheDocument();
+    // The dialog closes so the refusal is not hidden behind it; Complete review is the retry.
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Complete review" })).toBeEnabled();
   });
 
   it("SCRUM290_AC7_a_stale_completion_is_explained_and_the_state_read_again", async () => {

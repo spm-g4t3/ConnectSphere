@@ -11,7 +11,7 @@
 // (AC8).
 //
 // Follows VenueCatalogue: one panel at a time with a Back button rather than a
-// modal, a two-step confirm for retiring, and a refetch after every change
+// modal, a ConfirmDialog before retiring, and a refetch after every change
 // rather than splicing a response into the list.
 //
 // SCRUM-314: retiring a type that has reservations shows them under its row and
@@ -26,16 +26,22 @@ import {
   reinstateEquipment,
   previewEquipmentChange,
 } from "../services/equipmentService";
-import { equipmentErrorMessages, isStaleEquipmentError } from "../services/equipmentErrors";
+import { canRetryEquipmentRead, equipmentErrorMessages, isStaleEquipmentError } from "../services/equipmentErrors";
 import EquipmentImpactConfirmation from "./EquipmentImpactConfirmation";
 import useConfirmedChange from "./useConfirmedChange";
 import EquipmentForm from "./EquipmentForm";
 import EquipmentConditionForm from "./EquipmentConditionForm";
 import EquipmentHistory from "./EquipmentHistory";
 import Button from "./ui/Button";
+import ConfirmDialog from "./ui/ConfirmDialog";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import LoadingText from "./ui/LoadingText";
 import "./EquipmentCatalogue.css";
 
 const COLUMNS = 8;
+
+const loadFailure = (err) => ({ message: equipmentErrorMessages(err, "load")[0], retryable: canRetryEquipmentRead(err) });
 
 // A panel replaces the list, so its title is the page's h1. It sits here, not in
 // the form, so it stays while the form gives way to the confirmation step.
@@ -66,9 +72,7 @@ function EquipmentTable({
       <tbody>
         {types.map((type) => {
           const reinstating = busyId === type.id;
-          const confirming = confirmingId === type.id;
-          const retiring = confirming && flow.busy;
-          const reviewing = confirming && flow.reviewing;
+          const reviewing = confirmingId === type.id && flow.reviewing;
           const anyBusy = Boolean(busyId) || flow.busy || flow.reviewing;
           return (
             <Fragment key={type.id}>
@@ -106,25 +110,6 @@ function EquipmentTable({
                     >
                       {reinstating ? "Reinstating..." : "Reinstate"}
                     </Button>
-                  ) : confirming ? (
-                    <>
-                      <Button
-                        variant="danger"
-                        aria-label={`Confirm retire ${type.name}`}
-                        disabled={anyBusy}
-                        onClick={() => onChangeRetirement(type, "retire")}
-                      >
-                        {retiring ? "Checking..." : "Confirm retire"}
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        aria-label={`Cancel retire ${type.name}`}
-                        disabled={flow.busy}
-                        onClick={onCancelRetire}
-                      >
-                        Cancel
-                      </Button>
-                    </>
                   ) : (
                     <Button variant="danger" aria-label={`Retire ${type.name}`} disabled={anyBusy} onClick={() => onConfirm(type.id)}>
                       Retire
@@ -174,7 +159,7 @@ function EquipmentTable({
 export default function EquipmentCatalogue() {
   const [types, setTypes] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(null);
+  const [loadError, setLoadError] = useState(null); // { message, retryable }
 
   // { mode: "create" } | { mode: "edit" | "condition" | "history", type } | null
   const [activePanel, setActivePanel] = useState(null);
@@ -198,7 +183,7 @@ export default function EquipmentCatalogue() {
       setTypes(await listEquipment());
       setLoadError(null);
     } catch (err) {
-      setLoadError(equipmentErrorMessages(err, "load")[0]);
+      setLoadError(loadFailure(err));
     }
   }, []);
 
@@ -214,7 +199,7 @@ export default function EquipmentCatalogue() {
           setLoadError(null);
         }
       } catch (err) {
-        if (!cancelled) setLoadError(equipmentErrorMessages(err, "load")[0]);
+        if (!cancelled) setLoadError(loadFailure(err));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -299,6 +284,7 @@ export default function EquipmentCatalogue() {
 
   const active = types.filter((type) => !type.retiredAt);
   const retired = types.filter((type) => type.retiredAt);
+  const confirmingType = active.find((type) => type.id === confirmingId);
   const tableProps = {
     confirmingId,
     busyId,
@@ -319,9 +305,11 @@ export default function EquipmentCatalogue() {
           <h2>Active equipment</h2>
           <Button onClick={() => setActivePanel({ mode: "create" })}>Add equipment type</Button>
         </div>
-        {loading && <p>Loading equipment...</p>}
-        {loadError && <p role="alert">{loadError}</p>}
-        {!loading && !loadError && active.length === 0 && <p>No active equipment types yet.</p>}
+        {loading && <LoadingText />}
+        {loadError && <ErrorNotice message={loadError.message} onRetry={loadError.retryable ? refreshTypes : undefined} />}
+        {!loading && !loadError && active.length === 0 && (
+          <EmptyState message="No active equipment types yet." nextStep="Add an equipment type to start." />
+        )}
         {active.length > 0 && <EquipmentTable types={active} retired={false} {...tableProps} />}
       </section>
 
@@ -331,6 +319,21 @@ export default function EquipmentCatalogue() {
           <EquipmentTable types={retired} retired {...tableProps} />
         </section>
       )}
+
+      {/* Confirming runs the reservations check; if any are affected, the dialog
+          gives way to the list under the row (flow.reviewing). */}
+      <ConfirmDialog
+        open={Boolean(confirmingType) && !retireFlow.reviewing}
+        title={`Retire ${confirmingType?.name}?`}
+        confirmLabel={retireFlow.busy ? "Checking..." : "Confirm retire"}
+        danger
+        busy={retireFlow.busy}
+        onConfirm={() => changeRetirement(confirmingType, "retire")}
+        onCancel={cancelRetire}
+      >
+        It can no longer be reserved, and you can reinstate it later. If events have it reserved, you will see them
+        before anything is saved.
+      </ConfirmDialog>
     </div>
   );
 }

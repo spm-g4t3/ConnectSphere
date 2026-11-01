@@ -12,8 +12,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { getEquipmentQueue } from "../services/equipmentQueueService";
 import { equipmentStatusTone } from "../services/equipmentRequestStatus";
-import { formatEventPeriod } from "../services/eventPeriodFormat";
-import Button from "./ui/Button";
+import { formatEventDateTimeRange } from "../services/eventPeriodFormat";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import LoadingText from "./ui/LoadingText";
 import StatusBadge from "./ui/StatusBadge";
 import "./EquipmentRequestQueue.css";
 
@@ -21,7 +23,7 @@ const LOAD_ERRORS = {
   400: "That filter was not accepted. Choose another status and try again.",
   403: "Only technical support staff can see equipment requests.",
 };
-const GENERIC_LOAD_ERROR = "The equipment requests could not be loaded. Try again.";
+const GENERIC_LOAD_ERROR = "The equipment requests could not be loaded.";
 
 const itemsLabel = (count) => `${count} ${count === 1 ? "item" : "items"}`;
 
@@ -34,6 +36,9 @@ function venuesLabel(venues) {
 function loadErrorMessage(err) {
   return LOAD_ERRORS[err?.response?.status] ?? GENERIC_LOAD_ERROR;
 }
+
+// A refused filter or role gives the same answer again; only the generic failure is worth retrying.
+const isRetryable = (message) => message === GENERIC_LOAD_ERROR;
 
 // How the person can shorten a list, from the filters that actually apply to it.
 function narrowing({ status, includePast }) {
@@ -55,7 +60,7 @@ function RequestRow({ row, showFlagReasons }) {
           <strong>{row.eventName}</strong>
           <StatusBadge tone={equipmentStatusTone(row.status)}>{row.statusLabel}</StatusBadge>
         </div>
-        <p className="equipment-queue__detail">{formatEventPeriod(row.proposedStart, row.proposedEnd)}</p>
+        <p className="equipment-queue__detail">{formatEventDateTimeRange(row.proposedStart, row.proposedEnd)}</p>
         <p className="equipment-queue__detail">
           {venuesLabel(row.venues)}
           {" · "}
@@ -135,18 +140,13 @@ export default function EquipmentRequestQueue() {
     <>
       {error && (
         <section className="equipment-queue">
-          <p role="alert" className="equipment-queue__error">
-            {error}
-          </p>
-          <Button variant="secondary" onClick={load}>
-            Try again
-          </Button>
+          <ErrorNotice message={error} onRetry={isRetryable(error) ? load : undefined} />
         </section>
       )}
 
       {firstLoad && !error && (
         <section className="equipment-queue">
-          <p role="status">Loading equipment requests...</p>
+          <LoadingText />
         </section>
       )}
 
@@ -154,7 +154,10 @@ export default function EquipmentRequestQueue() {
         <section className="equipment-queue" aria-labelledby="equipment-queue-needs-action" aria-busy={loading}>
           <h2 id="equipment-queue-needs-action">{`Needs action (${needsList.total})`}</h2>
           {needsAction.length === 0 ? (
-            <p>Nothing needs your action.</p>
+            <EmptyState
+              message="Nothing needs your action."
+              nextStep="Requests waiting for review, or with a flagged reservation, appear here."
+            />
           ) : (
             <ul>
               {needsAction.map((row) => (
@@ -196,13 +199,16 @@ export default function EquipmentRequestQueue() {
               Include past events
             </label>
           </div>
-          {loading && !requestList && <p role="status">Loading equipment requests...</p>}
+          {loading && !requestList && <LoadingText />}
           {requestList && requests.length === 0 && (
-            <p>
-              {status || includePast
-                ? "No equipment requests match these filters."
-                : "No equipment requests for upcoming events."}
-            </p>
+            status || includePast ? (
+              <EmptyState message="No equipment requests match these filters." nextStep="Change or clear the filters." />
+            ) : (
+              <EmptyState
+                message="No equipment requests for upcoming events."
+                nextStep="New requests appear here when coordinators request equipment for an event."
+              />
+            )
           )}
           {requests.length > 0 && (
             <ul>

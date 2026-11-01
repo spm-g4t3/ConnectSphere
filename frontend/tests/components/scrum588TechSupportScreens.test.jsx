@@ -23,6 +23,7 @@ import * as equipment from "../../src/services/equipmentService";
 import * as availability from "../../src/services/equipmentAvailabilityService";
 import { renderAppAt } from "../helpers/renderApp.js";
 import { httpError } from "../helpers/async.js";
+import { stubDialogElement } from "../helpers/dialog.js";
 
 vi.mock("../../src/auth/AuthContext", async () => (await import("../helpers/authMock.js")).authContextMock());
 vi.mock("../../src/services/equipmentQueueService", () => ({ getEquipmentQueue: vi.fn(), getReviewedByMe: vi.fn() }));
@@ -256,6 +257,9 @@ beforeEach(() => {
   vi.mocked(availability.listActiveEquipmentTypes).mockResolvedValue([{ id: "p1", name: "Projector (HD)" }]);
 });
 
+// ConfirmDialog calls showModal and close, which jsdom lacks.
+stubDialogElement();
+
 describe("SCRUM588 AC2 one h1 per Technical Support screen, sections at h2", () => {
   it("SCRUM588_AC2_dashboard_has_one_h1_and_the_lists_at_h2", async () => {
     const { container } = render(<TechnicalSupportDashboard user={{ name: "Sam" }} />, { wrapper: MemoryRouter });
@@ -299,7 +303,7 @@ describe("SCRUM588 AC2 one h1 per Technical Support screen, sections at h2", () 
     const { container } = await openCatalogue();
 
     await user.click(screen.getByRole("button", { name: "Retire Projector (HD)" }));
-    await user.click(screen.getByRole("button", { name: "Confirm retire Projector (HD)" }));
+    await user.click(screen.getByRole("button", { name: "Confirm retire" }));
 
     expect(await screen.findByRole("heading", { level: 3, name: "Check before you save" })).toBeInTheDocument();
     expectOutline(container, "Equipment catalogue", ["Active equipment", "Retired equipment"]);
@@ -347,7 +351,7 @@ describe("SCRUM588 AC5 the review screen has one h1 in every state", () => {
     vi.mocked(getEquipmentReview).mockReturnValue(new Promise(() => {}));
     renderReview();
 
-    expect(screen.getByText("Loading equipment request...")).toBeInTheDocument();
+    expect(screen.getByText("Loading...")).toBeInTheDocument();
     expect(screen.getAllByRole("heading", { level: 1 }).map((h) => h.textContent)).toEqual(["Equipment request review"]);
   });
 
@@ -432,8 +436,8 @@ describe("SCRUM588 AC3 actions use the shared Button", () => {
     expectButton("Reinstate Overhead projector", "secondary");
     expectButton("Retire Projector (HD)", "danger");
     await user.click(screen.getByRole("button", { name: "Retire Projector (HD)" }));
-    expectButton("Confirm retire Projector (HD)", "danger");
-    expectButton("Cancel retire Projector (HD)", "secondary");
+    expectButton("Confirm retire", "danger");
+    expectButton("Cancel", "secondary");
     expectStandardMarkup(container);
   });
 

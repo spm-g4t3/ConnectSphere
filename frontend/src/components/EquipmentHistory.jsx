@@ -4,35 +4,56 @@
 // backend returns it. The note column is where a damage or maintenance change
 // explains itself.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getEquipmentHistory } from "../services/equipmentService";
-import { equipmentErrorMessages } from "../services/equipmentErrors";
+import { canRetryEquipmentRead, equipmentErrorMessages } from "../services/equipmentErrors";
 import { describeChange } from "../services/equipmentHistoryDisplay";
-import { formatTimestamp, shortId } from "../services/displayFormat";
+import { formatDateTime, shortId } from "../services/displayFormat";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import LoadingText from "./ui/LoadingText";
 
 export default function EquipmentHistory({ type }) {
   const [entries, setEntries] = useState(null);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState(null); // { message, retryable }
+  // A response that arrives after the panel closes is dropped.
+  const mounted = useRef(true);
 
   useEffect(() => {
-    let cancelled = false;
-    getEquipmentHistory(type.id)
-      .then((data) => {
-        if (!cancelled) setEntries(data);
-      })
-      .catch((err) => {
-        if (!cancelled) setError(equipmentErrorMessages(err, "history")[0]);
-      });
+    // Set here as well as initially, so StrictMode's remount turns it back on.
+    mounted.current = true;
     return () => {
-      cancelled = true;
+      mounted.current = false;
     };
-  }, [type.id]);
+  }, []);
+
+  const load = useCallback(
+    () =>
+      getEquipmentHistory(type.id).then(
+        (data) => mounted.current && setEntries(data),
+        (err) =>
+          mounted.current &&
+          setError({ message: equipmentErrorMessages(err, "history")[0], retryable: canRetryEquipmentRead(err) }),
+      ),
+    [type.id],
+  );
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  function retry() {
+    setError(null);
+    load();
+  }
 
   return (
     <div>
-      {error && <p role="alert">{error}</p>}
-      {!error && entries === null && <p>Loading history...</p>}
-      {entries?.length === 0 && <p>No changes recorded.</p>}
+      {error && <ErrorNotice message={error.message} onRetry={error.retryable ? retry : undefined} />}
+      {!error && entries === null && <LoadingText />}
+      {entries?.length === 0 && (
+        <EmptyState message="No changes recorded." nextStep="Changes to this equipment type will appear here." />
+      )}
       {entries?.length > 0 && (
         <table className="equipment-table">
           <thead>
@@ -46,7 +67,7 @@ export default function EquipmentHistory({ type }) {
           <tbody>
             {entries.map((entry) => (
               <tr key={entry.id}>
-                <td>{formatTimestamp(entry.changedAt)}</td>
+                <td>{formatDateTime(entry.changedAt)}</td>
                 <td>{describeChange(entry)}</td>
                 <td>{entry.note ?? ""}</td>
                 <td title={entry.changedBy ?? ""}>{entry.changedBy ? shortId(entry.changedBy) : "unknown"}</td>

@@ -5,7 +5,7 @@
 // plain sums its heading uses. Pure functions, so the wording is tested without
 // rendering anything.
 
-import { formatEventPeriod } from "./eventPeriodFormat";
+import { formatEventDateTimeRange } from "./eventPeriodFormat";
 
 const plural = (count, one, many) => (count === 1 ? one : many);
 
@@ -23,7 +23,7 @@ export function describeAffected(item) {
   return {
     id: item.reservationId,
     eventName: name === "" ? "Untitled event" : name,
-    period: formatEventPeriod(item.startAt, item.endAt),
+    period: formatEventDateTimeRange(item.startAt, item.endAt),
     quantity: `${quantity} ${plural(quantity, "unit", "units")}`,
     coordinator: coordinator === "" ? "No coordinator assigned" : coordinator,
     alreadyFlagged: item.flagged === true,

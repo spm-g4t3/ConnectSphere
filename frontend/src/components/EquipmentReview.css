@@ -17,7 +17,6 @@
 .equipment-review__form { display: grid; gap: 10px; max-width: 520px; }
 .equipment-review__form label { display: grid; gap: var(--space-1); }
 .equipment-review__form textarea { min-height: 72px; resize: vertical; }
-.equipment-review__confirm p { margin: 6px 0; }
 
 /* SCRUM-300: reservations on a line. A flagged one is marked in words as well as colour. */
 .equipment-review__reservations ul { list-style: none; margin: var(--space-1) 0 0; padding: 0; }
