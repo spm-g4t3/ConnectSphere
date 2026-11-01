@@ -168,6 +168,21 @@ describe('toNotification: the related event (SCRUM-172)', () => {
     expect(mapped.eventRequestId).toBeNull();
   });
 
+  it.each([
+    ['registration_opened', { audience: 'waitlisted', cause: 'opening_time', occurrenceKey: 'opened:1' }],
+    ['registration_closed', { audience: 'organiser', cause: 'switched_off', occurrenceKey: 'closed:2' }],
+    ['registration_capacity_reached', { audience: 'coordinator', capacity: 2, registeredCount: 2, occurrenceKey: 'full:1' }],
+    ['registration_place_released', { audience: 'organiser', cause: 'withdrawal', capacity: 2, registeredCount: 1, occurrenceKey: 'released:2' }],
+    ['registration_promoted', { registrationId: 'r1', waitlistedAt: '2026-11-05T10:00:00.000000Z' }],
+  ])('SCRUM177_AC5_a_%s_notice_reaches_the_inbox_with_its_event_and_payload', (type, fields) => {
+    // Registration notices carry no booking: the event comes from their own column.
+    const payload = { eventRequestId: EVENT_ID, eventName: 'Tech Talk', ...fields };
+    const mapped = toNotification(notificationRow({ type, booking_id: null, block_id: null, event_request_id: EVENT_ID, payload, booking: null }));
+
+    expect(mapped).toMatchObject({ type, eventRequestId: EVENT_ID, bookingId: null });
+    expect(mapped.payload).toBe(payload);
+  });
+
   it('SCRUM172_AC7_does_not_return_the_embedded_booking', () => {
     const mapped = toNotification(
       notificationRow({ booking: { event_request_id: BOOKING_EVENT_ID } }),
