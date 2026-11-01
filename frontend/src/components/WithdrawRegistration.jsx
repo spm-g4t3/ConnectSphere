@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { withdrawRegistration } from "../services/attendeeEventService";
 import { withdrawalFailure } from "../services/withdrawalErrors";
 import { REGISTRATION_STATUS } from "../services/registrationStatus";
+import Button from "./ui/Button";
 
 /**
  * Asks first, inline, as the other destructive actions here do (there is no
@@ -43,7 +44,7 @@ export default function WithdrawRegistration({ registrationId, refusal, onWithdr
   if (refusal) {
     return (
       <section className="withdraw-registration" aria-label="Withdraw registration">
-        <p className="pending-bookings__error" role="alert">{refusal}</p>
+        <p className="withdraw-registration__error" role="alert">{refusal}</p>
       </section>
     );
   }
@@ -53,27 +54,27 @@ export default function WithdrawRegistration({ registrationId, refusal, onWithdr
       {failure && (
         <div className="browse-open-events__error" role="alert">
           <p>{failure.message}</p>
-          <button type="button" disabled={submitting} onClick={handleConfirm}>
+          <Button variant="secondary" disabled={submitting} onClick={handleConfirm}>
             {submitting ? "Withdrawing..." : "Try again"}
-          </button>
+          </Button>
         </div>
       )}
       {confirming ? (
         <>
           <p>Withdraw your registration? Your place will be released to other attendees.</p>
-          <div className="event-venue-bookings__actions">
-            <button type="button" disabled={submitting} onClick={handleConfirm}>
+          <div className="withdraw-registration__actions">
+            <Button variant="danger" disabled={submitting} onClick={handleConfirm}>
               {submitting ? "Withdrawing..." : "Confirm withdrawal"}
-            </button>
-            <button type="button" disabled={submitting} onClick={() => setConfirming(false)}>
+            </Button>
+            <Button variant="secondary" disabled={submitting} onClick={() => setConfirming(false)}>
               Keep my registration
-            </button>
+            </Button>
           </div>
         </>
       ) : !failure && (
-        <button type="button" onClick={() => setConfirming(true)}>
+        <Button variant="danger" onClick={() => setConfirming(true)}>
           Withdraw registration
-        </button>
+        </Button>
       )}
     </section>
   );

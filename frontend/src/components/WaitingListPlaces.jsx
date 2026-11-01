@@ -4,6 +4,7 @@ import useOpenEventRead from "./useOpenEventRead";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 import { SESSION_EXPIRED } from "../services/apiErrors";
 import { WaitlistedBadge } from "./OpenEventAvailability";
+import Button from "./ui/Button";
 
 const MESSAGES = {
   401: SESSION_EXPIRED,
@@ -62,19 +63,19 @@ function WaitingListPlace({ place, onLeft, onPromoted }) {
       )}
       {failure && <p className="browse-open-events__error" role="alert">{failure}</p>}
       {confirming ? (
-        <div className="event-venue-bookings__actions">
+        <div className="waiting-list-places__actions">
           <p>Leave the waiting list? You will lose your place in the queue.</p>
-          <button type="button" disabled={submitting} onClick={handleLeave}>
+          <Button variant="danger" disabled={submitting} onClick={handleLeave}>
             {submitting ? "Leaving..." : "Confirm leaving"}
-          </button>
-          <button type="button" disabled={submitting} onClick={() => setConfirming(false)}>
+          </Button>
+          <Button variant="secondary" disabled={submitting} onClick={() => setConfirming(false)}>
             Keep my place
-          </button>
+          </Button>
         </div>
       ) : (
-        <button type="button" onClick={() => setConfirming(true)}>
+        <Button variant="danger" onClick={() => setConfirming(true)}>
           Leave waiting list
-        </button>
+        </Button>
       )}
     </li>
   );
@@ -101,14 +102,14 @@ export default function WaitingListPlaces({ onChanged }) {
   }
 
   return (
-    <section aria-labelledby="waiting-lists-heading">
+    <section className="waiting-list-places" aria-labelledby="waiting-lists-heading">
       <h2 id="waiting-lists-heading">Waiting lists</h2>
       {notice && <p className="browse-event-details__success" role="status">{notice}</p>}
       {loading && <p>Loading waiting lists...</p>}
       {(error || refreshFailed) && (
         <div className="browse-open-events__error" role="alert">
           <p>{error || "Could not refresh your waiting lists. Showing them as last loaded."}</p>
-          <button type="button" onClick={load}>Try again</button>
+          <Button variant="secondary" onClick={load}>Try again</Button>
         </div>
       )}
       {!loading && !error && (

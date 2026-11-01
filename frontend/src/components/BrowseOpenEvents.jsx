@@ -14,6 +14,7 @@ import {
   formatEventStartTime,
 } from "../services/openEventDisplay";
 import { SESSION_EXPIRED } from "../services/apiErrors";
+import Button from "./ui/Button";
 
 const LIST_ERROR_MESSAGES = {
   401: SESSION_EXPIRED,
@@ -66,18 +67,18 @@ export default function BrowseOpenEvents() {
         {error && (
           <div className="browse-open-events__error" role="alert">
             <p>{error}</p>
-            <button type="button" onClick={fetchEvents}>
+            <Button variant="secondary" onClick={fetchEvents}>
               Try again
-            </button>
+            </Button>
           </div>
         )}
 
         {refreshFailed && (
           <div className="browse-open-events__notice" role="status">
             <p>Could not refresh the list. Showing the events as last loaded.</p>
-            <button type="button" onClick={fetchEvents}>
+            <Button variant="secondary" onClick={fetchEvents}>
               Try again
-            </button>
+            </Button>
           </div>
         )}
 

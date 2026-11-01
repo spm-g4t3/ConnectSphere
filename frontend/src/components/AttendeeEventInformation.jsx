@@ -8,6 +8,8 @@ import useOpenEventRead from "./useOpenEventRead";
 import WithdrawRegistration from "./WithdrawRegistration";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 import { SESSION_EXPIRED } from "../services/apiErrors";
+import Button from "./ui/Button";
+import StatusBadge from "./ui/StatusBadge";
 
 const MESSAGES = {
   401: SESSION_EXPIRED,
@@ -93,7 +95,7 @@ function EventInformation({ eventId }) {
           <div className="browse-event-details__success" role="status">
             <p>Your registration has been withdrawn.</p>
             <dl className="browse-event-details__facts">
-              <div><dt>Registration status</dt><dd>Withdrawn</dd></div>
+              <div><dt>Registration status</dt><dd><StatusBadge tone="neutral">Withdrawn</StatusBadge></dd></div>
             </dl>
             <p><Link to={BROWSE_OPEN_EVENTS_PATH}>Browse open events</Link></p>
           </div>
@@ -102,7 +104,7 @@ function EventInformation({ eventId }) {
         {error && (
           <div className="browse-open-events__error" role="alert">
             <p>{error}</p>
-            <button type="button" onClick={load}>Try again</button>
+            <Button variant="secondary" onClick={load}>Try again</Button>
           </div>
         )}
         {view && <EventBody state={view} current={current} />}
@@ -116,7 +118,7 @@ function EventInformation({ eventId }) {
           />
         )}
       </section>
-      <p><Link to={REGISTERED_EVENTS_PATH}>Back to registered events</Link></p>
+      <p><Link className="ui-button ui-button--link" to={REGISTERED_EVENTS_PATH}>Back to registered events</Link></p>
     </>
   );
 }

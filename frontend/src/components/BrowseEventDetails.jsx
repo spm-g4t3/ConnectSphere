@@ -20,6 +20,7 @@ import {
   formatEventStartTime,
 } from "../services/openEventDisplay";
 import { SESSION_EXPIRED } from "../services/apiErrors";
+import Button from "./ui/Button";
 
 const LOAD_ERROR_MESSAGES = {
   401: SESSION_EXPIRED,
@@ -33,7 +34,7 @@ const NOT_OPEN_MESSAGE = "This event is not open for registration.";
 function BackLink() {
   return (
     <p>
-      <Link to={BROWSE_OPEN_EVENTS_PATH}>Back to open events</Link>
+      <Link className="ui-button ui-button--link" to={BROWSE_OPEN_EVENTS_PATH}>Back to open events</Link>
     </p>
   );
 }
@@ -42,9 +43,9 @@ function RegisterAction({ event, isRegistered, onRegister, onJoinWaitlist, regis
   if (isRegistered) {
     return (
       <div className="browse-event-details__register">
-        <button type="button" disabled>
+        <Button disabled>
           Already registered
-        </button>
+        </Button>
       </div>
     );
   }
@@ -52,9 +53,9 @@ function RegisterAction({ event, isRegistered, onRegister, onJoinWaitlist, regis
   if (event.waitlistPosition != null) {
     return (
       <div className="browse-event-details__register">
-        <button type="button" disabled>
+        <Button disabled>
           On the waiting list
-        </button>
+        </Button>
         <p>
           You are number {event.waitlistPosition} on the waiting list.{" "}
           <Link to={REGISTERED_EVENTS_PATH}>Manage it from your registrations</Link>.
@@ -66,9 +67,9 @@ function RegisterAction({ event, isRegistered, onRegister, onJoinWaitlist, regis
   if (event.isFull && event.canJoinWaitlist && onJoinWaitlist) {
     return (
       <div className="browse-event-details__register">
-        <button type="button" onClick={onJoinClick} disabled={registering || stale}>
+        <Button onClick={onJoinClick} disabled={registering || stale}>
           {registering ? "Joining..." : "Join waiting list"}
-        </button>
+        </Button>
         <p>
           This event is full. If a place opens while registration is open, the first person
           waiting is registered and notified.
@@ -81,9 +82,9 @@ function RegisterAction({ event, isRegistered, onRegister, onJoinWaitlist, regis
   if (event.isFull || !event.canRegister) {
     return (
       <div className="browse-event-details__register">
-        <button type="button" disabled>
+        <Button disabled>
           Register
-        </button>
+        </Button>
         <p>{event.isFull ? "This event is full." : "Registration is not available for this event."}</p>
       </div>
     );
@@ -91,9 +92,9 @@ function RegisterAction({ event, isRegistered, onRegister, onJoinWaitlist, regis
 
   return (
     <div className="browse-event-details__register">
-      <button type="button" onClick={onClick} disabled={!onRegister || registering || stale}>
+      <Button onClick={onClick} disabled={!onRegister || registering || stale}>
         {registering ? "Registering..." : "Register"}
-      </button>
+      </Button>
       {!onRegister && <p>Registering for events is not available yet.</p>}
       {onRegister && stale && <p>Registration is paused until this event can be checked again.</p>}
     </div>
@@ -284,18 +285,18 @@ export default function BrowseEventDetails({ onRegister, onJoinWaitlist }) {
         {!loading && error && (
           <div className="browse-event-details__error" role="alert">
             <p>{error}</p>
-            <button type="button" onClick={refreshUnlessRegistering}>
+            <Button variant="secondary" onClick={refreshUnlessRegistering}>
               Try again
-            </button>
+            </Button>
           </div>
         )}
 
         {refreshFailed && (
           <div className="browse-event-details__notice" role="status">
             <p>Could not refresh this event. Showing the details as last loaded.</p>
-            <button type="button" onClick={refreshUnlessRegistering} disabled={registering}>
+            <Button variant="secondary" onClick={refreshUnlessRegistering} disabled={registering}>
               Try again
-            </button>
+            </Button>
           </div>
         )}
 
@@ -334,7 +335,7 @@ export default function BrowseEventDetails({ onRegister, onJoinWaitlist }) {
               </div>
             </dl>
 
-            <h3>About this event</h3>
+            <h2 className="browse-event-details__about-heading">About this event</h2>
             <p className="browse-event-details__description">
               {event.description || "The organiser has not added a description."}
             </p>

@@ -15,13 +15,13 @@ export default function AttendeeDashboard({ user }) {
       <section aria-labelledby="attendee-registered-heading">
         <h2 id="attendee-registered-heading">Registered events</h2>
         <p>View the information for events you are registered for.</p>
-        <Link className="dashboard--attendee__browse-link" to={REGISTERED_EVENTS_PATH}>View registered events</Link>
+        <Link className="ui-button ui-button--primary" to={REGISTERED_EVENTS_PATH}>View registered events</Link>
       </section>
 
       <section aria-labelledby="attendee-browse-heading">
         <h2 id="attendee-browse-heading">Browse Open Events</h2>
         <p>Find events that are open for registration.</p>
-        <Link className="dashboard--attendee__browse-link" to={BROWSE_OPEN_EVENTS_PATH}>
+        <Link className="ui-button ui-button--primary" to={BROWSE_OPEN_EVENTS_PATH}>
           Browse Open Events
         </Link>
       </section>

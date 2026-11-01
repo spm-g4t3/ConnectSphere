@@ -5,6 +5,7 @@ import useOpenEventRead from "./useOpenEventRead";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 import { SESSION_EXPIRED } from "../services/apiErrors";
 import WaitingListPlaces from "./WaitingListPlaces";
+import Button from "./ui/Button";
 
 const MESSAGES = {
   401: SESSION_EXPIRED,
@@ -21,12 +22,13 @@ export default function RegisteredEvents() {
   return (
     <>
       <h1>Registered events</h1>
-      <section aria-label="Your registered events">
+      <section aria-labelledby="registered-events-heading">
+        <h2 id="registered-events-heading">Registered</h2>
         {loading && <p role="status">Loading...</p>}
         {(error || refreshFailed) && (
           <div className="browse-open-events__error" role="alert">
             <p>{error || "Could not refresh the list. Showing the events as last loaded."}</p>
-            <button type="button" onClick={load}>Try again</button>
+            <Button variant="secondary" onClick={load}>Try again</Button>
           </div>
         )}
         {!loading && !error && (
