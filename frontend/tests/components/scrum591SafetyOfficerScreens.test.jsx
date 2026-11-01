@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import SafetyOfficerDashboard from "../../src/components/SafetyOfficerDashboard.jsx";
@@ -298,6 +298,17 @@ function failure(message) {
   return Object.assign(new Error(message), { response: { data: { error: message } } });
 }
 
+// A reply the test settles by hand, so it can arrive after the officer has moved on.
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 describe("SCRUM591_AC4 loading, empty, error and date states follow the standard", () => {
   it("SCRUM591_AC4_lists_show_the_standard_loading_text", async () => {
     getSafetyReviewQueue.mockReturnValue(new Promise(() => {}));
@@ -438,6 +449,133 @@ describe("SCRUM591_AC4 loading, empty, error and date states follow the standard
 
     expect(await screen.findByText(/No further response can be submitted/)).toBeInTheDocument();
     expect(getSafetyReview).toHaveBeenLastCalledWith("event-2");
+  });
+
+  it.each([
+    ["retry", "a reply", (reply) => reply.resolve(detailFor("event-1", "safety_approved"))],
+    ["retry", "a failure", (reply) => reply.reject(new Error("reload failed"))],
+    ["conflict", "a reply", (reply) => reply.resolve(detailFor("event-1"))],
+    ["conflict", "a failure", (reply) => reply.reject(new Error("reload failed"))],
+  ])("SCRUM591_AC4_a_late_reload_for_a_left_review_does_not_replace_the_open_one (%s, %s)", async (path, _outcome, settle) => {
+    const user = userEvent.setup();
+    const lateReply = deferred();
+    await renderQueue();
+    await user.click(rowButton("Event event-1", "Review event"));
+    await screen.findByRole("heading", { level: 2, name: "Event event-1" });
+
+    // retry: Try again after the history refresh failed; conflict: the reload a 409 starts.
+    if (path === "retry") {
+      getSafetyReview.mockRejectedValueOnce(new Error("reload failed"));
+      await user.click(screen.getByRole("button", { name: "Submit response" }));
+      const tryAgain = within(await screen.findByRole("alert")).getByRole("button", { name: "Try again" });
+      getSafetyReview.mockImplementationOnce(() => lateReply.promise);
+      await user.click(tryAgain);
+    } else {
+      submitSafetyReviewResponse.mockRejectedValue(
+        Object.assign(new Error("conflict"), { response: { status: 409, data: { error: "Event changed." } } }),
+      );
+      getSafetyReview.mockImplementationOnce(() => lateReply.promise);
+      await user.click(screen.getByRole("button", { name: "Submit response" }));
+      await waitFor(() => expect(getSafetyReview).toHaveBeenCalledTimes(2));
+    }
+    await user.click(screen.getByRole("button", { name: /Back to Safety review/ }));
+    await user.click(rowButton("Event event-2", "Review event"));
+    const openHeading = await screen.findByRole("heading", { level: 2, name: "Event event-2" });
+
+    await act(async () => settle(lateReply));
+
+    expect(screen.getByRole("heading", { level: 2, name: "Event event-2" })).toBe(openHeading);
+    expect(screen.queryByRole("heading", { name: "Event event-1" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Submit response" })).toBeInTheDocument();
+  });
+
+  it("SCRUM591_AC4_a_late_recorded_response_for_a_left_review_is_not_reported_on_the_open_one", async () => {
+    const user = userEvent.setup();
+    const lateSubmit = deferred();
+    submitSafetyReviewResponse.mockImplementationOnce(() => lateSubmit.promise);
+    await renderQueue();
+    await user.click(rowButton("Event event-1", "Review event"));
+    await screen.findByRole("heading", { level: 2, name: "Event event-1" });
+    await user.click(screen.getByRole("button", { name: "Submit response" }));
+
+    await user.click(screen.getByRole("button", { name: /Back to Safety review/ }));
+    await user.click(rowButton("Event event-2", "Review event"));
+    await screen.findByRole("heading", { level: 2, name: "Event event-2" });
+
+    getSafetyReview.mockImplementation(async (id) => detailFor(id, "safety_approved"));
+    await act(async () => lateSubmit.resolve({}));
+
+    expect(screen.getByRole("heading", { level: 2, name: "Event event-2" })).toBeInTheDocument();
+    expect(screen.queryByText(/Response recorded/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Submit response" })).toBeInTheDocument();
+    // The queue still refreshes: the response was recorded either way.
+    expect(getSafetyReviewQueue).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ["a reply", (reply) => reply.resolve(detailFor("event-1"))],
+    ["a failure", (reply) => reply.reject(failure("Details unavailable"))],
+  ])("SCRUM591_AC4_a_late_open_for_a_left_review_does_not_replace_the_open_one (%s)", async (_name, settle) => {
+    const user = userEvent.setup();
+    const lateReply = deferred();
+    getSafetyReview.mockImplementationOnce(() => lateReply.promise);
+    await renderQueue();
+
+    await user.click(rowButton("Event event-1", "Review event"));
+    await user.click(screen.getByRole("button", { name: /Back to Safety review/ }));
+    await user.click(rowButton("Event event-2", "Review event"));
+    await screen.findByRole("heading", { level: 2, name: "Event event-2" });
+
+    await act(async () => settle(lateReply));
+
+    expect(screen.getByRole("heading", { level: 2, name: "Event event-2" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Event event-1" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM591_AC4_a_late_conflict_for_a_left_review_does_not_replace_the_open_one", async () => {
+    const user = userEvent.setup();
+    const lateSubmit = deferred();
+    submitSafetyReviewResponse.mockImplementationOnce(() => lateSubmit.promise);
+    await renderQueue();
+    await user.click(rowButton("Event event-1", "Review event"));
+    await screen.findByRole("heading", { level: 2, name: "Event event-1" });
+    await user.click(screen.getByRole("button", { name: "Submit response" }));
+
+    await user.click(screen.getByRole("button", { name: /Back to Safety review/ }));
+    await user.click(rowButton("Event event-2", "Review event"));
+    await screen.findByRole("heading", { level: 2, name: "Event event-2" });
+    const callsBefore = getSafetyReview.mock.calls.length;
+
+    await act(async () => lateSubmit.reject(
+      Object.assign(new Error("conflict"), { response: { status: 409, data: { error: "Event changed." } } }),
+    ));
+
+    expect(screen.getByRole("heading", { level: 2, name: "Event event-2" })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(getSafetyReview).toHaveBeenCalledTimes(callsBefore);
+  });
+
+  it.each([
+    ["a reply", (reply) => reply.resolve(detailFor("event-1"))],
+    ["a failure", (reply) => reply.reject(failure("Details unavailable"))],
+  ])("SCRUM591_AC4_late_history_details_for_a_left_event_do_not_replace_the_open_one (%s)", async (_name, settle) => {
+    const user = userEvent.setup();
+    const lateReply = deferred();
+    getSafetyReview.mockImplementationOnce(() => lateReply.promise);
+    await renderHistory();
+
+    await user.click(rowButton("Event event-1", "View details"));
+    await user.click(screen.getByRole("button", { name: /Back to Review history/ }));
+    await user.click(rowButton("Event event-2", "View details"));
+    await screen.findByRole("heading", { level: 2, name: "Event event-2" });
+
+    await act(async () => settle(lateReply));
+
+    expect(screen.getByRole("heading", { level: 2, name: "Event event-2" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Event event-1" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("SCRUM591_AC4_dates_use_the_standard_format", async () => {

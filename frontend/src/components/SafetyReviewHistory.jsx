@@ -7,6 +7,7 @@ import {
 import { formatDateTime } from "../services/displayFormat";
 import { OUTCOME_LABELS, OUTCOME_TONES, eventRange } from "./safetyReviewLabels";
 import { SafetyReviewDetail } from "./SafetyReviewDetail";
+import useReturnFocus from "./useReturnFocus";
 import Button from "./ui/Button";
 import EmptyState from "./ui/EmptyState";
 import ErrorNotice from "./ui/ErrorNotice";
@@ -21,18 +22,17 @@ export default function SafetyReviewHistory() {
   const [selectedId, setSelectedId] = useState(null);
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
-  const rowButtons = useRef(new Map());
-  const listHeadingRef = useRef(null);
-  const returnFocusId = useRef(null);
+  // The open event as of now, not as of a render: details for an event the
+  // officer has since left must not land on the one now open.
+  const selectedIdRef = useRef(null);
+  const { listHeadingRef, rowRef, returnFocusTo } = useReturnFocus(selectedId, loading);
 
   // State is set only in the promise callbacks, and only while isActive()
   // holds, so a first load that settles after unmounting is dropped.
   const loadHistory = useCallback((isActive = () => true) =>
     getSafetyReviewHistory()
       .then((rows) => {
-        if (!isActive()) return;
-        setHistory(rows);
-        setListError(null);
+        if (isActive()) setHistory(rows);
       })
       .catch((requestError) => {
         if (isActive()) {
@@ -58,29 +58,31 @@ export default function SafetyReviewHistory() {
     loadHistory();
   }
 
-  // Back returns focus to the row that was opened, or to the list heading if
-  // that row is no longer listed.
-  useEffect(() => {
-    if (selectedId || loading || returnFocusId.current === null) return;
-    const target = rowButtons.current.get(returnFocusId.current) ?? listHeadingRef.current;
-    returnFocusId.current = null;
-    target?.focus();
-  }, [selectedId, loading]);
+  function select(id) {
+    selectedIdRef.current = id;
+    setSelectedId(id);
+  }
+
+  function isOpen(id) {
+    return selectedIdRef.current === id;
+  }
 
   async function openDetail(id) {
-    setSelectedId(id);
+    select(id);
     setDetail(null);
     setError(null);
     setDetailLoading(true);
     try {
-      setDetail(await getSafetyReview(id));
+      const fresh = await getSafetyReview(id);
+      if (isOpen(id)) setDetail(fresh);
     } catch (requestError) {
+      if (!isOpen(id)) return;
       setError({
         message: requestError.response?.data?.error ?? "The event's safety details could not be loaded.",
         retry: () => openDetail(id),
       });
     } finally {
-      setDetailLoading(false);
+      if (isOpen(id)) setDetailLoading(false);
     }
   }
 
@@ -93,9 +95,10 @@ export default function SafetyReviewHistory() {
           <Button
             variant="link"
             onClick={() => {
-              returnFocusId.current = selectedId;
-              setSelectedId(null);
+              returnFocusTo(selectedId);
+              select(null);
               setDetail(null);
+              setDetailLoading(false);
               setError(null);
             }}
           >
@@ -108,7 +111,7 @@ export default function SafetyReviewHistory() {
               {detail.event.status === "safety_review" && (
                 <p>
                   This event is in the live queue.{" "}
-                  <Link to="/safety-review">Open the Safety review queue</Link>
+                  <Link to="/dashboard">Open the Safety review queue</Link>
                 </p>
               )}
               <SafetyReviewDetail detail={detail} readOnly />
@@ -143,10 +146,7 @@ export default function SafetyReviewHistory() {
                   <p>Reviewed: {formatDateTime(event.respondedAt)}</p>
                 </div>
                 <Button
-                  ref={(node) => {
-                    if (node) rowButtons.current.set(event.id, node);
-                    else rowButtons.current.delete(event.id);
-                  }}
+                  ref={rowRef(event.id)}
                   onClick={() => openDetail(event.id)}
                 >
                   View details

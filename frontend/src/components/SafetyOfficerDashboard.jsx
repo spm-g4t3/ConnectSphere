@@ -10,6 +10,7 @@ import ErrorNotice from "./ui/ErrorNotice";
 import LoadingText from "./ui/LoadingText";
 import { SafetyReviewDetail } from "./SafetyReviewDetail";
 import { OUTCOME_LABELS, eventRange } from "./safetyReviewLabels";
+import useReturnFocus from "./useReturnFocus";
 
 function waitingLabel(seconds) {
   const elapsed = Math.max(0, Number(seconds) || 0);
@@ -32,16 +33,16 @@ export default function SafetyOfficerDashboard({ user }) {
   const [error, setError] = useState(null);
   const [message, setMessage] = useState(null);
   const [detailFocusRequest, setDetailFocusRequest] = useState(0);
-  const rowButtons = useRef(new Map());
-  const listHeadingRef = useRef(null);
-  const returnFocusId = useRef(null);
+  // The open event as of now, not as of a render: a reply for an event the
+  // officer has since left must not land on the one now open.
+  const selectedIdRef = useRef(null);
+  const { listHeadingRef, rowRef, returnFocusTo } = useReturnFocus(selectedId, loading);
 
   const refreshQueue = useCallback(async () => {
     setLoading(true);
     setListError(null);
     try {
       setQueue(await getSafetyReviewQueue());
-      setListError(null);
     } catch (requestError) {
       setListError(requestError.response?.data?.error ?? "The safety review list could not be loaded.");
     } finally {
@@ -53,65 +54,76 @@ export default function SafetyOfficerDashboard({ user }) {
     refreshQueue();
   }, [refreshQueue]);
 
-  // Back returns focus to the row that was opened; a reviewed event has left
-  // the queue, so the list heading takes focus instead.
-  useEffect(() => {
-    if (selectedId || loading || returnFocusId.current === null) return;
-    const target = rowButtons.current.get(returnFocusId.current) ?? listHeadingRef.current;
-    returnFocusId.current = null;
-    target?.focus();
-  }, [selectedId, loading]);
+  function select(id) {
+    selectedIdRef.current = id;
+    setSelectedId(id);
+  }
+
+  function isOpen(id) {
+    return selectedIdRef.current === id;
+  }
 
   async function openReview(id) {
-    setSelectedId(id);
+    select(id);
     setDetail(null);
     setMessage(null);
     setError(null);
     setDetailLoading(true);
     try {
-      setDetail(await getSafetyReview(id));
+      const fresh = await getSafetyReview(id);
+      if (isOpen(id)) setDetail(fresh);
     } catch (requestError) {
+      if (!isOpen(id)) return;
       setError({
         message: requestError.response?.data?.error ?? "The event's safety details could not be loaded.",
         retry: () => openReview(id),
       });
     } finally {
-      setDetailLoading(false);
+      if (isOpen(id)) setDetailLoading(false);
     }
   }
 
   async function reloadDetail(id, failureMessage, retried = false) {
     try {
-      setDetail(await getSafetyReview(id));
+      const fresh = await getSafetyReview(id);
+      if (!isOpen(id)) return;
+      setDetail(fresh);
       setError(null);
       // Try again had focus and has now gone, so focus returns to the event.
       if (retried) setDetailFocusRequest((count) => count + 1);
     } catch {
-      setError({ message: failureMessage, retry: () => reloadDetail(id, failureMessage, true) });
+      if (isOpen(id)) setError({ message: failureMessage, retry: () => reloadDetail(id, failureMessage, true) });
     }
   }
 
   async function responseSubmitted(id, outcome) {
-    setMessage(`Response recorded: ${OUTCOME_LABELS[outcome]}.`);
-    setError(null);
-    await refreshQueue();
-    await reloadDetail(id, "The response was recorded, but the safety history could not be refreshed.");
+    if (isOpen(id)) {
+      setMessage(`Response recorded: ${OUTCOME_LABELS[outcome]}.`);
+      setError(null);
+    }
+    await Promise.all([
+      refreshQueue(),
+      reloadDetail(id, "The response was recorded, but the safety history could not be refreshed."),
+    ]);
   }
 
-  async function responseError(responseError) {
+  async function responseError(id, responseError) {
+    if (!isOpen(id)) return;
     if (!responseError) {
       setError(null);
       return;
     }
     // Submitting again is the retry for a form error, so none is offered.
     setError({ message: responseError.message });
-    if (responseError.status === 409 && selectedId) {
+    if (responseError.status === 409) {
       await refreshQueue();
       try {
-        setDetail(await getSafetyReview(selectedId));
+        const fresh = await getSafetyReview(id);
+        if (isOpen(id)) setDetail(fresh);
       } catch {
+        if (!isOpen(id)) return;
         const failureMessage = `${responseError.message} The latest safety history could not be loaded.`;
-        setError({ message: failureMessage, retry: () => reloadDetail(selectedId, failureMessage, true) });
+        setError({ message: failureMessage, retry: () => reloadDetail(id, failureMessage, true) });
       }
     }
   }
@@ -126,9 +138,10 @@ export default function SafetyOfficerDashboard({ user }) {
           <Button
             variant="link"
             onClick={() => {
-              returnFocusId.current = selectedId;
-              setSelectedId(null);
+              returnFocusTo(selectedId);
+              select(null);
               setDetail(null);
+              setDetailLoading(false);
               setError(null);
               setMessage(null);
             }}
@@ -142,7 +155,7 @@ export default function SafetyOfficerDashboard({ user }) {
             <SafetyReviewDetail
               detail={detail}
               onSubmitted={responseSubmitted}
-              onError={responseError}
+              onError={(failure) => responseError(selectedId, failure)}
               focusRequest={detailFocusRequest}
             />
           )}
@@ -170,10 +183,7 @@ export default function SafetyOfficerDashboard({ user }) {
                   <p>Waiting: {waitingLabel(event.waitingSeconds)}</p>
                 </div>
                 <Button
-                  ref={(node) => {
-                    if (node) rowButtons.current.set(event.id, node);
-                    else rowButtons.current.delete(event.id);
-                  }}
+                  ref={rowRef(event.id)}
                   onClick={() => openReview(event.id)}
                 >
                   Review event
