@@ -334,7 +334,7 @@ describe("SCRUM178_AC1_AC2_AC4 venue calendar flow (SCRUM-184)", () => {
     await settled();
     expect(lastWindow()).toEqual(windowOf(tuesday, dayAfter(tuesday, 1)));
 
-    const dayItems = within(document.querySelector(".venue-calendar")).getAllByRole("listitem");
+    const dayItems = within(document.querySelector(".venue-calendar__entries")).getAllByRole("listitem");
     expect(dayItems).toHaveLength(1);
     expect(labelOf(dayItems[0])).toBe("Booked");
     expect(dayItems[0]).toHaveTextContent("Gala Dinner");
@@ -486,7 +486,7 @@ describe("SCRUM484_AC7 venue calendar flow shows setup and turnaround", () => {
     // Day: the same text again.
     await user.click(screen.getByRole("button", { name: dayButtonName(wednesday) }));
     await settled();
-    const dayItem = within(document.querySelector(".venue-calendar")).getByRole("listitem");
+    const dayItem = within(document.querySelector(".venue-calendar__entries")).getByRole("listitem");
     expect(dayItem.querySelector(".venue-calendar__entry-time").textContent).toBe(expected);
   });
 });

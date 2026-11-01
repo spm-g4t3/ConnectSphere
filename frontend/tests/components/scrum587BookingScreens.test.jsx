@@ -109,7 +109,7 @@ describe("SCRUM587 AC2 one h1 per Venue Staff booking screen", () => {
     await user.click(toggleFor("Event 1"));
 
     const h1s = screen.getAllByRole("heading", { level: 1 });
-    expect(h1s.map((h) => h.textContent)).toEqual(["Pending booking requests"]);
+    expect(h1s.map((h) => h.textContent)).toEqual(["Pending booking requests (2)"]);
     const below = screen.getAllByRole("heading").filter((h) => h !== h1s[0]);
     expect(below.length).toBeGreaterThan(0);
     for (const h of below) expect(levelOf(h)).toBeGreaterThan(1);
@@ -121,7 +121,7 @@ describe("SCRUM587 AC2 one h1 per Venue Staff booking screen", () => {
     await user.click(toggleFor("Board Retreat"));
 
     const h1s = screen.getAllByRole("heading", { level: 1 });
-    expect(h1s.map((h) => h.textContent)).toEqual(["Flagged bookings"]);
+    expect(h1s.map((h) => h.textContent)).toEqual(["Flagged bookings (1)"]);
     const below = screen.getAllByRole("heading").filter((h) => h !== h1s[0]);
     expect(below.map((h) => h.textContent)).toContain("Why it was flagged");
     for (const h of below) expect(levelOf(h)).toBeGreaterThan(1);
@@ -138,8 +138,8 @@ describe("SCRUM587 AC2 one h1 per Venue Staff booking screen", () => {
 
     const h1s = screen.getAllByRole("heading", { level: 1 });
     expect(h1s.map((h) => h.textContent)).toEqual(["Welcome, staff@example.com"]);
-    expect(screen.getByRole("heading", { name: "Pending booking requests" }).tagName).toBe("H2");
-    expect(screen.getByRole("heading", { name: "Flagged bookings" }).tagName).toBe("H2");
+    expect(screen.getByRole("heading", { name: /^Pending booking requests/ }).tagName).toBe("H2");
+    expect(screen.getByRole("heading", { name: /^Flagged bookings/ }).tagName).toBe("H2");
   });
 });
 
@@ -344,5 +344,168 @@ describe("SCRUM587 AC4 loading, empty and error states on the booking screens", 
     expect(ddFor(flagged, "Flagged")).toHaveTextContent(/^20 Nov 2026, 10:00 am$/);
     // Venue periods keep their own helper and its zone note.
     expect(ddFor(flagged, "Booking period")).toHaveTextContent(/\(Singapore time\)$/);
+  });
+});
+
+const flaggedItem = (id, eventName) => ({ ...FLAGGED[0], id, eventName });
+
+/**
+ * Serves both lists from arrays the mocked POST shrinks, as the server drops a
+ * decided request or a resolved booking from its list.
+ */
+function serveShrinkingLists(pending, flagged) {
+  const lists = { "/booking-requests/pending": [...pending], "/flagged-bookings": [...flagged] };
+  vi.mocked(apiClient.get).mockImplementation(async (url) => ({ data: lists[url] ?? [] }));
+  vi.mocked(apiClient.post).mockReset();
+  vi.mocked(apiClient.post).mockImplementation(async (url) => {
+    const [, list, id] = url.match(/^\/(booking-requests|flagged-bookings)\/([^/]+)\//);
+    const key = list === "booking-requests" ? "/booking-requests/pending" : "/flagged-bookings";
+    lists[key] = lists[key].filter((entry) => entry.id !== id);
+    return { data: { markedConflicting: [] } };
+  });
+}
+
+// Approves the pending card, or reinstates the flagged one, through its own controls.
+async function decide(user, kind, name) {
+  await user.click(toggleFor(name));
+  const region = screen.getByRole("region", { name: new RegExp(`^${name} at `) });
+  if (kind === "pending") {
+    await user.click(within(region).getByRole("button", { name: "Approve" }));
+  } else {
+    await user.type(within(region).getByLabelText("Reason for reinstating (required)"), "Setup fits");
+    await user.click(within(region).getByRole("button", { name: "Reinstate" }));
+  }
+}
+
+const headingTexts = () => screen.getAllByRole("heading", { level: 1 }).map((h) => h.textContent);
+
+describe("SCRUM587 AC1 booking headings count what is listed", () => {
+  it("SCRUM587_AC1_booking_headings_show_how_many_items_are_listed (loaded, and after a decision)", async () => {
+    serveShrinkingLists(
+      ["1", "2", "3"].map((id) => pendingItem(id, "pending", "Pending", "PENDING")),
+      [flaggedItem("f1", "Board Retreat"), flaggedItem("f2", "Gala Dinner")],
+    );
+    const user = renderIn(
+      <>
+        <PendingBookingRequests asPage />
+        <FlaggedBookings />
+      </>,
+    );
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Pending booking requests (3)" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 2, name: "Flagged bookings (2)" })).toBeInTheDocument();
+
+    await decide(user, "pending", "Event 1");
+    expect(await screen.findByRole("heading", { name: "Pending booking requests (2)" })).toBeInTheDocument();
+    await decide(user, "flagged", "Board Retreat");
+    expect(await screen.findByRole("heading", { name: "Flagged bookings (1)" })).toBeInTheDocument();
+  });
+
+  it("SCRUM587_AC1_booking_headings_show_how_many_items_are_listed (none while loading)", () => {
+    vi.mocked(apiClient.get).mockReturnValue(new Promise(() => {}));
+    renderIn(
+      <>
+        <PendingBookingRequests asPage />
+        <FlaggedBookings asPage />
+      </>,
+    );
+
+    expect(headingTexts()).toEqual(["Pending booking requests", "Flagged bookings"]);
+  });
+
+  it("SCRUM587_AC1_booking_headings_show_how_many_items_are_listed (none after a load error)", async () => {
+    vi.mocked(apiClient.get).mockRejectedValue(httpError(500));
+    renderIn(
+      <>
+        <PendingBookingRequests asPage />
+        <FlaggedBookings asPage />
+      </>,
+    );
+
+    expect(await screen.findAllByRole("alert")).toHaveLength(2);
+    expect(headingTexts()).toEqual(["Pending booking requests", "Flagged bookings"]);
+  });
+});
+
+const FOCUS_LISTS = [
+  ["pending", () => <PendingBookingRequests asPage />, ["Event 1", "Event 2"], /^Pending booking requests/],
+  ["flagged", () => <FlaggedBookings asPage />, ["Board Retreat", "Gala Dinner"], /^Flagged bookings/],
+];
+
+function serveFocusLists(kind, names) {
+  const items =
+    kind === "pending"
+      ? names.map((name, i) => ({ ...pendingItem(String(i + 1), "pending", "Pending", "PENDING"), eventName: name }))
+      : names.map((name, i) => flaggedItem(`f${i + 1}`, name));
+  serveShrinkingLists(kind === "pending" ? items : [], kind === "pending" ? [] : items);
+}
+
+describe("SCRUM587 AC7 focus after a decision removes a card", () => {
+  it.each(FOCUS_LISTS)(
+    "SCRUM587_AC7_a_decided_card_hands_focus_to_the_next_card (%s)",
+    async (kind, ui, names) => {
+      serveFocusLists(kind, names);
+      const user = renderIn(ui());
+      await screen.findByText(names[0]);
+
+      await decide(user, kind, names[0]);
+
+      await vi.waitFor(() => expect(screen.queryByText(names[0])).not.toBeInTheDocument());
+      await vi.waitFor(() => expect(toggleFor(names[1])).toHaveFocus());
+    },
+  );
+
+  it.each(FOCUS_LISTS)(
+    "SCRUM587_AC7_the_last_decided_card_hands_focus_to_the_list_heading (%s)",
+    async (kind, ui, names, heading) => {
+      serveFocusLists(kind, names.slice(0, 1));
+      const user = renderIn(ui());
+      await screen.findByText(names[0]);
+
+      await decide(user, kind, names[0]);
+
+      await screen.findByRole("heading", { name: new RegExp(`${heading.source} \\(0\\)$`) });
+      await vi.waitFor(() => expect(screen.getByRole("heading", { name: heading })).toHaveFocus());
+    },
+  );
+
+  // A failed decision leaves the card listed; the pressed button was disabled while
+  // sending, so without this focus would drop to the page.
+  it.each(FOCUS_LISTS)(
+    "SCRUM587_AC7_a_failed_decision_keeps_focus_on_its_card (%s)",
+    async (kind, ui, names) => {
+      serveFocusLists(kind, names);
+      vi.mocked(apiClient.post).mockRejectedValue(httpError(500));
+      const user = renderIn(ui());
+      await screen.findByText(names[0]);
+
+      await decide(user, kind, names[0]);
+
+      await screen.findByRole("alert");
+      await vi.waitFor(() => expect(toggleFor(names[0])).toHaveFocus());
+    },
+  );
+});
+
+describe("SCRUM587 AC7 keyboard access to the booking controls", () => {
+  it("SCRUM587_AC7_every_control_on_an_expanded_request_is_reachable_with_tab", async () => {
+    const user = renderIn(<PendingBookingRequests asPage />);
+    await screen.findByText("Event 1");
+    await user.click(toggleFor("Event 1"));
+    const region = screen.getByRole("region", { name: "Event 1 at Hall 1" });
+
+    const order = [
+      toggleFor("Event 1"),
+      within(region).getByRole("button", { name: "Approve" }),
+      within(region).getByLabelText("Reason for rejecting (required)"),
+      within(region).getByLabelText("Suggest an alternative venue or arrangement (optional)"),
+      within(region).getByRole("button", { name: "Reject" }),
+      toggleFor("Event 2"),
+    ];
+    expect(order[0]).toHaveFocus();
+    for (const control of order.slice(1)) {
+      await user.tab();
+      expect(control).toHaveFocus();
+    }
   });
 });

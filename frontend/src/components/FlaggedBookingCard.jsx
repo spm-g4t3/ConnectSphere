@@ -26,6 +26,7 @@ export default function FlaggedBookingCard({
   item,
   expanded,
   onToggle,
+  toggleRef,
   busy,
   resolving,
   error,
@@ -47,6 +48,7 @@ export default function FlaggedBookingCard({
           A native button: it is a disclosure row, not an action, so Button would restyle it. */}
       <button
         type="button"
+        ref={toggleRef}
         className="pending-bookings__toggle"
         aria-expanded={expanded}
         aria-controls={regionId}

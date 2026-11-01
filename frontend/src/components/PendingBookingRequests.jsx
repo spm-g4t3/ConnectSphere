@@ -96,6 +96,11 @@ export default function PendingBookingRequests({ onDecided, asPage = false }) {
   const [queueError, setQueueError] = useState(null);
   const [notice, setNotice] = useState(null);
   const sending = useRef(false);
+  const headingRef = useRef(null);
+  const toggles = useRef(new Map());
+  // The card a decision closed, by id and place in the queue, so focus can
+  // follow it once the refetched queue renders instead of dropping to the page.
+  const refocus = useRef(null);
 
   // A refresh after a decision keeps the queue on screen, so it does not raise
   // `loading` again (EquipmentCatalogue's pattern, which also keeps setState
@@ -132,6 +137,17 @@ export default function PendingBookingRequests({ onDecided, asPage = false }) {
     };
   }, [loadAttempt]);
 
+  // Waits for `deciding` to clear: the toggles are disabled until then, and a
+  // disabled button cannot take focus. The card itself if it is still listed,
+  // else the one now in its place, else the heading.
+  useEffect(() => {
+    if (deciding !== null || !refocus.current) return;
+    const { id, index } = refocus.current;
+    refocus.current = null;
+    const next = requests.find((r) => r.id === id) ?? requests[Math.min(index, requests.length - 1)];
+    (next ? toggles.current.get(next.id) : headingRef.current)?.focus();
+  }, [deciding, requests]);
+
   function retryLoad() {
     setError(null);
     setLoading(true);
@@ -153,6 +169,7 @@ export default function PendingBookingRequests({ onDecided, asPage = false }) {
           : "Rejected; the coordinator has been notified.",
       );
       setExpandedId(null);
+      refocus.current = { id: item.id, index: requests.findIndex((r) => r.id === item.id) };
       onDecided?.();
       await refreshRequests();
     } catch (err) {
@@ -160,9 +177,12 @@ export default function PendingBookingRequests({ onDecided, asPage = false }) {
       if (isStaleDecisionError(err)) {
         setQueueError(message);
         setExpandedId(null);
+        refocus.current = { id: item.id, index: requests.findIndex((r) => r.id === item.id) };
         await refreshRequests();
       } else {
         setCardError({ id: item.id, message, retryable: action === "approve" && isTransient(err) });
+        // The pressed button was disabled while sending, so browsers drop focus; the card's row keeps it.
+        refocus.current = { id: item.id, index: requests.findIndex((r) => r.id === item.id) };
       }
     } finally {
       sending.current = false;
@@ -182,10 +202,15 @@ export default function PendingBookingRequests({ onDecided, asPage = false }) {
   const pendingIds = new Set(requests.filter((r) => r.status === "pending").map((r) => r.id));
   // Its own route makes it the page title; on the dashboard it is a section.
   const Heading = asPage ? "h1" : "h2";
+  // Only a list that loaded is counted; while loading or failed there is nothing to count.
+  const count = loading || error ? null : requests.length;
 
   return (
     <section className="pending-bookings">
-      <Heading>Pending booking requests</Heading>
+      {/* Focusable from script only, for when the last card leaves the queue. */}
+      <Heading ref={headingRef} tabIndex={-1}>
+        Pending booking requests{count !== null && ` (${count})`}
+      </Heading>
 
       {loading && <LoadingText />}
       {/* Signing in again or a different role is the fix for 401 and 403, not repeating the load. */}
@@ -214,6 +239,10 @@ export default function PendingBookingRequests({ onDecided, asPage = false }) {
                 item={item}
                 expanded={expandedId === item.id}
                 onToggle={handleToggle}
+                toggleRef={(element) => {
+                  toggles.current.set(item.id, element);
+                  return () => toggles.current.delete(item.id);
+                }}
                 busy={deciding !== null}
                 marksOnApproval={marksOnApproval(item, pendingIds)}
                 deciding={deciding?.id === item.id ? deciding.action : null}

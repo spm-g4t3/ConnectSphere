@@ -68,6 +68,11 @@ export default function FlaggedBookings({ asPage = false }) {
   const [listError, setListError] = useState(null);
   const [notice, setNotice] = useState(null);
   const sending = useRef(false);
+  const headingRef = useRef(null);
+  const toggles = useRef(new Map());
+  // The card a resolution closed, by id and place in the list, so focus can
+  // follow it once the refetched list renders instead of dropping to the page.
+  const refocus = useRef(null);
 
   // A refresh after a resolution keeps the list on screen, so it does not
   // raise `loading` again.
@@ -103,6 +108,17 @@ export default function FlaggedBookings({ asPage = false }) {
     };
   }, [loadAttempt]);
 
+  // Waits for `resolving` to clear: the toggles are disabled until then, and a
+  // disabled button cannot take focus. The card itself if it is still listed,
+  // else the one now in its place, else the heading.
+  useEffect(() => {
+    if (resolving !== null || !refocus.current) return;
+    const { id, index } = refocus.current;
+    refocus.current = null;
+    const next = bookings.find((b) => b.id === id) ?? bookings[Math.min(index, bookings.length - 1)];
+    (next ? toggles.current.get(next.id) : headingRef.current)?.focus();
+  }, [resolving, bookings]);
+
   function retryLoad() {
     setError(null);
     setLoading(true);
@@ -120,15 +136,19 @@ export default function FlaggedBookings({ asPage = false }) {
       await send();
       setNotice(resolvedNotice(item, action));
       setExpandedId(null);
+      refocus.current = { id: item.id, index: bookings.findIndex((b) => b.id === item.id) };
       await refreshBookings();
     } catch (err) {
       const message = resolutionErrorMessage(err);
       if (isStaleResolutionError(err)) {
         setListError(message);
         setExpandedId(null);
+        refocus.current = { id: item.id, index: bookings.findIndex((b) => b.id === item.id) };
         await refreshBookings();
       } else {
         setCardError({ id: item.id, message, conflicts: resolutionConflicts(err) });
+        // The pressed button was disabled while sending, so browsers drop focus; the card's row keeps it.
+        refocus.current = { id: item.id, index: bookings.findIndex((b) => b.id === item.id) };
       }
     } finally {
       sending.current = false;
@@ -143,10 +163,15 @@ export default function FlaggedBookings({ asPage = false }) {
 
   // Its own route makes it the page title; on the dashboard it is a section.
   const Heading = asPage ? "h1" : "h2";
+  // Only a list that loaded is counted; while loading or failed there is nothing to count.
+  const count = loading || error ? null : bookings.length;
 
   return (
     <section className="flagged-bookings">
-      <Heading>Flagged bookings</Heading>
+      {/* Focusable from script only, for when the last card leaves the list. */}
+      <Heading ref={headingRef} tabIndex={-1}>
+        Flagged bookings{count !== null && ` (${count})`}
+      </Heading>
 
       {loading && <LoadingText />}
       {/* Signing in again or a different role is the fix for 401 and 403, not repeating the load. */}
@@ -175,6 +200,10 @@ export default function FlaggedBookings({ asPage = false }) {
                 item={item}
                 expanded={expandedId === item.id}
                 onToggle={handleToggle}
+                toggleRef={(element) => {
+                  toggles.current.set(item.id, element);
+                  return () => toggles.current.delete(item.id);
+                }}
                 busy={resolving !== null}
                 resolving={resolving?.id === item.id ? resolving.action : null}
                 error={ownError?.message ?? null}

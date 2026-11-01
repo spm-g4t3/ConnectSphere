@@ -59,7 +59,7 @@ function bookingsWere(count) {
   return count === 1 ? "1 booking was" : `${count} bookings were`;
 }
 
-export default function VenueBlocksPanel({ venue, currentUserId }) {
+export default function VenueBlocksPanel({ venue, currentUserId, headingRef }) {
   const [blocks, setBlocks] = useState([]);
   const [loadingBlocks, setLoadingBlocks] = useState(true);
   const [listError, setListError] = useState(null);
@@ -430,7 +430,8 @@ export default function VenueBlocksPanel({ venue, currentUserId }) {
 
   return (
     <div className="venue-blocks">
-      <h2>
+      {/* tabIndex -1 and headingRef: the catalogue moves focus here when it opens this panel. */}
+      <h2 ref={headingRef} tabIndex={-1}>
         Blocks for {venue.name} — {venue.location}
       </h2>
 

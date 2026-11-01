@@ -41,7 +41,8 @@ import LoadingText from "./ui/LoadingText";
 import EmptyState from "./ui/EmptyState";
 import ErrorNotice from "./ui/ErrorNotice";
 import { SESSION_EXPIRED } from "../services/apiErrors";
-import { HOLD_TONE } from "../services/venueStatusTones";
+import { HOLD_EXPIRING_TONE, HOLD_TONE } from "../services/venueStatusTones";
+import { describeHoldExpiry } from "../services/holdExpiry";
 
 /** "1 thing is" / "3 things are", for the conflict heading. */
 function thingsAre(count) {
@@ -65,7 +66,7 @@ function conflictText(conflict) {
   };
 }
 
-export default function VenueHoldsPanel({ venue, currentUserId }) {
+export default function VenueHoldsPanel({ venue, currentUserId, headingRef }) {
   const [holds, setHolds] = useState([]);
   const [loadingHolds, setLoadingHolds] = useState(true);
   const [listError, setListError] = useState(null);
@@ -229,7 +230,8 @@ export default function VenueHoldsPanel({ venue, currentUserId }) {
 
   return (
     <div className="venue-holds">
-      <h2>
+      {/* tabIndex -1 and headingRef: the catalogue moves focus here when it opens this panel. */}
+      <h2 ref={headingRef} tabIndex={-1}>
         Tentative holds for {venue.name} — {venue.location}
       </h2>
 
@@ -294,19 +296,25 @@ export default function VenueHoldsPanel({ venue, currentUserId }) {
 
         {activeHolds.length > 0 && (
           <ul className="venue-holds__list">
-            {activeHolds.map((hold) => (
-              <li key={hold.id} className="venue-holds__item">
-                <div className="venue-holds__item-main">
-                  <strong>{hold.eventName || "Unnamed event"}</strong>
-                  <span>{formatDateTimeRangeOrFallback(hold.eventStartsAt, hold.eventEndsAt, "no date")}</span>
-                  <StatusBadge tone={HOLD_TONE}>Tentatively held</StatusBadge>
-                  <p className="venue-holds__audit">
-                    Expires {formatDateTime(hold.expiresAt)} · Placed{" "}
-                    {formatDateTime(hold.placedAt)} {renderPlacer(hold)}
-                  </p>
-                </div>
-              </li>
-            ))}
+            {activeHolds.map((hold) => {
+              // The same `now` as the filter above, so a row and its wording agree.
+              const expiry = describeHoldExpiry(hold.expiresAt, now);
+              return (
+                <li key={hold.id} className="venue-holds__item">
+                  <div className="venue-holds__item-main">
+                    <strong>{hold.eventName || "Unnamed event"}</strong>
+                    <span>{formatDateTimeRangeOrFallback(hold.eventStartsAt, hold.eventEndsAt, "no date")}</span>
+                    <StatusBadge tone={HOLD_TONE}>Tentatively held</StatusBadge>
+                    {expiry.soon && <StatusBadge tone={HOLD_EXPIRING_TONE}>Expires soon</StatusBadge>}
+                    <p className="venue-holds__audit">
+                      Expires {formatDateTime(hold.expiresAt)}
+                      {expiry.relative && ` (${expiry.relative})`} · Placed{" "}
+                      {formatDateTime(hold.placedAt)} {renderPlacer(hold)}
+                    </p>
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>

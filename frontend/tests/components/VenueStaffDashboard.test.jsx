@@ -51,7 +51,7 @@ describe("SCRUM258 VenueStaffDashboard", () => {
       </MemoryRouter>,
     );
 
-    const queue = screen.getByRole("heading", { name: "Pending booking requests" }).closest("section");
+    const queue = screen.getByRole("heading", { name: /^Pending booking requests/ }).closest("section");
     expect(await within(queue).findByText("Tech Talk")).toBeInTheDocument();
     expect(within(queue).getByText("Hall A")).toBeInTheDocument();
     expect(apiClient.get).toHaveBeenCalledWith("/booking-requests/pending");
@@ -81,13 +81,13 @@ describe("SCRUM266 VenueStaffDashboard", () => {
       </MemoryRouter>,
     );
 
-    const flagged = screen.getByRole("heading", { name: "Flagged bookings" }).closest("section");
+    const flagged = screen.getByRole("heading", { name: /^Flagged bookings/ }).closest("section");
     expect(await within(flagged).findByText("Board Retreat")).toBeInTheDocument();
     expect(within(flagged).getByText("Hall B")).toBeInTheDocument();
     expect(within(flagged).getByText("Setup or turnaround time changed")).toBeInTheDocument();
     expect(apiClient.get).toHaveBeenCalledWith("/flagged-bookings");
 
-    const pending = screen.getByRole("heading", { name: "Pending booking requests" }).closest("section");
+    const pending = screen.getByRole("heading", { name: /^Pending booking requests/ }).closest("section");
     expect(pending.compareDocumentPosition(flagged) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(within(pending).queryByText("Board Retreat")).not.toBeInTheDocument();
   });
@@ -119,10 +119,10 @@ describe("SCRUM266 approving a replacement on the dashboard (W7)", () => {
     );
 
     // Looked up each time, as the refresh may replace the section's element.
-    const flaggedSection = () => screen.getByRole("heading", { name: "Flagged bookings" }).closest("section");
+    const flaggedSection = () => screen.getByRole("heading", { name: /^Flagged bookings/ }).closest("section");
     expect(await within(flaggedSection()).findByText("Board Retreat")).toBeInTheDocument();
 
-    const queue = screen.getByRole("heading", { name: "Pending booking requests" }).closest("section");
+    const queue = screen.getByRole("heading", { name: /^Pending booking requests/ }).closest("section");
     await user.click(await within(queue).findByText("Tech Talk"));
     await user.click(within(queue).getByRole("button", { name: "Approve" }));
 

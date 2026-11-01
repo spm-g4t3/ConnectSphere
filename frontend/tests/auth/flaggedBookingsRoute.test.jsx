@@ -29,7 +29,7 @@ describe("SCRUM266 /flagged-bookings", () => {
   it("SCRUM266_AC1_venue_staff_see_the_flagged_bookings_list", async () => {
     renderAppAt("/flagged-bookings", "venue_staff");
 
-    const heading = screen.getByRole("heading", { name: "Flagged bookings" });
+    const heading = screen.getByRole("heading", { name: /^Flagged bookings/ });
     // The wrapper is what styles the cards.
     expect(heading.closest(".dashboard--venue-staff")).not.toBeNull();
     expect(await screen.findByText("No bookings are flagged for review.")).toBeInTheDocument();
@@ -55,7 +55,7 @@ describe("SCRUM266 /flagged-bookings", () => {
   ])("SCRUM266_AC1_sends_%s_to_unauthorized_and_never_loads_the_list", (role) => {
     renderAppAt("/flagged-bookings", role);
 
-    expect(screen.queryByRole("heading", { name: "Flagged bookings" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /^Flagged bookings/ })).not.toBeInTheDocument();
     expect(getFlaggedBookings).not.toHaveBeenCalled();
     expect(window.location.pathname).toBe("/unauthorized");
   });
@@ -63,7 +63,7 @@ describe("SCRUM266 /flagged-bookings", () => {
   it("SCRUM266_AC1_sends_a_signed_out_visitor_to_login", () => {
     renderAppAt("/flagged-bookings", null);
 
-    expect(screen.queryByRole("heading", { name: "Flagged bookings" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /^Flagged bookings/ })).not.toBeInTheDocument();
     expect(getFlaggedBookings).not.toHaveBeenCalled();
     expect(window.location.pathname).toBe("/login");
   });

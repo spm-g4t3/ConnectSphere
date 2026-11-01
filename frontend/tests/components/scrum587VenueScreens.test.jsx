@@ -37,6 +37,8 @@ import {
   updateVenue,
 } from "../../src/services/venueService";
 import { toDatetimeLocalValue, toOffsetIsoString } from "../../src/services/datetimeFormat";
+import { ACCESSIBILITY_FEATURES, FACILITIES, ROOM_LAYOUTS } from "../../src/services/venueLookups";
+import { SAFETY_FACTS } from "../../src/services/venueSafetyFacts";
 import { httpError } from "../helpers/async.js";
 import { pressEscape, stubDialogElement } from "../helpers/dialog.js";
 
@@ -658,7 +660,7 @@ describe("SCRUM587_AC4 venue screens use the shared loading, empty, error and da
 
       expect(await screen.findByText("15 Jan 2099, 9:00 am – 11:00 am")).toBeInTheDocument();
       expect(document.querySelector(".venue-holds__audit")).toHaveTextContent(
-        "Expires 14 Jan 2099, 9:00 am · Placed 15 Jan 2026, 9:00 am by you",
+        /^Expires 14 Jan 2099, 9:00 am \(in \d+ days\) · Placed 15 Jan 2026, 9:00 am by you$/,
       );
       await user.click(screen.getByRole("button", { name: "+ Place a hold" }));
       expect(
@@ -964,4 +966,165 @@ describe("SCRUM587_AC6 and AC9 venue confirmations use the shared ConfirmDialog"
       expect(flow.service).toHaveBeenLastCalledWith(...flow.args);
     },
   );
+});
+
+describe("SCRUM587_AC7 keyboard focus on the venue screens", () => {
+  // An active second row, so a bug that returns focus to the wrong row fails.
+  const SECOND = {
+    ...VENUE,
+    id: "3f2504e0-4f89-41d3-9a0c-0305e82c3303",
+    name: "Hall B",
+    location: "Level 3",
+  };
+
+  const PANELS = [
+    ["edit form", "Edit details", "Edit venue"],
+    ["detail", "View bookings & history", "Hall B — Level 3"],
+    ["blocks", "Manage blocks", "Blocks for Hall B — Level 3"],
+    ["holds", "Place hold", "Tentative holds for Hall B — Level 3"],
+  ];
+
+  function secondRow() {
+    return screen.getByText("Hall B").closest("li");
+  }
+
+  beforeEach(() => {
+    vi.mocked(getVenueCatalogue).mockResolvedValue([VENUE, SECOND]);
+    vi.mocked(getVenueDetails).mockResolvedValue({ ...SECOND, hours: [], layouts: [] });
+  });
+
+  it.each(PANELS)(
+    "SCRUM587_AC7_opening_a_venue_panel_moves_focus_to_its_heading (%s)",
+    async (_name, buttonName, heading) => {
+      const { user } = await renderCatalogue();
+      await user.click(within(secondRow()).getByRole("button", { name: buttonName }));
+
+      const panelHeading = await screen.findByRole("heading", { name: heading });
+      await waitFor(() => expect(panelHeading).toHaveFocus());
+    },
+  );
+
+  it.each(PANELS)(
+    "SCRUM587_AC7_back_returns_focus_to_the_button_that_opened_the_panel (%s)",
+    async (_name, buttonName, heading) => {
+      const { user } = await renderCatalogue();
+      await user.click(within(secondRow()).getByRole("button", { name: buttonName }));
+      await screen.findByRole("heading", { name: heading });
+
+      await user.click(screen.getByRole("button", { name: /Back to the venue catalogue/ }));
+
+      await waitFor(() =>
+        expect(within(secondRow()).getByRole("button", { name: buttonName })).toHaveFocus(),
+      );
+    },
+  );
+
+  it("SCRUM587_AC7_every_control_on_the_venue_form_is_reachable_with_tab", async () => {
+    const user = userEvent.setup();
+    render(<VenueForm onSaved={() => {}} />);
+    // An open day, so its opening and closing times are live controls too.
+    await user.click(screen.getByRole("checkbox", { name: "Monday" }));
+
+    const checkbox = (name) => screen.getByRole("checkbox", { name });
+    const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const expected = [
+      screen.getByRole("textbox", { name: "Name" }),
+      screen.getByRole("textbox", { name: "Location" }),
+      screen.getByRole("spinbutton", { name: "Maximum capacity" }),
+      ...[...ROOM_LAYOUTS, ...ACCESSIBILITY_FEATURES, ...FACILITIES].map(({ label }) => checkbox(label)),
+      ...days.flatMap((day) =>
+        day === "Monday"
+          ? [checkbox(day), screen.getByLabelText("Monday opens at"), screen.getByLabelText("Monday closes at")]
+          : [checkbox(day)],
+      ),
+      screen.getByRole("combobox", { name: "Setup before events" }),
+      screen.getByRole("combobox", { name: "Turnaround between events" }),
+      ...SAFETY_FACTS.map(({ label }) => screen.getByRole("textbox", { name: label })),
+      screen.getByRole("button", { name: "Create venue" }),
+    ];
+
+    document.activeElement.blur(); // start from the top of the page
+    const reached = [];
+    for (let i = 0; i < expected.length; i += 1) {
+      await user.tab();
+      reached.push(document.activeElement);
+    }
+    expect(reached).toEqual(expected);
+  });
+});
+
+describe("SCRUM587_AC1 venue screen refinements", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("SCRUM587_AC1_catalogue_rows_lead_with_view_bookings_and_set_retire_apart", async () => {
+    await renderCatalogue();
+    const row = screen.getByText("Hall A").closest("li");
+    const button = (name) => within(row).getByRole("button", { name });
+
+    expect(
+      within(row)
+        .getAllByRole("button")
+        .filter((b) => b.classList.contains("ui-button--primary")),
+    ).toEqual([button("View bookings & history")]);
+    for (const name of ["Edit details", "Manage blocks", "Place hold"]) {
+      expect(button(name)).toHaveClass("ui-button--secondary");
+    }
+    const retire = button("Retire venue");
+    expect(retire).toHaveClass("ui-button--danger");
+    expect(retire.parentElement.lastElementChild).toBe(retire);
+  });
+
+  it("SCRUM587_AC1_a_hold_shows_when_it_expires_and_flags_one_expiring_soon", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const now = new Date("2026-12-01T00:00:00Z");
+    vi.setSystemTime(now);
+    const at = (ms) => new Date(now.getTime() + ms).toISOString();
+    vi.mocked(listVenueHolds).mockResolvedValue([
+      { ...HOLD, placedAt: at(-DAY), expiresAt: at(2 * DAY) },
+      { ...HOLD, id: "h2000000-0000-4000-8000-000000000002", eventName: "Board Meeting", placedAt: at(-DAY), expiresAt: at(5 * HOUR) },
+    ]);
+    render(<VenueHoldsPanel venue={VENUE} currentUserId="d1" />);
+
+    const later = (await screen.findByText("Product Launch")).closest("li");
+    expect(later.querySelector(".venue-holds__audit")).toHaveTextContent("Expires 3 Dec 2026, 8:00 am (in 2 days) ·");
+    expect(within(later).queryByText("Expires soon")).not.toBeInTheDocument();
+
+    const soon = screen.getByText("Board Meeting").closest("li");
+    expect(soon.querySelector(".venue-holds__audit")).toHaveTextContent("Expires 1 Dec 2026, 1:00 pm (in 5 hours) ·");
+    expect(within(soon).getByText("Expires soon", { selector: ".ui-status-badge--warning" })).toBeInTheDocument();
+  });
+
+  it("SCRUM587_AC1_the_calendar_key_names_each_entry_colour", async () => {
+    // Noon to 2 pm Singapore time on Wednesday 7 October, inside the week shown.
+    const entry = (kind, extra) => ({
+      kind,
+      startsAt: "2026-10-07T04:00:00Z",
+      endsAt: "2026-10-07T06:00:00Z",
+      ...extra,
+    });
+    vi.mocked(getVenueCalendar).mockResolvedValue([
+      entry("booking", { id: "k1", status: "approved", eventName: "Gala" }),
+      entry("booking", { id: "k2", status: "flagged_for_review", eventName: "Talk" }),
+      entry("block", { id: "k3", reason: null }),
+      entry("hold", { id: "k4", eventName: "Launch" }),
+    ]);
+    render(<VenueCalendar venueId={VENUE.id} initialDate={WED_7_OCT} />);
+    await screen.findByRole("table");
+
+    const keyItems = within(screen.getByRole("list", { name: "Calendar key" })).getAllByRole("listitem");
+    expect(keyItems.map((item) => item.textContent)).toEqual([
+      "Booked",
+      "Booked – under review",
+      "Blocked",
+      "Tentatively held",
+    ]);
+    // Each swatch's colour is an entry's colour, and that entry says the same words.
+    for (const item of keyItems) {
+      const tone = item.querySelector(".venue-calendar__swatch").className.match(/--(\w+)/)[1];
+      const shown = document.querySelector(`.venue-calendar__entry--${tone} .venue-calendar__entry-label`);
+      expect(shown).toHaveTextContent(item.textContent);
+    }
+  });
 });

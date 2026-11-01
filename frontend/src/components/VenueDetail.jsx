@@ -172,7 +172,7 @@ function fmtField(key, value) {
   }
 }
 
-export default function VenueDetail({ venue }) {
+export default function VenueDetail({ venue, headingRef }) {
   // Names the "Safety information" section by its h3, so the page has exactly
   // one region of that name. VenueSafetyFacts inside it, given no venueName,
   // is a plain div and does not repeat it.
@@ -269,7 +269,8 @@ export default function VenueDetail({ venue }) {
 
   return (
     <div className="venue-detail">
-      <h2>
+      {/* tabIndex -1 and headingRef: the catalogue moves focus here when it opens this panel. */}
+      <h2 ref={headingRef} tabIndex={-1}>
         {venue.name} &mdash; {venue.location}
       </h2>
 

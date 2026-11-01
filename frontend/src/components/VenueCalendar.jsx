@@ -34,7 +34,7 @@ import {
   startOfDay,
   toWireWindow,
 } from "../services/calendarRange";
-import { calendarEntryDisplay } from "../services/calendarEntryDisplay";
+import { CALENDAR_KEY, calendarEntryDisplay } from "../services/calendarEntryDisplay";
 import {
   formatDateTimeRange,
   formatDayMonth,
@@ -243,6 +243,16 @@ export default function VenueCalendar({ venueId, initialDate = new Date() }) {
       <h2 id={titleId} className="venue-calendar__title" aria-live="polite">
         {rangeTitle(view, range)}
       </h2>
+
+      {/* Each swatch shares its entry's colour rule in App.css, so the key matches. */}
+      <ul className="venue-calendar__legend" aria-label="Calendar key">
+        {CALENDAR_KEY.map(({ label, tone }) => (
+          <li key={tone}>
+            <span className={`venue-calendar__swatch venue-calendar__swatch--${tone}`} aria-hidden="true" />
+            {label}
+          </li>
+        ))}
+      </ul>
 
       {loading && <LoadingText />}
 

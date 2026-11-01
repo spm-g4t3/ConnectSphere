@@ -43,7 +43,7 @@ button { cursor: pointer; }
 .login-form, .placeholder-page, .dashboard, .venue-search { margin: 0 auto; max-width: 1080px; padding: clamp(42px, 8vw, 88px) 24px; }
 .login-form { background: var(--paper); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); margin-top: 9vh; max-width: 440px; padding: 38px; }
 .login-form h1, .placeholder-page h1, .dashboard h1 { color: var(--ink); font-size: clamp(2rem, 4vw, 3.25rem); letter-spacing: -0.05em; margin: 0 0 12px; }
-.login-form label, .dashboard--venue-staff .venue-form > label { color: var(--muted); display: grid; font-size: 0.9rem; gap: 7px; margin: 20px 0; }
+.login-form label { color: var(--muted); display: grid; font-size: 0.9rem; gap: 7px; margin: 20px 0; }
 .login-form input { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); padding: 12px; }
 .login-form input:focus { border-color: var(--teal); outline: 2px solid rgba(8, 127, 123, 0.16); }
 .login-form button { width: 100%; }
@@ -207,14 +207,32 @@ button { cursor: pointer; }
    bug SCRUM-110 fixed at :24-30. Scoped to .venue-form so the catalogue's
    own rows keep the spread layout they want. */
 .dashboard--venue-staff .venue-form li { border-top: 0; display: block; padding: 4px 0; }
+/* One field style for the venue, block and hold forms, so the three read as
+   one family. Checkboxes keep the browser's own look. */
+.dashboard--venue-staff .venue-form > label, .dashboard--venue-staff .venue-block-form label, .dashboard--venue-staff .venue-hold-form label { color: var(--color-muted); display: grid; font-size: var(--font-size-md); gap: var(--space-2); margin: var(--space-4) 0 0; }
+.dashboard--venue-staff .venue-form input:not([type="checkbox"]), .dashboard--venue-staff .venue-form select, .dashboard--venue-staff .venue-form textarea,
+.dashboard--venue-staff .venue-block-form input, .dashboard--venue-staff .venue-block-form select, .dashboard--venue-staff .venue-block-form textarea,
+.dashboard--venue-staff .venue-hold-form input, .dashboard--venue-staff .venue-hold-form select { background: var(--color-paper); border: 1px solid var(--color-line); border-radius: var(--radius-control); color: var(--color-ink); font: inherit; max-width: 100%; min-width: 0; padding: var(--space-2) var(--space-3); width: 100%; }
+.dashboard--venue-staff .venue-form textarea, .dashboard--venue-staff .venue-block-form textarea { resize: vertical; }
+/* A ring of its own, because the accent border alone is too faint to find. */
+.dashboard--venue-staff .venue-form input:focus-visible, .dashboard--venue-staff .venue-form select:focus-visible, .dashboard--venue-staff .venue-form textarea:focus-visible,
+.dashboard--venue-staff .venue-block-form input:focus-visible, .dashboard--venue-staff .venue-block-form select:focus-visible, .dashboard--venue-staff .venue-block-form textarea:focus-visible,
+.dashboard--venue-staff .venue-hold-form input:focus-visible, .dashboard--venue-staff .venue-hold-form select:focus-visible { border-color: var(--color-accent); outline: 2px solid var(--color-accent); outline-offset: 1px; }
+.dashboard--venue-staff .venue-form [aria-invalid="true"], .dashboard--venue-staff .venue-block-form [aria-invalid="true"], .dashboard--venue-staff .venue-hold-form [aria-invalid="true"] { border-color: var(--color-danger); }
+.dashboard--venue-staff .venue-block-form__field-error, .dashboard--venue-staff .venue-hold-form__field-error { color: var(--color-danger); font-size: var(--font-size-sm); margin: var(--space-1) 0 0; }
+.dashboard--venue-staff .venue-form__help, .dashboard--venue-staff .venue-block-form__hint, .dashboard--venue-staff .venue-block-form__help, .dashboard--venue-staff .venue-hold-form__hint { color: var(--color-muted); font-size: var(--font-size-sm); margin: var(--space-1) 0 0; }
+.dashboard--venue-staff .venue-block-form button, .dashboard--venue-staff .venue-hold-form button { margin: var(--space-5) var(--space-2) 0 0; }
+/* A fieldset is as wide as its widest row by default; this lets it shrink to a phone. */
+.dashboard--venue-staff .venue-form fieldset { min-width: 0; }
+/* The opening hours sit beside their day on a wide screen, so they keep their own width there. */
+.dashboard--venue-staff .venue-form li input[type="time"] { width: auto; }
 /* SCRUM-493. The safety-fact boxes. They are the form's only textareas, so
    they get the block form's control look here rather than a new shared rule.
    The help line under each carries the code-point counter, which turns red
    past 2,000 -- the server refuses at that point, so staff see it before
    they save rather than after. */
-.dashboard--venue-staff .venue-form textarea { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; padding: 10px 12px; resize: vertical; }
 .dashboard--venue-staff .venue-form__counter { white-space: nowrap; }
-.dashboard--venue-staff .venue-form__counter--over { color: #a43c32; font-weight: 700; }
+.dashboard--venue-staff .venue-form__counter--over { color: var(--color-danger); font-weight: 700; }
 /* The next-day note under an overnight day's times, in the accent so it
    reads as information about the entry rather than as an error. */
 .dashboard--venue-staff .venue-form__closing,
@@ -235,25 +253,12 @@ button { cursor: pointer; }
 .venue-safety-facts dt { color: var(--muted); font-size: 0.86rem; font-weight: 700; }
 .venue-safety-facts dd { color: var(--ink); margin: 2px 0 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 .venue-safety-facts .venue-safety-facts__not-recorded { color: var(--muted); font-style: italic; }
-/* SCRUM-126. The block form, scoped like .venue-form above. The label grid is
-   the same shape as .venue-form > label; the start and end sit side by side on
-   a __row, which collapses to one column on a phone. Field errors are red
-   rather than the muted .dashboard p grey, so a fault under a control is not
-   mistaken for help text. */
-.dashboard--venue-staff .venue-block-form label { color: var(--muted); display: grid; font-size: 0.9rem; gap: 7px; margin: 20px 0 0; }
+/* SCRUM-126. The block form's start and end sit side by side on a __row,
+   which collapses to one column on a phone. */
 .dashboard--venue-staff .venue-block-form__row { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.dashboard--venue-staff .venue-block-form input, .dashboard--venue-staff .venue-block-form select, .dashboard--venue-staff .venue-block-form textarea { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; padding: 10px 12px; }
-.dashboard--venue-staff .venue-block-form textarea { resize: vertical; }
-.dashboard--venue-staff .venue-block-form [aria-invalid="true"] { border-color: #a43c32; }
-.dashboard--venue-staff .venue-block-form__field-error { color: #a43c32; font-size: 0.84rem; margin: 6px 0 0; }
-.dashboard--venue-staff .venue-block-form__hint, .dashboard--venue-staff .venue-block-form__help { color: var(--muted); font-size: 0.84rem; margin: 6px 0 0; }
-.dashboard--venue-staff .venue-block-form button { margin: 20px 10px 0 0; }
 /* NECESSARY, not cosmetic -- the same .dashboard li flex bug .venue-form li
    fixes above, here on the field-error lists and the alert's list. */
 .dashboard--venue-staff .venue-block-form li { border-top: 0; display: block; padding: 2px 0; }
-@media (max-width: 720px) {
-  .dashboard--venue-staff .venue-block-form__row { grid-template-columns: 1fr; }
-}
 /* SCRUM-125. The booking-conflict warning a block over approved bookings
    raises. The same amber pair as .status--awaiting-review: a warning to act
    on, not a failure. */
@@ -304,15 +309,8 @@ button { cursor: pointer; }
    the row's details and actions. */
 .dashboard--venue-staff .venue-blocks__list > li { flex-wrap: wrap; }
 .dashboard--venue-staff .venue-blocks__audit { color: var(--muted); flex-basis: 100%; font-size: 0.84rem; margin: 0; overflow-wrap: anywhere; }
-/* SCRUM-491. The hold panel and form, scoped and shaped like the block ones
-   above: the same label grid, red field errors, the amber warning for what
-   is in the way, and the green notice for a hold placed. */
-.dashboard--venue-staff .venue-hold-form label { color: var(--muted); display: grid; font-size: 0.9rem; gap: 7px; margin: 20px 0 0; }
-.dashboard--venue-staff .venue-hold-form input, .dashboard--venue-staff .venue-hold-form select { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; padding: 10px 12px; }
-.dashboard--venue-staff .venue-hold-form [aria-invalid="true"] { border-color: #a43c32; }
-.dashboard--venue-staff .venue-hold-form__field-error { color: #a43c32; font-size: 0.84rem; margin: 6px 0 0; }
-.dashboard--venue-staff .venue-hold-form__hint { color: var(--muted); font-size: 0.84rem; margin: 6px 0 0; }
-.dashboard--venue-staff .venue-hold-form button { margin: 20px 10px 0 0; }
+/* SCRUM-491. The hold panel, shaped like the block one above: the amber
+   warning for what is in the way, and the green notice for a hold placed. */
 /* NECESSARY, not cosmetic -- the same .dashboard li flex bug .venue-form li
    fixes above, on the field-error lists and the alert's list. */
 .dashboard--venue-staff .venue-hold-form li { border-top: 0; display: block; padding: 2px 0; }
@@ -344,6 +342,30 @@ button { cursor: pointer; }
    either to a name, so they are rendered as identifiers and need to read as
    one rather than as prose. */
 .dashboard--venue-staff code { background: #eef2f1; border-radius: 4px; color: var(--muted); font-size: 0.78rem; padding: 2px 6px; }
+/* Catalogue rows: View bookings & history leads, and Retire, which cannot be
+   undone, stands apart at the end. */
+.dashboard--venue-staff .venue-catalogue__item-main { min-width: 0; overflow-wrap: anywhere; }
+.dashboard--venue-staff .venue-catalogue__item-actions { align-items: center; display: flex; flex-wrap: wrap; gap: var(--space-2); justify-content: flex-end; }
+.dashboard--venue-staff .venue-catalogue__item-actions .venue-catalogue__retire { margin-left: var(--space-4); }
+/* The calendar link sits among the secondary buttons, so it takes their look
+   rather than the primary fill it has on the venue search. */
+.dashboard--venue-staff .venue-catalogue__calendar-link { background: var(--color-paper); border: 1px solid var(--color-accent-dark); border-radius: var(--radius-control); color: var(--color-accent-dark); font-size: inherit; padding: 10px var(--space-4); }
+.dashboard--venue-staff .venue-catalogue__calendar-link:hover { background: var(--color-accent-soft); }
+.dashboard--venue-staff .venue-catalogue__calendar-link:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+/* Venue and event names can be one long word; they wrap inside the card. */
+.dashboard--venue-staff .venue-form h2, .dashboard--venue-staff .venue-detail h2, .dashboard--venue-staff .venue-blocks h2, .dashboard--venue-staff .venue-holds h2,
+.dashboard--venue-staff .venue-detail li, .dashboard--venue-staff .block-conflicts__list li, .dashboard--venue-staff .venue-holds__conflict-list li,
+.dashboard--venue-staff .ui-confirm-dialog { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 720px) {
+  .dashboard--venue-staff .venue-catalogue__item-actions { justify-content: flex-start; width: 100%; }
+  .dashboard--venue-staff .venue-catalogue__item-actions .venue-catalogue__retire { margin-left: auto; }
+  .dashboard--venue-staff .venue-block-form__row { grid-template-columns: 1fr; }
+  /* Each day's name above its opening and closing times, which share the row. */
+  .dashboard--venue-staff .venue-form fieldset li { display: grid; gap: var(--space-2); grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dashboard--venue-staff .venue-form fieldset li > label, .dashboard--venue-staff .venue-form fieldset li > .venue-form__closing { grid-column: 1 / -1; }
+  .dashboard--venue-staff .venue-form li input[type="time"] { width: 100%; }
+  .dashboard--venue-staff .ui-confirm-dialog .ui-confirm-dialog__actions { flex-wrap: wrap; }
+}
 /* SCRUM-45. A COPY of the badge rules above, not an unscoping of them. The
    comment at :56-61 says in as many words that scoping them to one dashboard
    is blast-radius control and that defining the unscoped base belongs to
@@ -932,16 +954,43 @@ button.event-registration-page__back { background: none; border: 0; cursor: poin
 .venue-calendar .venue-calendar__cell--today .venue-calendar__day-number.ui-button { background: var(--teal); border-radius: 999px; color: white; }
 .venue-calendar__entries { display: grid; gap: 6px; list-style: none; margin: 4px 0 0; padding: 0; }
 .venue-calendar__entry { border-left: 4px solid; border-radius: 6px; display: grid; font-size: 0.84rem; gap: 2px; overflow-wrap: anywhere; padding: 6px 8px; }
+/* The key's swatch: an entry's left border and fill in miniature. Before the
+   tone rules below, which it shares, so their border style wins. */
+.venue-calendar__swatch { border-left: 4px solid; border-radius: var(--radius-control); display: inline-block; flex: 0 0 auto; height: var(--space-4); width: var(--space-5); }
 .venue-calendar__entry-time { color: var(--muted); font-size: 0.78rem; }
 .venue-calendar__entry-label { font-weight: 700; }
 .venue-calendar__entry-detail { color: var(--ink); }
-.venue-calendar__entry--booked { background: #e8f7f1; border-color: #17684f; color: #17684f; }
-.venue-calendar__entry--review { background: #fff6e5; border-color: #8a5a00; border-left-style: dashed; color: #8a5a00; }
-.venue-calendar__entry--blocked { background: #fff0ee; border-color: #a43c32; border-left-style: double; border-left-width: 6px; color: #a43c32; }
+.venue-calendar__entry--booked, .venue-calendar__swatch--booked { background: #e8f7f1; border-color: #17684f; color: #17684f; }
+.venue-calendar__entry--review, .venue-calendar__swatch--review { background: #fff6e5; border-color: #8a5a00; border-left-style: dashed; color: #8a5a00; }
+.venue-calendar__entry--blocked, .venue-calendar__swatch--blocked { background: #fff0ee; border-color: #a43c32; border-left-style: double; border-left-width: 6px; color: #a43c32; }
 /* SCRUM-491 (AC6). A tentative hold: blue, and dotted, so it reads as
    provisional beside a solid booking even without colour. */
-.venue-calendar__entry--held { background: #e9f1fb; border-color: #2b5285; border-left-style: dotted; color: #2b5285; }
+.venue-calendar__entry--held, .venue-calendar__swatch--held { background: #e9f1fb; border-color: #2b5285; border-left-style: dotted; color: #2b5285; }
 .venue-calendar__grid--month .venue-calendar__entry { font-size: 0.76rem; padding: 3px 6px; }
+.venue-calendar__legend { color: var(--color-muted); display: flex; flex-wrap: wrap; font-size: var(--font-size-sm); gap: var(--space-2) var(--space-4); list-style: none; margin: 0 0 var(--space-3); padding: 0; }
+.venue-calendar__legend li { align-items: center; display: inline-flex; gap: var(--space-2); }
+@media (max-width: 720px) {
+  /* The month keeps its seven columns at phone width: no minimum, tighter cells. */
+  .venue-calendar__grid { min-width: 0; }
+  .venue-calendar__grid th { font-size: var(--font-size-xs); overflow-wrap: anywhere; padding: var(--space-1); }
+  .venue-calendar__grid td { padding: 2px; }
+  .venue-calendar__grid--month td { height: 72px; }
+  .venue-calendar .venue-calendar__day-number.ui-button { font-size: var(--font-size-sm); padding: 0 var(--space-1); }
+  .venue-calendar__grid--month .venue-calendar__entry { border-left-width: 3px; font-size: var(--font-size-xs); padding: 2px; }
+  /* The week turns into an agenda, each day's name beside its entries, since
+     seven columns of times would be too narrow to read. */
+  .venue-calendar__grid--week { display: grid; grid-template-columns: minmax(64px, auto) minmax(0, 1fr); }
+  .venue-calendar__grid--week thead, .venue-calendar__grid--week tbody, .venue-calendar__grid--week tr { display: contents; }
+  .venue-calendar__grid--week th { border-bottom: 0; border-top: 1px solid var(--color-line); grid-column: 1; padding: var(--space-2); }
+  .venue-calendar__grid--week td, .venue-calendar__grid--week td:first-child { border-left: 1px solid var(--color-line); grid-column: 2; height: auto; min-height: 44px; padding: var(--space-1); }
+  .venue-calendar__grid--week :is(th, td):nth-child(1) { border-top: 0; grid-row: 1; }
+  .venue-calendar__grid--week :is(th, td):nth-child(2) { grid-row: 2; }
+  .venue-calendar__grid--week :is(th, td):nth-child(3) { grid-row: 3; }
+  .venue-calendar__grid--week :is(th, td):nth-child(4) { grid-row: 4; }
+  .venue-calendar__grid--week :is(th, td):nth-child(5) { grid-row: 5; }
+  .venue-calendar__grid--week :is(th, td):nth-child(6) { grid-row: 6; }
+  .venue-calendar__grid--week :is(th, td):nth-child(7) { grid-row: 7; }
+}
 @media (max-width: 720px) {
    .app-nav { align-items: flex-start; flex-wrap: wrap; gap: 12px 16px; padding: 14px 18px; }
    .app-nav__links { flex: 1 1 100%; gap: 2px; order: 3; overflow-x: auto; width: 100%; }
@@ -1091,6 +1140,16 @@ button.event-registration-page__back { background: none; border: 0; cursor: poin
 .dashboard .pending-bookings__toggle:hover, .dashboard .pending-bookings__toggle[aria-expanded="true"] { background: #f4f8f7; }
 .dashboard .pending-bookings__toggle span:not(.ui-status-badge) { color: var(--muted); font-size: 0.9rem; }
 .dashboard .pending-bookings__toggle .ui-status-badge { margin-left: auto; }
+/* Hover and expanded share one background, so keyboard focus gets its own ring; inset so the full-width row stays inside the card. */
+.dashboard .pending-bookings__toggle:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+/* Long unbroken event or venue names wrap instead of widening the page. */
+.dashboard .pending-bookings__toggle > * { min-width: 0; overflow-wrap: anywhere; }
+.pending-bookings__detail { overflow-wrap: anywhere; }
+@media (max-width: 720px) {
+  /* Event, venue, period and badge stack one per line rather than wrapping raggedly. */
+  .dashboard .pending-bookings__toggle { align-items: flex-start; flex-direction: column; gap: var(--space-1); }
+  .dashboard .pending-bookings__toggle .ui-status-badge { margin-left: 0; }
+}
 .pending-bookings__detail { display: grid; gap: 12px; padding: 4px 4px 20px; }
 .pending-bookings__detail dl { display: grid; gap: 7px 16px; grid-template-columns: minmax(150px, 220px) minmax(0, 1fr); margin: 0; }
 .pending-bookings__detail dt { color: var(--muted); font-size: 0.86rem; font-weight: 700; }

@@ -108,7 +108,7 @@ describe("loading, empty and error states (AC1)", () => {
     vi.mocked(getFlaggedBookings).mockReturnValue(pending.promise);
     renderList();
 
-    expect(screen.getByRole("heading", { name: "Flagged bookings" }).closest("section")).not.toBeNull();
+    expect(screen.getByRole("heading", { name: /^Flagged bookings/ }).closest("section")).not.toBeNull();
     expect(screen.getByText("Loading...")).toBeInTheDocument();
     await act(async () => pending.resolve([item("1")]));
     expect(screen.queryByText("Loading...")).not.toBeInTheDocument();

@@ -108,6 +108,17 @@ function httpError(status) {
   });
 }
 
+// The calendar key lists every kind of entry, so checks on the entries
+// themselves leave it out.
+const KEY = ".venue-calendar__legend";
+const OUTSIDE_KEY = { ignore: `script, style, ${KEY} *` };
+function entryItems() {
+  return screen.queryAllByRole("listitem").filter((item) => !item.closest(KEY));
+}
+function entryLists() {
+  return screen.queryAllByRole("list").filter((list) => !list.closest(KEY) && !list.matches(KEY));
+}
+
 async function renderCalendar(props = {}) {
   const user = userEvent.setup();
   const utils = render(<VenueCalendar venueId={VENUE_ID} initialDate={WED_7_OCT} {...props} />);
@@ -665,7 +676,8 @@ describe("SCRUM178_AC2 VenueCalendar entry labels", () => {
     const { user } = await renderCalendar();
     await user.click(screen.getByRole("button", { name: "Day" }));
 
-    const items = await screen.findAllByRole("listitem");
+    await screen.findByText("Evening Talk");
+    const items = entryItems();
     expect(items).toHaveLength(2);
     expect(items[0]).toHaveClass("venue-calendar__entry--review");
     expect(items[0].querySelector(".venue-calendar__entry-time")).toHaveTextContent(expectedRange(first));
@@ -742,14 +754,14 @@ describe("SCRUM178_AC3 VenueCalendar pending requests are not shown as booked", 
       // The endpoint's answer did carry all three.
       expect(await vi.mocked(getVenueCalendar).mock.results.at(-1).value).toHaveLength(3);
 
-      const items = screen.getAllByRole("listitem");
+      const items = entryItems();
       expect(items).toHaveLength(1);
       expect(items[0]).toHaveClass("venue-calendar__entry--booked");
       expect(items[0]).toHaveTextContent("Gala Dinner");
       expect(document.querySelectorAll(".venue-calendar__entry-label")).toHaveLength(1);
       expect(screen.queryByText("Pending Party")).not.toBeInTheDocument();
       expect(screen.queryByText("Rejected Rally")).not.toBeInTheDocument();
-      expect(screen.queryByText("Booked – under review")).not.toBeInTheDocument();
+      expect(screen.queryByText("Booked – under review", OUTSIDE_KEY)).not.toBeInTheDocument();
     },
   );
 
@@ -759,8 +771,8 @@ describe("SCRUM178_AC3 VenueCalendar pending requests are not shown as booked", 
     await showView(user, "day");
 
     expect(screen.getByText("Nothing booked or blocked in this period.")).toBeInTheDocument();
-    expect(screen.queryByRole("list")).not.toBeInTheDocument();
-    expect(screen.queryByText(/Booked/)).not.toBeInTheDocument();
+    expect(entryLists()).toHaveLength(0);
+    expect(screen.queryByText(/Booked/, OUTSIDE_KEY)).not.toBeInTheDocument();
   });
 });
 
@@ -774,7 +786,7 @@ describe("SCRUM178_AC5 VenueCalendar hidden entries", () => {
     ]);
     await renderCalendar();
 
-    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    expect(entryItems()).toHaveLength(1);
     expect(screen.getByText("Gala Dinner")).toBeInTheDocument();
     expect(screen.queryByText("Pending Party")).not.toBeInTheDocument();
     expect(screen.queryByText("Cancelled Concert")).not.toBeInTheDocument();
@@ -789,13 +801,13 @@ describe("SCRUM178_AC5 VenueCalendar hidden entries", () => {
     const { user } = await renderCalendar();
 
     expect(screen.getByText("Nothing booked or blocked in this period.")).toBeInTheDocument();
-    expect(screen.queryAllByRole("listitem")).toHaveLength(0);
+    expect(entryItems()).toHaveLength(0);
 
     // The day view drops its list entirely rather than rendering an empty one.
     await user.click(screen.getByRole("button", { name: "Day" }));
     await waitFor(() => expect(getVenueCalendar).toHaveBeenCalledTimes(2));
     expect(await screen.findByText("Nothing booked or blocked in this period.")).toBeInTheDocument();
-    expect(screen.queryByRole("list")).not.toBeInTheDocument();
+    expect(entryLists()).toHaveLength(0);
   });
 
   it.each(["day", "month"])(
@@ -812,7 +824,7 @@ describe("SCRUM178_AC5 VenueCalendar hidden entries", () => {
       await showView(user, view);
 
       expect(await vi.mocked(getVenueCalendar).mock.results.at(-1).value).toHaveLength(4);
-      const items = screen.getAllByRole("listitem");
+      const items = entryItems();
       expect(items).toHaveLength(1);
       expect(items[0]).toHaveTextContent("Gala Dinner");
       expect(screen.queryByText("Cancelled Concert")).not.toBeInTheDocument();
@@ -1184,7 +1196,7 @@ describe("SCRUM491_AC6 VenueCalendar shows active tentative holds", () => {
     expect(entry).not.toBeNull();
     expect(within(entry).getByText("Tentatively held")).toBeInTheDocument();
     expect(within(entry).getByText("Product Launch")).toBeInTheDocument();
-    expect(screen.queryByText("Booked")).not.toBeInTheDocument();
+    expect(screen.queryByText("Booked", OUTSIDE_KEY)).not.toBeInTheDocument();
   });
 
   it("SCRUM491_AC6_a_hold_shows_its_whole_occupied_period", async () => {

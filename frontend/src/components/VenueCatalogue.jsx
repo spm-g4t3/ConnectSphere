@@ -79,6 +79,20 @@ export default function VenueCatalogue({ currentUserId, asPage = false } = {}) {
   const retireOpener = useRef(null); // { id, button }
   const rowMains = useRef(new Map());
 
+  // The button that opened the current panel, keyed "<venue id> <mode>" (or
+  // "create"), so Back can return focus to it once the list is back.
+  const panelOpener = useRef(null); // { key, id }
+  const panelButtons = useRef(new Map());
+  // Set when a panel opens; cleared once its heading has taken focus. A flag
+  // rather than an effect because the edit form's heading only appears once
+  // the venue has loaded.
+  const headingFocusPending = useRef(false);
+  const focusPanelHeading = useCallback((heading) => {
+    if (!heading || !headingFocusPending.current) return;
+    headingFocusPending.current = false;
+    heading.focus();
+  }, []);
+
   // SCRUM-484 (AC8). The bookings the last save flagged for review, because a
   // new setup or turnaround time made them overlap. Kept until dismissed or
   // replaced by the next save, so it survives the refetch and stays readable
@@ -126,6 +140,29 @@ export default function VenueCatalogue({ currentUserId, asPage = false } = {}) {
     retireOpener.current = null;
     (button.isConnected ? button : rowMains.current.get(id))?.focus();
   }, [confirmingId]);
+
+  // Runs once the list is back. A button that went away or was disabled
+  // meanwhile (the venue was retired) hands focus to its row instead.
+  useEffect(() => {
+    if (activePanel !== null || !panelOpener.current) return;
+    const { key, id } = panelOpener.current;
+    panelOpener.current = null;
+    headingFocusPending.current = false;
+    const button = panelButtons.current.get(key);
+    (button && !button.disabled ? button : rowMains.current.get(id))?.focus();
+  }, [activePanel]);
+
+  function openPanel(mode, venue = null) {
+    panelOpener.current = { key: venue ? `${venue.id} ${mode}` : mode, id: venue?.id };
+    headingFocusPending.current = true;
+    setActivePanel(venue ? { mode, venue } : { mode });
+  }
+
+  /** Records one of the panel buttons for Back; called from its ref callback. */
+  function trackPanelButton(key, element) {
+    panelButtons.current.set(key, element);
+    return () => panelButtons.current.delete(key);
+  }
 
   function openRetire(venue, event) {
     retireOpener.current = { id: venue.id, button: event.currentTarget };
@@ -202,7 +239,7 @@ export default function VenueCatalogue({ currentUserId, asPage = false } = {}) {
         <Button variant="link" onClick={() => setActivePanel(null)}>
           &larr; Back to the venue catalogue
         </Button>
-        <VenueForm onSaved={handleSaved} />
+        <VenueForm onSaved={handleSaved} headingRef={focusPanelHeading} />
       </section>
     );
   }
@@ -214,7 +251,11 @@ export default function VenueCatalogue({ currentUserId, asPage = false } = {}) {
         <Button variant="link" onClick={() => setActivePanel(null)}>
           &larr; Back to the venue catalogue
         </Button>
-        <VenueForm venueId={activePanel.venue.id} onSaved={handleSaved} />
+        <VenueForm
+          venueId={activePanel.venue.id}
+          onSaved={handleSaved}
+          headingRef={focusPanelHeading}
+        />
       </section>
     );
   }
@@ -228,7 +269,7 @@ export default function VenueCatalogue({ currentUserId, asPage = false } = {}) {
         </Button>
         {/* No onSaved: this panel reads and changes nothing, so closing it
             needs no refetch. */}
-        <VenueDetail venue={activePanel.venue} />
+        <VenueDetail venue={activePanel.venue} headingRef={focusPanelHeading} />
       </section>
     );
   }
@@ -241,7 +282,11 @@ export default function VenueCatalogue({ currentUserId, asPage = false } = {}) {
             retired meanwhile (VENUE_RETIRED), and the catalogue row should
             say so when we come back to it. */}
         <Button variant="link" onClick={handleSaved}>&larr; Back to the venue catalogue</Button>
-        <VenueBlocksPanel venue={activePanel.venue} currentUserId={currentUserId} />
+        <VenueBlocksPanel
+          venue={activePanel.venue}
+          currentUserId={currentUserId}
+          headingRef={focusPanelHeading}
+        />
       </section>
     );
   }
@@ -253,7 +298,11 @@ export default function VenueCatalogue({ currentUserId, asPage = false } = {}) {
       <section>
         {pageTitle}
         <Button variant="link" onClick={handleSaved}>&larr; Back to the venue catalogue</Button>
-        <VenueHoldsPanel venue={activePanel.venue} currentUserId={currentUserId} />
+        <VenueHoldsPanel
+          venue={activePanel.venue}
+          currentUserId={currentUserId}
+          headingRef={focusPanelHeading}
+        />
       </section>
     );
   }
@@ -330,10 +379,11 @@ export default function VenueCatalogue({ currentUserId, asPage = false } = {}) {
                     Now that the button opens a real form, that is no longer
                     hypothetical. */}
                 <Button
+                  ref={(element) => trackPanelButton(`${venue.id} edit`, element)}
                   variant="secondary"
                   disabled={retired}
                   title={retired ? "A retired venue cannot be edited." : undefined}
-                  onClick={() => setActivePanel({ mode: "edit", venue })}
+                  onClick={() => openPanel("edit", venue)}
                 >
                   Edit details
                 </Button>
@@ -343,7 +393,12 @@ export default function VenueCatalogue({ currentUserId, asPage = false } = {}) {
                     appearing in searches *while its past bookings remain
                     viewable*. Greying this out on a retired row would make
                     retirement a delete after all. */}
-                <Button variant="secondary" onClick={() => setActivePanel({ mode: "detail", venue })}>
+                {/* The one primary action in a row: the read every row has,
+                    retired or not. */}
+                <Button
+                  ref={(element) => trackPanelButton(`${venue.id} detail`, element)}
+                  onClick={() => openPanel("detail", venue)}
+                >
                   View bookings &amp; history
                 </Button>
 
@@ -360,10 +415,11 @@ export default function VenueCatalogue({ currentUserId, asPage = false } = {}) {
                     the server refuses a new block there with VENUE_RETIRED, so
                     the button would only open a form that cannot be saved. */}
                 <Button
+                  ref={(element) => trackPanelButton(`${venue.id} blocks`, element)}
                   variant="secondary"
                   disabled={retired}
                   title={retired ? "A retired venue cannot be blocked." : undefined}
-                  onClick={() => setActivePanel({ mode: "blocks", venue })}
+                  onClick={() => openPanel("blocks", venue)}
                 >
                   Manage blocks
                 </Button>
@@ -373,10 +429,11 @@ export default function VenueCatalogue({ currentUserId, asPage = false } = {}) {
                     Disabled on a retired venue for the same reason: the
                     server refuses a hold there with VENUE_RETIRED (AC4). */}
                 <Button
+                  ref={(element) => trackPanelButton(`${venue.id} holds`, element)}
                   variant="secondary"
                   disabled={retired}
                   title={retired ? "A retired venue cannot be held." : undefined}
-                  onClick={() => setActivePanel({ mode: "holds", venue })}
+                  onClick={() => openPanel("holds", venue)}
                 >
                   Place hold
                 </Button>
@@ -386,6 +443,7 @@ export default function VenueCatalogue({ currentUserId, asPage = false } = {}) {
                 {!retired && (
                   <Button
                     variant="danger"
+                    className="venue-catalogue__retire"
                     onClick={(event) => openRetire(venue, event)}
                     title="A retired venue stops appearing in searches. Its past bookings stay viewable. This cannot be undone."
                   >
@@ -398,7 +456,9 @@ export default function VenueCatalogue({ currentUserId, asPage = false } = {}) {
         })}
       </ul>
 
-      <Button onClick={() => setActivePanel({ mode: "create" })}>+ Add new venue</Button>
+      <Button ref={(element) => trackPanelButton("create", element)} onClick={() => openPanel("create")}>
+        + Add new venue
+      </Button>
 
       {confirmingVenue && (
         <ConfirmDialog

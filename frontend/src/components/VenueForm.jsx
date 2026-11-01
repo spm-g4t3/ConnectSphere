@@ -231,7 +231,7 @@ function CodeCheckboxes({ legend, options, selected, onToggle, disabled }) {
   );
 }
 
-export default function VenueForm({ venueId = null, onSaved }) {
+export default function VenueForm({ venueId = null, onSaved, headingRef }) {
   const isEdit = Boolean(venueId);
   const turnaroundHelpId = useId();
   const setupHelpId = useId();
@@ -532,7 +532,11 @@ export default function VenueForm({ venueId = null, onSaved }) {
 
   return (
     <form className="venue-form" onSubmit={handleSubmit}>
-      <h2>{isEdit ? "Edit venue" : "Add a new venue"}</h2>
+      {/* tabIndex -1 and headingRef: the catalogue moves focus here when it opens
+          this form, which for an edit is only once the venue has loaded. */}
+      <h2 ref={headingRef} tabIndex={-1}>
+        {isEdit ? "Edit venue" : "Add a new venue"}
+      </h2>
 
       <label>
         Name

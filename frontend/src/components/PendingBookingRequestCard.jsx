@@ -79,6 +79,7 @@ export default function PendingBookingRequestCard({
   item,
   expanded,
   onToggle,
+  toggleRef,
   busy,
   marksOnApproval,
   deciding,
@@ -131,6 +132,7 @@ export default function PendingBookingRequestCard({
           A native button: it is a disclosure row, not an action, so Button would restyle it. */}
       <button
         type="button"
+        ref={toggleRef}
         className="pending-bookings__toggle"
         aria-expanded={expanded}
         aria-controls={regionId}
