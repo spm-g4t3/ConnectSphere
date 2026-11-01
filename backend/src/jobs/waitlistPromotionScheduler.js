@@ -19,6 +19,7 @@
  */
 
 import { resolveClient } from '../config/resolveClient.js';
+import { startRepeatingJob } from './repeatingJob.js';
 
 /** Once a minute: a reopened place is handed out within a minute of opening. */
 export const DEFAULT_INTERVAL_MS = 60_000;
@@ -64,23 +65,5 @@ export function startWaitlistPromotionScheduler({
   client,
   logger = console,
 } = {}) {
-  let running = false;
-
-  async function tick() {
-    if (running) return;
-    running = true;
-    try {
-      await runWaitlistPromotionsOnce({ client, logger });
-    } finally {
-      running = false;
-    }
-  }
-
-  tick();
-  const timer = setInterval(tick, intervalMs);
-  timer.unref();
-
-  return function stop() {
-    clearInterval(timer);
-  };
+  return startRepeatingJob(() => runWaitlistPromotionsOnce({ client, logger }), intervalMs);
 }
