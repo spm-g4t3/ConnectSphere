@@ -369,28 +369,6 @@ export async function getEventRequestForReview(id) {
 }
 
 /**
- * Every Event Coordinator, for the reassign picker (SCRUM-334).
- *
- * Each entry is { id, fullName }, in name order, with anyone who has no name
- * on record at the end. fullName can be null: a coordinator with no name is
- * still someone an event can be handed to, so the picker has to show them
- * some other way rather than drop them.
- *
- * The list includes the caller. Nobody can hand an event to themselves, so
- * the picker should leave the signed-in user out, matching on id: the user in
- * AuthContext has no name to compare. That is the picker's job; the server
- * returns the plain list.
- *
- * Gated on the event_coordinator role. This is the first call in the app that
- * lists people, and nothing outside the reassign screen needs it.
- *
- * @returns {Promise<Array<{id: string, fullName: string|null}>>} possibly empty
- */
-export async function listCoordinators() {
-  return getData("/event-requests/coordinators");
-}
-
-/**
  * One event's assignment history, the Organiser's view (SCRUM-334, SCRUM-327
  * AC10).
  *
@@ -496,7 +474,7 @@ export async function getAssignmentHistoryForReview(id) {
  *
  * @param {string} id
  * @param {Object} handover
- * @param {string} handover.newCoordinatorId  an id from listCoordinators
+ * @param {string} handover.newCoordinatorId  an id from listCoordinatorWorkload
  * @param {string} [handover.handoverNote]    optional, for the new coordinator
  * @returns {Promise<Object>} the event after the handover
  */

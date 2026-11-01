@@ -25,7 +25,7 @@ venue booking, equipment and attendee registration [W1 §2]. The core problems i
 | Role | Key | Does |
 |---|---|---|
 | Event Organiser (external) | `event_organiser` | Creates, drafts and submits requests. After submission, changes only through the Coordinator [C4]. |
-| Event Coordinator | `event_coordinator` | Reviews, clarifies, approves or rejects; books venues; records equipment; confirms or cancels. Edits **only events assigned to them**; may view others [C4][W7 #5]. |
+| Event Coordinator | `event_coordinator` | Reviews, clarifies, approves or rejects; books venues; records equipment; confirms or cancels. Edits **only events assigned to them**; may view others [C4][W7 #5]. *Changed by SCRUM-444 (Week 9 Q&A row 40), 2 November 2026: views only events assigned to them.* |
 | Event Coordinator Lead | `event_coordinator_lead` | Sees the unassigned queue, assigns and reassigns, sees all assignments and active events [W7 #5]. |
 | Venue Staff | `venue_staff` | Venue catalogue (create, edit, delete), blocks, booking decisions, tentative holds [C4][W7]. |
 | Technical Support Staff | `technical_support_staff` | Equipment catalogue and status, availability checks, request review, reservations [W4][C4]. |

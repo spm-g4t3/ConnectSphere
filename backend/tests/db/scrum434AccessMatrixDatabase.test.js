@@ -144,13 +144,19 @@ describe('SCRUM-434: access to an event, by role and relationship', () => {
     ];
 
     describe.each(STRANGERS)('%s', (_label, who, role) => {
-      // Any coordinator reads a submitted event's clarification history: the
-      // coordinators work from one shared queue (SCRUM-486), so that read is
-      // not limited to the assigned one. Every other history is.
+      // 434 let any coordinator read the clarification history, the one row this
+      // table left out. SCRUM-444 AC1 narrowed it to the holder; that row is
+      // the SCRUM444_ test below, and this table keeps 434's rows.
       const refused = Object.keys(READS).filter((kind) => !(role === ROLE.EVENT_COORDINATOR && kind === 'clarification'));
       it.each(refused)('SCRUM434_AC6_%s_history_is_answered_as_not_found', async (kind) => {
         await expect(READS[kind](who(), role)).rejects.toMatchObject(NOT_FOUND);
       });
+
+      if (role === ROLE.EVENT_COORDINATOR) {
+        it('SCRUM444_AC1_an_unassigned_coordinator_is_refused_the_clarification_history', async () => {
+          await expect(READS.clarification(who(), role)).rejects.toMatchObject(NOT_FOUND);
+        });
+      }
 
       it('SCRUM434_AC6_the_organiser_event_read_is_answered_as_not_found', async () => {
         // The routes put a role gate in front of this; behind it, an account

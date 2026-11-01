@@ -42,6 +42,8 @@ import {
   amendEquipmentLine,
   removeEquipmentLine,
 } from '../services/equipmentLineService.js';
+import { getEventRequestForCoordinator, assertCoordinatorMayRead } from '../services/eventRequestService.js';
+import { validateEventRequestId } from '../validation/equipmentLineValidation.js';
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
 import { noopFinalEventGuard, createFinalEventGuard, eventIdFromParam } from '../middleware/finalEventGuard.js';
 import { createRequireRole } from '../middleware/requireRole.js';
@@ -87,8 +89,14 @@ export function createEventEquipmentRouter({
 
   router.use(requireAuth);
 
-  /** AC11: the event's equipment. 404 for an event that does not exist. */
+  /**
+   * AC11: the event's equipment. SCRUM-444 AC1, AC4: for the holder and the Lead;
+   * anyone else, and a draft, gets the coordinator read's missing-id 404.
+   */
   router.get('/', coordinatorOrLead, async (req, res) => {
+    validateEventRequestId(req.params.id);
+    const event = await getEventRequestForCoordinator(req.params.id, { client });
+    assertCoordinatorMayRead(event, req.user.id, req.user.role, req.params.id);
     res.status(200).json(await listEventEquipment(req.params.id, { client }));
   });
 

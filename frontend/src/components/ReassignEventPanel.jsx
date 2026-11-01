@@ -23,7 +23,6 @@ import { useAuth } from "../auth/AuthContext";
 import { normaliseRole } from "../auth/normaliseRole";
 import {
   listCoordinatorWorkload,
-  listCoordinators,
   reassignEventRequest,
 } from "../services/eventRequestService";
 import { coordinatorOptionLabel } from "../services/coordinatorDisplay";
@@ -103,14 +102,9 @@ export default function ReassignEventPanel({
   useEffect(() => {
     let cancelled = false;
 
-    // Which list, by role. GET /coordinators is the coordinators' (SCRUM-334)
-    // and refuses a Lead, deliberately (SCRUM-485 AC5); the Lead's own list
-    // of the same people is GET /coordinator-workload (SCRUM-519), which also
-    // gives each one's active events. Widening /coordinators instead would
-    // undo that pinned refusal for a need this already meets.
-    const loadCoordinators = isLead ? listCoordinatorWorkload : listCoordinators;
-
-    loadCoordinators()
+    // SCRUM-444 (D5): GET /coordinators is gone with the holder's handover, so
+    // the Lead's list (SCRUM-519) is the only one. The screen itself is brief 2's.
+    listCoordinatorWorkload()
       .then((data) => {
         if (!cancelled) setCoordinators(data);
       })
