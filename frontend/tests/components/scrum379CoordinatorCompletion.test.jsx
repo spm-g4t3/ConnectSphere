@@ -157,20 +157,21 @@ describe("SCRUM379 AC4: a change request closed by the completion", () => {
     createdAt: "2030-06-01T03:00:00Z", ...overrides,
   });
 
-  it("SCRUM379_AC4_the_coordinators_panel_says_closed_event_completed_not_rejected", async () => {
+  // The coordinator's panel is SCRUM-402's ChangeRequestReviewPanel, in its words (changeRequestDisplay).
+  it("SCRUM402_AC10_the_coordinators_panel_says_closed_the_event_was_completed_not_declined", async () => {
     vi.mocked(getCoordinatorChangeRequests).mockResolvedValue([changeRequest("event_completed")]);
     renderDetail(COORDINATOR_USER, eventRequest({ status: "completed" }));
 
-    expect(await screen.findByText("Outcome: Closed, event completed")).toBeInTheDocument();
-    expect(screen.queryByText("Outcome: Rejected")).not.toBeInTheDocument();
+    expect(await screen.findByText("Closed: the event was completed")).toBeInTheDocument();
+    expect(screen.queryByText("Declined")).not.toBeInTheDocument();
   });
 
   it.each([
-    ["approved", "Outcome: Approved"],
-    ["rejected", "Outcome: Rejected"],
-    ["event_cancelled", "Outcome: Closed, event cancelled"],
-    ["event_rejected", "Outcome: Closed, event rejected"],
-  ])("SCRUM379_AC4_the_coordinators_panel_still_words_%s_correctly", async (decision, label) => {
+    ["approved", "Accepted"],
+    ["rejected", "Declined"],
+    ["event_cancelled", "Closed: the event was cancelled"],
+    ["event_rejected", "Closed: the event was rejected"],
+  ])("SCRUM402_AC10_the_coordinators_panel_still_words_%s_correctly", async (decision, label) => {
     vi.mocked(getCoordinatorChangeRequests).mockResolvedValue([changeRequest(decision)]);
     renderDetail(COORDINATOR_USER, eventRequest({ status: "completed" }));
 

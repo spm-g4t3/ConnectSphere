@@ -33,17 +33,23 @@ const RESERVATION_EMBED = (table) =>
       'flagged', r.flagged, 'released_at', r.released_at, 'flag_reason', r.flag_reason, 'flag_code', r.flag_code)), '[]'::json)
       from equipment_reservations r where r.event_request_id = ${table}.id) as equipment_reservations`;
 const RESERVATION_EMBED_TEXT = /\bequipment_reservations\(flagged, released_at, flag_reason, flag_code\)/;
+// SCRUM-402: the coordinator's list (/mine) also reads the change requests it counts.
+const CHANGE_REQUEST_EMBED = (table) =>
+  `(select coalesce(json_agg(json_build_object('request_group_id', c.request_group_id, 'status', c.status)), '[]'::json)
+      from event_change_requests c where c.event_request_id = ${table}.id) as event_change_requests`;
+const CHANGE_REQUEST_EMBED_TEXT = /\bevent_change_requests\(request_group_id, status\)/;
 
 function pgliteClient(db) {
   return pgliteSupabaseClient(db, {
     columns(cols, table) {
-      const rest = cols.replace(/\bbookings\(status\)/, '').replace(RESERVATION_EMBED_TEXT, '');
+      const rest = cols.replace(/\bbookings\(status\)/, '').replace(RESERVATION_EMBED_TEXT, '').replace(CHANGE_REQUEST_EMBED_TEXT, '');
       if (/\w+\(/.test(rest)) {
         throw new Error(`pgliteClient: an embed in "${cols}" is not on this path`);
       }
       return cols
         .replace(/\bbookings\(status\)/, BOOKING_STATUS_EMBED(table))
-        .replace(RESERVATION_EMBED_TEXT, RESERVATION_EMBED(table));
+        .replace(RESERVATION_EMBED_TEXT, RESERVATION_EMBED(table))
+        .replace(CHANGE_REQUEST_EMBED_TEXT, CHANGE_REQUEST_EMBED(table));
     },
   });
 }
