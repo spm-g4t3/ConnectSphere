@@ -13,14 +13,11 @@ import OpenEventAvailability, { RegisteredBadge, WaitlistedBadge } from "./OpenE
 import { BROWSE_OPEN_EVENTS_PATH } from "../services/openEventRoutes";
 import { REGISTERED_EVENTS_PATH } from "../services/attendeeEventRoutes";
 import { REGISTRATION_STATUS } from "../services/registrationStatus";
-import {
-  EVENT_TIME_NOTE,
-  formatEventDate,
-  formatEventEndTime,
-  formatEventStartTime,
-} from "../services/openEventDisplay";
+import { EVENT_TIME_NOTE, formatEventWhen } from "../services/openEventDisplay";
 import { SESSION_EXPIRED } from "../services/apiErrors";
 import Button from "./ui/Button";
+import ErrorNotice from "./ui/ErrorNotice";
+import LoadingText from "./ui/LoadingText";
 
 const LOAD_ERROR_MESSAGES = {
   401: SESSION_EXPIRED,
@@ -266,13 +263,10 @@ export default function BrowseEventDetails({ onRegister, onJoinWaitlist }) {
       <section className="browse-event-details" aria-labelledby="browse-event-details-heading">
         <h2 id="browse-event-details-heading">Event details</h2>
 
-        {loading && <p role="status">Loading...</p>}
+        {loading && <LoadingText />}
 
-        {!loading && notOpen && !registerError && (
-          <div className="browse-event-details__unavailable" role="alert">
-            <p>{NOT_OPEN_MESSAGE}</p>
-          </div>
-        )}
+        {/* Final for this event, so there is nothing to try again. */}
+        {!loading && notOpen && !registerError && <ErrorNotice message={NOT_OPEN_MESSAGE} />}
 
         {/* Outside the details: the reload after registering can find the event
             closed, and the attendee must still be told they are registered. */}
@@ -283,16 +277,14 @@ export default function BrowseEventDetails({ onRegister, onJoinWaitlist }) {
         )}
 
         {!loading && error && (
-          <div className="browse-event-details__error" role="alert">
-            <p>{error}</p>
-            <Button variant="secondary" onClick={refreshUnlessRegistering}>
-              Try again
-            </Button>
-          </div>
+          <ErrorNotice
+            message={error}
+            onRetry={error === SESSION_EXPIRED ? undefined : refreshUnlessRegistering}
+          />
         )}
 
         {refreshFailed && (
-          <div className="browse-event-details__notice" role="status">
+          <div className="browse-open-events__notice" role="status">
             <p>Could not refresh this event. Showing the details as last loaded.</p>
             <Button variant="secondary" onClick={refreshUnlessRegistering} disabled={registering}>
               Try again
@@ -304,19 +296,9 @@ export default function BrowseEventDetails({ onRegister, onJoinWaitlist }) {
           <>
             <dl className="browse-event-details__facts">
               <div>
-                <dt>Date</dt>
-                <dd>{formatEventDate(event.startsAt)}</dd>
-              </div>
-              <div>
-                <dt>Starts</dt>
+                <dt>When</dt>
                 <dd>
-                  {formatEventStartTime(event.startsAt)} {EVENT_TIME_NOTE}
-                </dd>
-              </div>
-              <div>
-                <dt>Ends</dt>
-                <dd>
-                  {formatEventEndTime(event.startsAt, event.endsAt)} {EVENT_TIME_NOTE}
+                  {formatEventWhen(event.startsAt, event.endsAt)} {EVENT_TIME_NOTE}
                 </dd>
               </div>
               <div>
@@ -353,11 +335,8 @@ export default function BrowseEventDetails({ onRegister, onJoinWaitlist }) {
           </>
         )}
 
-        {registerError && registerError !== error && (
-          <div className="browse-event-details__error" role="alert">
-            <p>{registerError}</p>
-          </div>
-        )}
+        {/* The Register or Join button is the retry, as for any form error. */}
+        {registerError && registerError !== error && <ErrorNotice message={registerError} />}
 
         <BackLink />
       </section>

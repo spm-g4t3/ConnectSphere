@@ -22,6 +22,7 @@ import {
 } from "../../src/services/attendeeEventService";
 import { getOpenEvent, getOpenEvents } from "../../src/services/openEventService";
 import { httpError } from "../helpers/async.js";
+import { stubDialogElement } from "../helpers/dialog.js";
 
 vi.mock("../../src/services/attendeeEventService", () => ({
   getAttendeeEvent: vi.fn(),
@@ -89,6 +90,8 @@ function expectButton(name, variant) {
 function expectNoBorrowedClasses(container) {
   for (const name of BORROWED_CLASSES) expect(container.querySelector(`.${name}`)).toBeNull();
 }
+
+stubDialogElement();
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -241,7 +244,7 @@ describe("SCRUM589 AC3 shared status badges and buttons", () => {
 });
 
 describe("SCRUM589 AC6 no classes borrowed from other roles' screens", () => {
-  it("SCRUM589_AC3_a_final_withdrawal_refusal_uses_the_attendee_error_class", async () => {
+  it("SCRUM589_AC3_a_final_withdrawal_refusal_is_the_shared_error_notice_without_try_again", async () => {
     const user = userEvent.setup();
     vi.mocked(getAttendeeEvent).mockResolvedValue(attendeeEvent());
     vi.mocked(withdrawRegistration).mockRejectedValue(httpError(409, { code: "WITHDRAWAL_DEADLINE_PASSED" }));
@@ -250,8 +253,10 @@ describe("SCRUM589 AC6 no classes borrowed from other roles' screens", () => {
     await user.click(await screen.findByRole("button", { name: "Withdraw registration" }));
     await user.click(screen.getByRole("button", { name: "Confirm withdrawal" }));
 
-    const refusal = await screen.findByText(/withdrawal deadline for this event has passed/);
-    expect(refusal).toHaveClass("withdraw-registration__error");
+    const refusal = await screen.findByRole("alert");
+    expect(refusal).toHaveClass("ui-error-notice");
+    expect(refusal).toHaveTextContent(/withdrawal deadline for this event has passed/);
+    expect(within(refusal).queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
     expectNoBorrowedClasses(container);
   });
 });

@@ -5,6 +5,10 @@ import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 import { SESSION_EXPIRED } from "../services/apiErrors";
 import { WaitlistedBadge } from "./OpenEventAvailability";
 import Button from "./ui/Button";
+import ConfirmDialog from "./ui/ConfirmDialog";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import LoadingText from "./ui/LoadingText";
 
 const MESSAGES = {
   401: SESSION_EXPIRED,
@@ -43,11 +47,13 @@ function WaitingListPlace({ place, onLeft, onPromoted }) {
       onLeft(place);
     } catch (err) {
       setFailure(leaveFailureMessage(err));
-      setConfirming(false);
       // Promoted: the registrations list gains the event. This list is left as
       // it is, so the explanation stays on screen until the next refresh.
       if (err?.response?.data?.code === "ALREADY_REGISTERED") onPromoted?.();
     } finally {
+      // Closed either way: on success the re-read removes this row, so the
+      // dialog must not stay open offering to leave again meanwhile.
+      setConfirming(false);
       sending.current = false;
       setSubmitting(false);
     }
@@ -61,22 +67,23 @@ function WaitingListPlace({ place, onLeft, onPromoted }) {
       {place.placesOffered === false && (
         <p>Registration for this event is closed, so no places are being offered. You keep your place in the queue.</p>
       )}
-      {failure && <p className="browse-open-events__error" role="alert">{failure}</p>}
-      {confirming ? (
-        <div className="waiting-list-places__actions">
-          <p>Leave the waiting list? You will lose your place in the queue.</p>
-          <Button variant="danger" disabled={submitting} onClick={handleLeave}>
-            {submitting ? "Leaving..." : "Confirm leaving"}
-          </Button>
-          <Button variant="secondary" disabled={submitting} onClick={() => setConfirming(false)}>
-            Keep my place
-          </Button>
-        </div>
-      ) : (
-        <Button variant="danger" onClick={() => setConfirming(true)}>
-          Leave waiting list
-        </Button>
-      )}
+      {/* Leave waiting list stays on screen, so it is the retry. */}
+      {failure && <ErrorNotice message={failure} />}
+      <Button variant="danger" onClick={() => setConfirming(true)}>
+        Leave waiting list
+      </Button>
+      <ConfirmDialog
+        open={confirming}
+        title="Leave the waiting list?"
+        confirmLabel={submitting ? "Leaving..." : "Confirm leaving"}
+        cancelLabel="Keep my place"
+        danger
+        busy={submitting}
+        onConfirm={handleLeave}
+        onCancel={() => setConfirming(false)}
+      >
+        You will lose your place in the queue.
+      </ConfirmDialog>
     </li>
   );
 }
@@ -105,10 +112,11 @@ export default function WaitingListPlaces({ onChanged }) {
     <section className="waiting-list-places" aria-labelledby="waiting-lists-heading">
       <h2 id="waiting-lists-heading">Waiting lists</h2>
       {notice && <p className="browse-event-details__success" role="status">{notice}</p>}
-      {loading && <p>Loading waiting lists...</p>}
-      {(error || refreshFailed) && (
-        <div className="browse-open-events__error" role="alert">
-          <p>{error || "Could not refresh your waiting lists. Showing them as last loaded."}</p>
+      {loading && <LoadingText />}
+      {error && <ErrorNotice message={error} onRetry={error === SESSION_EXPIRED ? undefined : load} />}
+      {refreshFailed && (
+        <div className="browse-open-events__notice" role="status">
+          <p>Could not refresh your waiting lists. Showing them as last loaded.</p>
           <Button variant="secondary" onClick={load}>Try again</Button>
         </div>
       )}
@@ -124,7 +132,12 @@ export default function WaitingListPlaces({ onChanged }) {
               />
             ))}
           </ul>
-        ) : <p>You are not on any waiting lists.</p>
+        ) : (
+          <EmptyState
+            message="You are not on any waiting lists."
+            nextStep="When an event is full, you can join its waiting list from the event's page."
+          />
+        )
       )}
     </section>
   );

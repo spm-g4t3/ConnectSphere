@@ -3,11 +3,12 @@ import { withdrawRegistration } from "../services/attendeeEventService";
 import { withdrawalFailure } from "../services/withdrawalErrors";
 import { REGISTRATION_STATUS } from "../services/registrationStatus";
 import Button from "./ui/Button";
+import ConfirmDialog from "./ui/ConfirmDialog";
+import ErrorNotice from "./ui/ErrorNotice";
 
 /**
- * Asks first, inline, as the other destructive actions here do (there is no
- * modal in this frontend). Nothing on screen changes until the backend has
- * withdrawn the registration; onWithdrawn then gets its reply.
+ * Asks first, in a ConfirmDialog. Nothing on screen changes until the backend
+ * has withdrawn the registration; onWithdrawn then gets its reply.
  *
  * A final refusal goes to the page through onRefused and comes back as
  * `refusal`: a reload remounts this component, and must not bring the action back.
@@ -34,48 +35,44 @@ export default function WithdrawRegistration({ registrationId, refusal, onWithdr
       const outcome = withdrawalFailure(err);
       if (outcome.rejected) onRefused(outcome.message);
       else setFailure(outcome);
-      setConfirming(false);
     } finally {
+      setConfirming(false);
       sending.current = false;
       setSubmitting(false);
     }
   }
 
   if (refusal) {
+    // Final, so there is nothing to try again.
     return (
       <section className="withdraw-registration" aria-label="Withdraw registration">
-        <p className="withdraw-registration__error" role="alert">{refusal}</p>
+        <ErrorNotice message={refusal} />
       </section>
     );
   }
 
   return (
     <section className="withdraw-registration" aria-label="Withdraw registration">
-      {failure && (
-        <div className="browse-open-events__error" role="alert">
-          <p>{failure.message}</p>
-          <Button variant="secondary" disabled={submitting} onClick={handleConfirm}>
-            {submitting ? "Withdrawing..." : "Try again"}
-          </Button>
-        </div>
-      )}
-      {confirming ? (
-        <>
-          <p>Withdraw your registration? Your place will be released to other attendees.</p>
-          <div className="withdraw-registration__actions">
-            <Button variant="danger" disabled={submitting} onClick={handleConfirm}>
-              {submitting ? "Withdrawing..." : "Confirm withdrawal"}
-            </Button>
-            <Button variant="secondary" disabled={submitting} onClick={() => setConfirming(false)}>
-              Keep my registration
-            </Button>
-          </div>
-        </>
-      ) : !failure && (
+      {failure && <ErrorNotice message={failure.message} onRetry={handleConfirm} />}
+      {/* A retry sends from here, outside the dialog, so its progress shows here too. */}
+      {submitting && !confirming && <p role="status">Withdrawing...</p>}
+      {!failure && !submitting && (
         <Button variant="danger" onClick={() => setConfirming(true)}>
           Withdraw registration
         </Button>
       )}
+      <ConfirmDialog
+        open={confirming}
+        title="Withdraw your registration?"
+        confirmLabel={submitting ? "Withdrawing..." : "Confirm withdrawal"}
+        cancelLabel="Keep my registration"
+        danger
+        busy={submitting}
+        onConfirm={handleConfirm}
+        onCancel={() => setConfirming(false)}
+      >
+        Your place will be released to other attendees.
+      </ConfirmDialog>
     </section>
   );
 }

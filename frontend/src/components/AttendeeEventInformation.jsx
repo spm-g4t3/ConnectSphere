@@ -3,12 +3,14 @@ import { Link, useParams } from "react-router-dom";
 import { getAttendeeEvent } from "../services/attendeeEventService";
 import { REGISTERED_EVENTS_PATH } from "../services/attendeeEventRoutes";
 import { BROWSE_OPEN_EVENTS_PATH } from "../services/openEventRoutes";
-import { EVENT_TIME_NOTE, formatEventDate, formatEventStartTime, formatEventEndTime } from "../services/openEventDisplay";
+import { EVENT_TIME_NOTE, formatEventWhen } from "../services/openEventDisplay";
 import useOpenEventRead from "./useOpenEventRead";
 import WithdrawRegistration from "./WithdrawRegistration";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 import { SESSION_EXPIRED } from "../services/apiErrors";
-import Button from "./ui/Button";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import LoadingText from "./ui/LoadingText";
 import StatusBadge from "./ui/StatusBadge";
 
 const MESSAGES = {
@@ -40,11 +42,8 @@ function EventBody({ state, current }) {
       return (
         <>
           <h2>Confirmed arrangements</h2>
-          <p>{EVENT_TIME_NOTE}</p>
           <dl className="browse-event-details__facts">
-            <div><dt>Date</dt><dd>{formatEventDate(current.startsAt)}</dd></div>
-            <div><dt>Start time</dt><dd>{formatEventStartTime(current.startsAt)}</dd></div>
-            <div><dt>End time</dt><dd>{formatEventEndTime(current.startsAt, current.endsAt)}</dd></div>
+            <div><dt>When</dt><dd>{formatEventWhen(current.startsAt, current.endsAt)} {EVENT_TIME_NOTE}</dd></div>
           </dl>
           <h2 id="attendee-confirmed-venues-heading">Venues</h2>
           {current.venues.length ? <ul aria-labelledby="attendee-confirmed-venues-heading">{current.venues.map(venue => (
@@ -53,7 +52,12 @@ function EventBody({ state, current }) {
               <p className="attendee-event-information__location">{venue.location?.trim() || "Location unavailable"}</p>
               {venue.underReview === true && <p>This venue is being reviewed and may change.</p>}
             </li>
-          ))}</ul> : <p>No confirmed venue information is available.</p>}
+          ))}</ul> : (
+            <EmptyState
+              message="No confirmed venue information is available."
+              nextStep="Check back later; this page shows the venue once it is confirmed."
+            />
+          )}
         </>
       );
     default:
@@ -89,7 +93,7 @@ function EventInformation({ eventId }) {
     <>
       <h1>{current?.eventName?.trim() || withdrawn?.eventName?.trim() || "Event information"}</h1>
       <section aria-label="Registered event information">
-        {loading && <p role="status">Loading...</p>}
+        {loading && <LoadingText />}
         {/* From the backend's reply alone, so a failed reload cannot hide it. */}
         {withdrawn && (
           <div className="browse-event-details__success" role="status">
@@ -100,13 +104,9 @@ function EventInformation({ eventId }) {
             <p><Link to={BROWSE_OPEN_EVENTS_PATH}>Browse open events</Link></p>
           </div>
         )}
-        {!withdrawn && notFound && <p role="alert">Event information is unavailable. An active registration is required.</p>}
-        {error && (
-          <div className="browse-open-events__error" role="alert">
-            <p>{error}</p>
-            <Button variant="secondary" onClick={load}>Try again</Button>
-          </div>
-        )}
+        {/* A missing registration is the answer, not a failure, so there is nothing to try again. */}
+        {!withdrawn && notFound && <ErrorNotice message="Event information is unavailable. An active registration is required." />}
+        {error && <ErrorNotice message={error} onRetry={error === SESSION_EXPIRED ? undefined : load} />}
         {view && <EventBody state={view} current={current} />}
         {/* SCRUM-434 AC5: a cancelled event shows the cancellation and the message only, so no withdrawal is offered. */}
         {!loading && !error && current?.registrationId && view !== "cancelled" && (

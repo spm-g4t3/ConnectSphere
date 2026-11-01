@@ -7,14 +7,12 @@ import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 import useOpenEventRead from "./useOpenEventRead";
 import OpenEventAvailability, { RegisteredBadge, WaitlistedBadge } from "./OpenEventAvailability";
 import { openEventDetailsPath } from "../services/openEventRoutes";
-import {
-  EVENT_TIME_NOTE,
-  formatEventDate,
-  formatEventEndTime,
-  formatEventStartTime,
-} from "../services/openEventDisplay";
+import { EVENT_TIME_NOTE, formatEventWhen } from "../services/openEventDisplay";
 import { SESSION_EXPIRED } from "../services/apiErrors";
 import Button from "./ui/Button";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import LoadingText from "./ui/LoadingText";
 
 const LIST_ERROR_MESSAGES = {
   401: SESSION_EXPIRED,
@@ -35,9 +33,7 @@ function EventRow({ event }) {
           {event.waitlistPosition != null && <WaitlistedBadge position={event.waitlistPosition} />}
         </span>
         <span className="browse-open-events__meta">
-          <span>{formatEventDate(event.startsAt)}</span>
-          <span>Starts {formatEventStartTime(event.startsAt)}</span>
-          <span>Ends {formatEventEndTime(event.startsAt, event.endsAt)}</span>
+          <span>{formatEventWhen(event.startsAt, event.endsAt)}</span>
           <span>{EVENT_TIME_NOTE}</span>
         </span>
       </div>
@@ -62,15 +58,13 @@ export default function BrowseOpenEvents() {
       <section className="browse-open-events" aria-labelledby="browse-open-events-heading">
         <h2 id="browse-open-events-heading">Events open for registration</h2>
 
-        {loading && <p role="status">Loading...</p>}
+        {loading && <LoadingText />}
 
         {error && (
-          <div className="browse-open-events__error" role="alert">
-            <p>{error}</p>
-            <Button variant="secondary" onClick={fetchEvents}>
-              Try again
-            </Button>
-          </div>
+          <ErrorNotice
+            message={error}
+            onRetry={error === SESSION_EXPIRED ? undefined : fetchEvents}
+          />
         )}
 
         {refreshFailed && (
@@ -84,7 +78,10 @@ export default function BrowseOpenEvents() {
 
         {/* Nothing open is a normal state, not an error. */}
         {!loading && !error && events.length === 0 && (
-          <p>No events are currently open for registration.</p>
+          <EmptyState
+            message="No events are currently open for registration."
+            nextStep="Check back later for new events."
+          />
         )}
 
         {!loading && !error && events.length > 0 && (

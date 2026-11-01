@@ -1,11 +1,15 @@
 import { Link } from "react-router-dom";
 import { getRegisteredEvents } from "../services/attendeeEventService";
 import { attendeeEventPath } from "../services/attendeeEventRoutes";
+import { BROWSE_OPEN_EVENTS_PATH } from "../services/openEventRoutes";
 import useOpenEventRead from "./useOpenEventRead";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 import { SESSION_EXPIRED } from "../services/apiErrors";
 import WaitingListPlaces from "./WaitingListPlaces";
 import Button from "./ui/Button";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import LoadingText from "./ui/LoadingText";
 
 const MESSAGES = {
   401: SESSION_EXPIRED,
@@ -24,10 +28,11 @@ export default function RegisteredEvents() {
       <h1>Registered events</h1>
       <section aria-labelledby="registered-events-heading">
         <h2 id="registered-events-heading">Registered</h2>
-        {loading && <p role="status">Loading...</p>}
-        {(error || refreshFailed) && (
-          <div className="browse-open-events__error" role="alert">
-            <p>{error || "Could not refresh the list. Showing the events as last loaded."}</p>
+        {loading && <LoadingText />}
+        {error && <ErrorNotice message={error} onRetry={error === SESSION_EXPIRED ? undefined : load} />}
+        {refreshFailed && (
+          <div className="browse-open-events__notice" role="status">
+            <p>Could not refresh the list. Showing the events as last loaded.</p>
             <Button variant="secondary" onClick={load}>Try again</Button>
           </div>
         )}
@@ -36,7 +41,13 @@ export default function RegisteredEvents() {
             <li key={event.eventRequestId}>
               <Link to={attendeeEventPath(event.eventRequestId)}>{event.eventName || "Unnamed event"}</Link>
             </li>
-          ))}</ul> : <p>You have no active event registrations.</p>
+          ))}</ul> : (
+            <EmptyState
+              message="You have no active event registrations."
+              nextStep="Browse Open Events to find an event to register for."
+              action={<Link className="ui-button ui-button--primary" to={BROWSE_OPEN_EVENTS_PATH}>Browse Open Events</Link>}
+            />
+          )
         )}
       </section>
       <WaitingListPlaces onChanged={load} />

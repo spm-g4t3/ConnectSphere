@@ -2,6 +2,7 @@
 // on every device (the venue's hours are kept in it). EVENT_TIME_NOTE names the zone.
 
 import { VENUE_TIME_NOTE, toVenueWallClock } from "./datetimeFormat";
+import { formatDateTimeRange } from "./displayFormat";
 
 export const EVENT_TIME_NOTE = VENUE_TIME_NOTE;
 
@@ -29,6 +30,17 @@ export function formatEventEndTime(startsAt, endsAt) {
   const [date, time] = end.split("T");
   return start && start.slice(0, 10) !== date ? `${date} ${time}` : time;
 }
+
+/**
+ * When the event runs, in the standard display format, e.g. "25 Oct 2026,
+ * 9:00 am – 11:00 am"; an event past midnight shows both dates. A missing or
+ * unparseable start reads as "Date to be confirmed" and such an end as "Not set".
+ */
+export function formatEventWhen(startsAt, endsAt) {
+  if (!toVenueWallClock(startsAt)) return "Date to be confirmed";
+  return formatDateTimeRange(startsAt, toVenueWallClock(endsAt) ? endsAt : null, "Not set");
+}
+
 /**
  * What the availability reads as: "Full", "No limit", or "N places left".
  *

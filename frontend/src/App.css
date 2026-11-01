@@ -412,7 +412,6 @@ button { cursor: pointer; }
 .dashboard--attendee a.ui-button--primary { text-decoration: none; }
 .browse-open-events__row { padding-block: 10px; }
 .browse-open-events__summary { display: grid; gap: 2px; min-width: 0; }
-.browse-open-events__meta > span { white-space: nowrap; }
 .browse-open-events__meta > span:last-child { flex-basis: 100%; font-size: 0.75rem; font-style: italic; opacity: 0.8; white-space: normal; }
 .browse-event-details__facts > div { background: #f5f9f7; border: 1px solid #e5eeea; border-radius: 7px; padding: 8px 12px; }
 .browse-event-details__facts { gap: 8px 12px !important; margin-bottom: 12px !important; }
@@ -422,8 +421,6 @@ button { cursor: pointer; }
 .browse-open-events__title a { color: var(--teal-dark); overflow-wrap: anywhere; }
 .browse-open-events__meta { color: var(--muted); display: flex; flex-wrap: wrap; font-size: 0.85rem; gap: 4px 16px; }
 .browse-open-events .ui-status-badge { flex: 0 0 auto; }
-.browse-open-events__error { align-items: center; background: #fff0ee; border-radius: 6px; color: #a43c32; display: flex; flex-wrap: wrap; gap: 8px 12px; justify-content: space-between; padding: 8px 12px; }
-.dashboard .browse-open-events__error p { color: #a43c32; margin: 0; }
 /* SCRUM-495. One open event. Its facts are a definition list, not .dashboard li
    rows, and the description keeps the organiser's line breaks. */
 .browse-event-details__facts { display: grid; gap: 10px 24px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); margin: 0 0 18px; }
@@ -435,15 +432,11 @@ button { cursor: pointer; }
 .attendee-event-information__message { white-space: pre-wrap; }
 .browse-event-details__register { align-items: center; display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 18px 0; }
 .browse-event-details__register p { margin: 0; }
-.browse-open-events__notice, .browse-event-details__notice { align-items: center; background: #fff6e5; border-radius: 6px; color: #8a5a00; display: flex; flex-wrap: wrap; gap: 8px 12px; justify-content: space-between; margin: 0 0 12px; padding: 8px 12px; }
-.dashboard .browse-open-events__notice p, .dashboard .browse-event-details__notice p { color: #8a5a00; margin: 0; }
-.browse-event-details__success { background: #e8f7f1; border-radius: 6px; margin: 0 0 12px; padding: 8px 12px; }
-.dashboard .browse-event-details__success p { color: #17684f; margin: 0; }
-.browse-event-details__unavailable, .browse-event-details__error { background: #fff0ee; border-radius: 6px; color: #a43c32; display: flex; flex-wrap: wrap; gap: 8px 12px; justify-content: space-between; margin: 0 0 12px; padding: 8px 12px; }
-.dashboard .browse-event-details__unavailable p, .dashboard .browse-event-details__error p { color: #a43c32; margin: 0; }
-.withdraw-registration__actions, .waiting-list-places__actions { align-items: center; display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-3); }
-.dashboard .waiting-list-places__actions p { margin: 0; }
-.dashboard .withdraw-registration__error { background: var(--color-danger-soft); border-radius: var(--radius-control); color: var(--color-danger); margin: var(--space-2) 0 0; padding: var(--space-2) var(--space-3); }
+/* The attendee screens' "showing as last loaded" warning, with its Try again. */
+.browse-open-events__notice { align-items: center; background: var(--color-warning-soft); border-radius: var(--radius-control); color: var(--color-warning); display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-3); justify-content: space-between; margin: 0 0 var(--space-3); padding: var(--space-2) var(--space-3); }
+.dashboard .browse-open-events__notice p { color: var(--color-warning); margin: 0; }
+.browse-event-details__success { background: var(--color-success-soft); border-radius: var(--radius-control); margin: 0 0 var(--space-3); padding: var(--space-2) var(--space-3); }
+.dashboard .browse-event-details__success p { color: var(--color-success); margin: 0; }
 .dashboard--coordinator .my-booking-requests button:disabled { cursor: not-allowed; opacity: 0.55; }
 .dashboard--coordinator .status--booking-pending { background: #fff6e5; color: #8a5a00; }
 .dashboard--coordinator .status--booking-conflicting { background: #fff0ee; color: #a43c32; }

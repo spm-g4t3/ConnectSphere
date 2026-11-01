@@ -78,10 +78,8 @@ describe("SCRUM495_AC5 what the details show", () => {
     renderDetails();
 
     expect(await screen.findByRole("heading", { name: "Open Day", level: 1 })).toBeInTheDocument();
-    const facts = screen.getByText("Date").closest("dl");
-    expect(facts).toHaveTextContent("2026-10-25");
-    expect(facts).toHaveTextContent("09:00");
-    expect(facts).toHaveTextContent("11:30");
+    const facts = screen.getByText("When").closest("dl");
+    expect(facts).toHaveTextContent("25 Oct 2026, 9:00 am – 11:30 am");
     expect(facts).toHaveTextContent("12 places left");
     expect(screen.getByText(/Come along\./)).toHaveTextContent("Come along. Bring a friend.");
   });
@@ -809,8 +807,8 @@ describe("SCRUM495 time zone note", () => {
 
     renderDetails();
 
-    const facts = (await screen.findByText("Starts", { selector: "dt" })).closest("dl");
-    expect(facts).toHaveTextContent("09:00 (Singapore time)");
-    expect(facts).toHaveTextContent("11:30 (Singapore time)");
+    const facts = (await screen.findByText("When", { selector: "dt" })).closest("dl");
+    expect(facts).toHaveTextContent("25 Oct 2026, 9:00 am – 11:30 am (Singapore time)");
+    expect(facts.textContent.match(/\(Singapore time\)/g)).toHaveLength(1);
   });
 });

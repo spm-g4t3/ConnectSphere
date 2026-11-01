@@ -10,6 +10,7 @@ import BrowseEventDetails from "../../src/components/BrowseEventDetails.jsx";
 import { getRegisteredEvents, getWaitlist, leaveWaitlist } from "../../src/services/attendeeEventService";
 import { getOpenEvent, getOpenEvents } from "../../src/services/openEventService";
 import { deferred } from "../helpers/async.js";
+import { stubDialogElement } from "../helpers/dialog.js";
 
 vi.mock("../../src/services/attendeeEventService", () => ({
   getRegisteredEvents: vi.fn(), getWaitlist: vi.fn(), leaveWaitlist: vi.fn(),
@@ -34,6 +35,8 @@ function renderMyRegistrations() {
 async function returnToTab() {
   await act(async () => { window.dispatchEvent(new Event("focus")); });
 }
+
+stubDialogElement();
 
 beforeEach(() => {
   vi.resetAllMocks();
