@@ -28,9 +28,9 @@ import EmptyState from "./ui/EmptyState";
 import ErrorNotice from "./ui/ErrorNotice";
 import LoadingText from "./ui/LoadingText";
 
-// Keyed by status, the same shape as ReviewQueue's QUEUE_ERROR_MESSAGES. No
-// 403: the route has no role gate, so a 403 cannot happen. A 500 reads the
-// same as any other failure, so it takes the fallback below.
+// Keyed by status, the same shape as ReviewQueue's QUEUE_ERROR_MESSAGES. Every
+// status takes the fallback below: a 401 is worded once by the app (SCRUM-583),
+// and there is no 403 because the route has no role gate.
 const LIST_ERROR_MESSAGES = {
 };
 

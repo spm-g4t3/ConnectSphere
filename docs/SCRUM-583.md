@@ -79,6 +79,8 @@ Test names follow the repo convention `SCRUM583_AC<n>_<behaviour>`.
 - **The server does not enforce the idle time.** The Supabase token stays valid until it
   ends; the 30 and 15 minutes are enforced in the browser. A stolen token is not
   invalidated by idleness.
+- **Duplicating a tab copies `sessionStorage`, so both tabs share one refresh token.** When one
+  renews, the other's renewal is refused and that tab is signed out.
 
 ## 5. Manual check
 
