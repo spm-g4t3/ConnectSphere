@@ -47,8 +47,8 @@ const ATTENDEE_EVENT_PAGE_TYPES = new Set([
 
 // One entry per role, so a later story adds a line rather than a branch.
 const LINKS_BY_ROLE = {
-  // The review page lets any coordinator or Lead read any submitted event;
-  // an unassigned one opens read-only.
+  // The review page: the Lead reads any event, a coordinator the ones they
+  // hold (SCRUM-444); anyone else is told it isn't available to them.
   EVENT_COORDINATOR: (_type, id) => eventRequestPage(id),
   EVENT_COORDINATOR_LEAD: (_type, id) => eventRequestPage(id),
 

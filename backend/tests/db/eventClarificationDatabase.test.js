@@ -99,7 +99,10 @@ describe("SCRUM-162 clarification transactions in Postgres", () => {
     ]);
   });
 
-  it("refuses wrong actors, wrong statuses, blank messages and expired dates without recording them", async () => {
+  it("SCRUM444_AC2_refuses_a_wrong_actor_with_42501_and_wrong_statuses_blank_messages_and_expired_dates_without_recording_them", async () => {
+    // Was "refuses wrong actors, wrong statuses, …", where the wrong actor met
+    // only change_event_request_status's guard, 40001. Since 056 the function
+    // checks its caller first: 42501.
     const id = await event();
     const due = sgDate(0);
     const wrongStatusId = await event("submitted");
@@ -112,7 +115,7 @@ describe("SCRUM-162 clarification transactions in Postgres", () => {
       "select * from request_event_clarification_with_fields($1, $2, $3, 'Question', null, '{}'::text[])",
       [id, otherCoordinator, otherCoordinator],
     ));
-    expect(wrongActor?.code).toBe("40001");
+    expect(wrongActor?.code).toBe("42501");
 
     const blank = await refused(db.query(
       "select * from request_event_clarification_with_fields($1, $2, $2, '  ', null, '{}'::text[])",
@@ -293,7 +296,10 @@ describe("SCRUM-162 clarification transactions in Postgres", () => {
     ]);
   });
 
-  it("SCRUM486_AC7_the_coordinator_the_lead_hands_it_to_asks_for_clarification_and_the_previous_one_cannot", async () => {
+  it("SCRUM444_AC4_the_coordinator_the_lead_hands_it_to_asks_for_clarification_and_the_previous_one_gets_42501", async () => {
+    // Was SCRUM486_AC7_…_and_the_previous_one_cannot, refused with 40001. Since
+    // 056 (SCRUM-444 AC2) the function checks its caller itself: 42501. The
+    // history below is SCRUM-486's.
     // AC7-01's "asks for clarification". Until SCRUM-486 removed it,
     // check-coordinator-assignment.js was the only place a coordinator the
     // Lead handed the event to asked; it could not stay there (030's history
@@ -303,11 +309,10 @@ describe("SCRUM-162 clarification transactions in Postgres", () => {
     // it with assigned_coordinator_id when it runs, and reassignment changes
     // that column.
     //
-    // The refusal is 40001, not 42501: 022's "no longer assigned to this
-    // coordinator" (serialization_failure), as in the wrong-actor test above.
-    // The 403 the screen shows is the service's own check, made before the
-    // call. It comes first, while the event is still under review, so a 55000
-    // status refusal cannot pass for it.
+    // The refusal was 40001 until 056: 022's "no longer assigned to this
+    // coordinator". The 403 the screen shows is still the service's own check,
+    // made before the call. It comes first, while the event is still under
+    // review, so a 55000 status refusal cannot pass for it.
     const id = await event();
     await db.query("select * from reassign_event_request($1, $2, $3, null)", [id, otherCoordinator, lead]);
     // The handover's own notices (052, AC10), so what follows is measured from here.
@@ -317,7 +322,7 @@ describe("SCRUM-162 clarification transactions in Postgres", () => {
       "select * from request_event_clarification_with_fields($1, $2, $2, 'Please confirm the attendee count.', null, '{}'::text[])",
       [id, coordinator],
     ));
-    expect(previous?.code).toBe("40001");
+    expect(previous?.code).toBe("42501");
     expect((await one("select status from event_requests where id = $1", [id])).status).toBe("under_review");
     expect(await history(id)).toHaveLength(0);
     expect(await notifications(id)).toEqual(handoverNotices);

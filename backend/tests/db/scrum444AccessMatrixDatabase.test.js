@@ -18,6 +18,7 @@ import { pgliteSupabaseClient } from '../fixtures/pgliteSupabaseClient.js';
 // Confirmed event that has ended is seeded. Cases: docs/test-cases/SCRUM-444.md.
 const here = dirname(fileURLToPath(import.meta.url));
 const sql055 = readFileSync(resolve(here, '../../db/migrations/055_reassign_lead_only.sql'), 'utf8');
+const sql056 = readFileSync(resolve(here, '../../db/migrations/056_clarification_caller_check.sql'), 'utf8');
 const baseline = readFileSync(resolve(here, '../../db/baseline/02_event_requests.sql'), 'utf8');
 
 describe('SCRUM-444: only the assigned coordinator acts; only the Lead hands over', () => {
@@ -114,13 +115,11 @@ describe('SCRUM-444: only the assigned coordinator acts; only the Lead hands ove
   }
 
   // Every AC2 action, as `who`. The setup leaves `holder` holding the event.
-  // Each is 42501 but one: the clarification request's only check in SQL is
-  // change_event_request_status's expected coordinator, 40001 (the 403 a
-  // non-holder gets over HTTP is requestEventClarification's own).
+  // Each is 42501 (the clarification request since 056; it was 40001).
   const ACTIONS = [
     ['start_review', assigned, ({ id }, who) => db.query('select start_event_review($1, $2)', [id, who])],
     ['request_clarification', underReview, ({ id }, who) => db.query(
-      "select request_event_clarification_with_fields($1, $2, $2, 'Numbers?', null, '{}'::text[])", [id, who]), '40001'],
+      "select request_event_clarification_with_fields($1, $2, $2, 'Numbers?', null, '{}'::text[])", [id, who])],
     ['close_clarification', pendingClarification, ({ id }, who) => db.query(
       "select close_event_clarification($1, $2, $2, 'Settled by phone')", [id, who])],
     ['approve', underReview, ({ id }, who) => db.query(
@@ -261,6 +260,49 @@ describe('SCRUM-444: only the assigned coordinator acts; only the Lead hands ove
       expect(await queued(newHolder)).toContain(id);
       await expect(clarifications(holder)).rejects.toMatchObject({ status: 404, message: `Event request ${id} not found` });
       await expect(clarifications(newHolder)).resolves.toHaveLength(1);
+    });
+  });
+
+  describe('AC2: the clarification request checks its caller in SQL (056)', () => {
+    const ask = (id, who) => db.query(
+      "select request_event_clarification_with_fields($1, $2, $2, 'Numbers?', null, '{}'::text[])", [id, who]);
+    const withRole = async (userId, role, run) => {
+      const { role: was } = await one('select role::text as role from profiles where id = $1', [userId]);
+      await db.query('update profiles set role = $2 where id = $1', [userId, role]);
+      try {
+        await run();
+      } finally {
+        await db.query('update profiles set role = $2 where id = $1', [userId, was]);
+      }
+    };
+
+    it('SCRUM444_AC2_the_clarification_request_refuses_a_non_holder_with_42501_in_sql', async () => {
+      const { id } = await underReview();
+      const message = `only the coordinator assigned to event request ${id} can request a clarification`;
+
+      // Another coordinator, a null caller, and the holder whose role was
+      // changed away from Event Coordinator: 42501 each, nothing written.
+      expect((await expectRefused(id, () => ask(id, other))).message).toBe(message);
+      expect((await expectRefused(id, () => ask(id, null))).message).toBe(message);
+      await withRole(holder, 'event_coordinator_lead', async () => {
+        expect((await expectRefused(id, () => ask(id, holder))).message).toBe(message);
+      });
+
+      // The holder, as before.
+      await ask(id, holder);
+      expect((await one('select status::text as status from event_requests where id = $1', [id])).status)
+        .toBe('pending_clarification');
+    });
+
+    it('SCRUM444_AC2_056_is_rerunnable_and_keeps_one_overload', async () => {
+      await db.exec(sql056);
+      await db.exec(sql056);
+
+      const { count } = await one("select count(*)::int as count from pg_proc where proname = 'request_event_clarification_with_fields'");
+      expect(count).toBe(1);
+      expect(await clientsCanExecute(
+        db, 'request_event_clarification_with_fields(uuid, uuid, uuid, text, date, text[])',
+      )).toEqual([]);
     });
   });
 

@@ -1,36 +1,29 @@
 // ReassignEventPanel.jsx
 //
-// SCRUM-334, for SCRUM-327 AC6 and AC9: the assigned coordinator hands an
-// event to a colleague, with an optional note for them.
+// SCRUM-334, for SCRUM-327 AC9: an event handed to another coordinator, with
+// an optional note for them.
 //
 // A full-page panel with a back button, opened from CoordinatorRequestDetail,
 // like every other panel in this frontend. There is no modal anywhere in the
 // codebase, and a handover is not the place to introduce the first.
 //
-// This screen decides nothing about who may hand over. The parent shows the
-// button only to the assigned coordinator or an Event Coordinator Lead, as a
-// convenience; the server's reassign_event_request (052) is the gate, and
+// This screen decides nothing about who may hand over. Since SCRUM-444 (AC3)
+// the parent shows the button to the Event Coordinator Lead alone, as a
+// convenience; the server's reassign_event_request (055) is the gate, and
 // checks it again under a lock. So every refusal the server can give is
 // handled below, including the ones the parent's check should make rare.
-//
-// SCRUM-486 (SCRUM-521): two callers. Since 052 the Lead may hand over any
-// event, not only the holder. Three things follow, each marked below: which
-// list of coordinators is read, who is left out of it, and wording that was
-// written for a caller who held the event.
 
 import { useEffect, useState } from "react";
-import { useAuth } from "../auth/AuthContext";
-import { normaliseRole } from "../auth/normaliseRole";
 import {
   listCoordinatorWorkload,
   reassignEventRequest,
 } from "../services/eventRequestService";
 import { coordinatorOptionLabel } from "../services/coordinatorDisplay";
 
-// 403 reworded in SCRUM-521. It said "Only Event Coordinators can hand an
-// event over", which has been false since 052 let the Lead hand over too.
+// The list is the Lead's (GET /coordinator-workload, leadOnly), so a 403 means
+// the caller is not the Lead.
 const LOAD_ERROR_MESSAGES = {
-  403: "Only Event Coordinators and the Event Coordinator Lead can hand an event over.",
+  403: "Only the Event Coordinator Lead can hand an event over.",
   500: "The list of coordinators could not be loaded. Please try again.",
 };
 
@@ -52,21 +45,15 @@ const LOAD_ERROR_MESSAGES = {
 //
 // 400 likewise covers two: the person chosen is no longer an Event
 // Coordinator, or they already hold the event. The remedy is the same, choose
-// someone else, so one message. Since SCRUM-521 the message names both: it
-// used to name only the first, because the second could not be chosen when
-// the caller was the holder and the list left the caller out. The list now
-// leaves out whoever holds the event, so it is again rare, and only a stale
-// list (someone else handed the event on while this one was open) reaches it.
+// someone else, so one message, naming both. The list leaves out whoever holds
+// the event, so the second is rare: only a stale list (the event handed on
+// while this one was open) reaches it.
 //
-// 403, since SCRUM-486 (SCRUM-519). It used to say "This event is no longer
-// assigned to you", which was the only way a coordinator could be refused
-// when only the holder could hand over. 052 lets the Event Coordinator Lead
-// hand over any event too, so a 403 now means the caller is neither the
-// holder nor a Lead, and "assigned to you" would be wrong said to a Lead.
-// The message says who may hand an event over, which is true for any caller.
+// 403: the caller is not the Lead (SCRUM-444, 055). The message says who may
+// hand an event over, which is true for any caller.
 const REASSIGN_ERROR_MESSAGES = {
   400: "That person cannot take this event. They may no longer be an Event Coordinator, or they may already hold it. Choose someone else.",
-  403: "You cannot hand this event over. Only the coordinator who holds it, or the Event Coordinator Lead, can do that, and it may have been handed to someone else. Go back and reopen it to see who holds it now.",
+  403: "You cannot hand this event over. Only the Event Coordinator Lead can do that.",
   404: "This event no longer exists.",
   409: "This event cannot be handed over right now. Its status may not allow a handover, or it changed while you were looking at it. Go back and reopen it to see where it stands.",
   500: "The event could not be handed over. Please try again.",
@@ -88,9 +75,6 @@ export default function ReassignEventPanel({
   onCancel,
   onReassigned,
 }) {
-  const { user } = useAuth();
-  const isLead = normaliseRole(user?.role) === "EVENT_COORDINATOR_LEAD";
-  const callerHoldsIt = Boolean(user?.id) && user.id === outgoingCoordinatorId;
   const [coordinators, setCoordinators] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
@@ -102,8 +86,7 @@ export default function ReassignEventPanel({
   useEffect(() => {
     let cancelled = false;
 
-    // SCRUM-444 (D5): GET /coordinators is gone with the holder's handover, so
-    // the Lead's list (SCRUM-519) is the only one. The screen itself is brief 2's.
+    // The Lead's list (SCRUM-519), the only list of coordinators since SCRUM-444.
     listCoordinatorWorkload()
       .then((data) => {
         if (!cancelled) setCoordinators(data);
@@ -123,20 +106,12 @@ export default function ReassignEventPanel({
     return () => {
       cancelled = true;
     };
-  }, [isLead]);
+  }, []);
 
   // Whoever holds the event is left out: handing an event to its current
   // holder is refused by the server (23514, a confusing 400). Done here and
   // not on the server, because "everyone but the holder" is this picker's
   // need, not the list's meaning.
-  //
-  // SCRUM-521. This used to leave out the signed-in user, which is the same
-  // person when the holder hands over, and was right while only the holder
-  // could. For a Lead it was wrong twice: the Lead is never in the list, so
-  // the filter removed nobody, and the holder stayed in it, offered as a
-  // choice the server would refuse. A coordinator who is not the holder is
-  // never shown this panel (the parent shows the button to the holder or a
-  // Lead), and if one were, they would be listed: they are a valid choice.
   const choices = coordinators.filter((coordinator) => coordinator.id !== outgoingCoordinatorId);
 
   async function handleSubmit(event) {
@@ -173,14 +148,10 @@ export default function ReassignEventPanel({
           back to the event, rather than out to the list, is the form's Cancel
           button, and the Cancel below the messages when there is no form. */}
       <h2>Hand over {request.eventName}</h2>
-      {/* SCRUM-327 AC7, said before the caller commits: after this the
-          coordinator handing it over can still read the event, and can no
-          longer change it. Said to the holder as "you"; a Lead never could
-          change it, so to a Lead it is said about the holder (SCRUM-521). */}
+      {/* SCRUM-444 AC4, said before the Lead commits: the coordinator who
+          holds it now loses it, view and all. */}
       <p>
-        {callerHoldsIt
-          ? "The coordinator you choose becomes responsible for this event. You will still be able to view it, but not change it."
-          : "The coordinator you choose becomes responsible for this event. The coordinator who holds it now will still be able to view it, but not change it."}
+        The coordinator you choose becomes responsible for this event. The coordinator who holds it now will no longer be able to view or change it.
       </p>
 
       {loading && <p>Loading coordinators...</p>}

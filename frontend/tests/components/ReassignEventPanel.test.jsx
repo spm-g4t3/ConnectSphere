@@ -1,7 +1,7 @@
 // ReassignEventPanel.test.jsx
 //
-// SCRUM-486: the handover panel for its two callers, the coordinator who
-// holds the event and, since 052, the Event Coordinator Lead.
+// SCRUM-486: the handover panel, since SCRUM-444 the Event Coordinator Lead's
+// alone (it had two callers, the holder and, since 052, the Lead).
 //
 // SCRUM-519 pinned the 403 message. SCRUM-521 adds who is left out of the
 // list (the holder, not the caller), which list a Lead reads, and every
@@ -75,14 +75,15 @@ beforeEach(() => {
 
 
 describe("SCRUM486_AC6 who the picker offers", () => {
-  it("SCRUM486_AC6_the_holder_handing_over_is_left_out_as_before", async () => {
-    // The holder is the caller here, so this is the person the old filter
-    // left out too: the coordinator case is unchanged.
-    renderAs(HOLDER, "event_coordinator");
+  it("SCRUM444_AC3_the_leads_list_is_the_only_one_read_and_the_holder_is_left_out", async () => {
+    // Was SCRUM486_AC6_the_holder_handing_over_is_left_out_as_before, where the
+    // holder handed over from GET /coordinators. That list is gone (D5), and
+    // the Lead hands over; the holder is still left out of the choices.
+    renderAs(LEAD, "event_coordinator_lead");
 
-    expect(await optionNames()).toEqual(["Omar Okafor", "Mei Tan"]);
-    expect(listCoordinators).toHaveBeenCalledTimes(1);
-    expect(listCoordinatorWorkload).not.toHaveBeenCalled();
+    expect(await optionNames()).toEqual(["Omar Okafor, 1 active event", "Mei Tan, 0 active events"]);
+    expect(listCoordinatorWorkload).toHaveBeenCalledTimes(1);
+    expect(listCoordinators).not.toHaveBeenCalled();
   });
 
   it("SCRUM486_AC6_for_a_lead_the_holder_is_left_out_not_the_caller", async () => {
@@ -104,12 +105,15 @@ describe("SCRUM486_AC6 who the picker offers", () => {
     expect(listCoordinators).not.toHaveBeenCalled();
   });
 
-  it("SCRUM486_AC6_a_coordinator_who_does_not_hold_it_is_listed_and_the_holder_is_not", async () => {
-    // Not a caller the screen shows the button to, but if one reached this
-    // panel they are a valid choice and the holder is not.
+  it("SCRUM444_AC3_a_coordinator_who_reaches_the_panel_is_told_only_the_lead_hands_over", async () => {
+    // Was SCRUM486_AC6_a_coordinator_who_does_not_hold_it_is_listed_and_the_holder_is_not.
+    // The screen shows the button to the Lead alone; a coordinator who got here
+    // anyway is refused the Lead's list (leadOnly), and told who may hand over.
+    vi.mocked(listCoordinatorWorkload).mockRejectedValue(httpError(403));
     renderAs(OTHER, "event_coordinator");
 
-    expect(await optionNames()).toEqual(["Omar Okafor", "Mei Tan"]);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Only the Event Coordinator Lead can hand an event over.");
+    expect(screen.queryByLabelText("Hand over to")).not.toBeInTheDocument();
   });
 
   it("SCRUM486_AC6_the_holder_the_parent_names_wins_over_the_row_it_was_loaded_from", async () => {
@@ -145,52 +149,43 @@ describe("SCRUM486_AC6 who the picker offers", () => {
 });
 
 
-describe("SCRUM486_AC6 every message on the path, true for either caller", () => {
-  it("SCRUM486_AC6_a_403_says_who_may_hand_over_not_that_the_event_was_yours", async () => {
-    // SCRUM-519's case, kept by name: the holder whose event moved on gets
-    // the 403, and it says who may hand over, not "no longer assigned to you".
+describe("SCRUM444_AC3 every message on the path, true for the Lead", () => {
+  it("SCRUM444_AC3_a_403_says_only_the_lead_hands_over", async () => {
+    // Was SCRUM486_AC6_a_403_says_who_may_hand_over_not_that_the_event_was_yours,
+    // said to the holder. Since 055 a 403 means the caller is not the Lead (a
+    // role changed since the screen opened), and it says who may hand over.
     vi.mocked(reassignEventRequest).mockRejectedValue(httpError(403));
     const user = userEvent.setup();
-    renderAs(HOLDER, "event_coordinator");
+    renderAs(LEAD, "event_coordinator_lead");
 
     await user.selectOptions(await screen.findByLabelText("Hand over to"), OTHER);
     await user.click(screen.getByRole("button", { name: "Confirm handover" }));
 
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent(
-      "Only the coordinator who holds it, or the Event Coordinator Lead, can do that",
-    );
-    expect(alert).toHaveTextContent("Go back and reopen it to see who holds it now.");
-    expect(alert).not.toHaveTextContent(/no longer assigned to you/i);
+    expect(alert).toHaveTextContent("You cannot hand this event over. Only the Event Coordinator Lead can do that.");
+    expect(alert).not.toHaveTextContent(/no longer assigned to you|holds it/i);
   });
 
-  it("SCRUM486_AC6_the_intro_says_you_to_the_holder", async () => {
-    renderAs(HOLDER, "event_coordinator");
-
-    expect(
-      await screen.findByText(
-        "The coordinator you choose becomes responsible for this event. You will still be able to view it, but not change it.",
-      ),
-    ).toBeInTheDocument();
-  });
-
-  it("SCRUM486_AC6_the_intro_speaks_of_the_holder_to_a_lead", async () => {
-    // A Lead never could change it, so "you will no longer" would be untrue.
+  it("SCRUM444_AC4_the_intro_says_the_holder_will_no_longer_see_it", async () => {
+    // Replaces SCRUM486_AC6_the_intro_says_you_to_the_holder and
+    // SCRUM486_AC6_the_intro_speaks_of_the_holder_to_a_lead, which both said the
+    // holder could still view it: since SCRUM-444 AC4 they cannot.
     renderAs(LEAD, "event_coordinator_lead");
 
     expect(
       await screen.findByText(
-        "The coordinator you choose becomes responsible for this event. The coordinator who holds it now will still be able to view it, but not change it.",
+        "The coordinator you choose becomes responsible for this event. The coordinator who holds it now will no longer be able to view or change it.",
       ),
     ).toBeInTheDocument();
+    expect(screen.queryByText(/still be able to view/)).not.toBeInTheDocument();
   });
 
   it.each([
-    [403, "Only Event Coordinators and the Event Coordinator Lead can hand an event over."],
+    [403, "Only the Event Coordinator Lead can hand an event over."],
     [500, "The list of coordinators could not be loaded. Please try again."],
-  ])("SCRUM486_AC6_loading_the_list_for_a_lead_fails_with_%s", async (status, message) => {
-    // The 403 said "Only Event Coordinators can hand an event over" until
-    // SCRUM-521, false since 052 let the Lead.
+  ])("SCRUM444_AC3_loading_the_list_for_a_lead_fails_with_%s", async (status, message) => {
+    // Was SCRUM486_AC6_loading_the_list_for_a_lead_fails_with_%s: the list is
+    // leadOnly, so its 403 now names the Lead alone.
     vi.mocked(listCoordinatorWorkload).mockRejectedValue(httpError(status));
     renderAs(LEAD, "event_coordinator_lead");
 
@@ -200,18 +195,17 @@ describe("SCRUM486_AC6 every message on the path, true for either caller", () =>
 
   it.each([
     [400, "That person cannot take this event. They may no longer be an Event Coordinator, or they may already hold it. Choose someone else."],
-    [403, "You cannot hand this event over. Only the coordinator who holds it, or the Event Coordinator Lead, can do that, and it may have been handed to someone else. Go back and reopen it to see who holds it now."],
+    [403, "You cannot hand this event over. Only the Event Coordinator Lead can do that."],
     [404, "This event no longer exists."],
     [409, "This event cannot be handed over right now. Its status may not allow a handover, or it changed while you were looking at it. Go back and reopen it to see where it stands."],
     [500, "The event could not be handed over. Please try again."],
-  ])("SCRUM486_AC6_a_%s_refusal_reads_the_same_to_a_lead_and_a_holder", async (status, message) => {
-    // Every handover refusal, for both callers, and none tells a Lead the
-    // event was theirs. The 409 is a lost race or a status: "changed while
-    // you were looking at it", never "yours".
+  ])("SCRUM444_AC3_a_%s_refusal_reads_true_to_the_lead", async (status, message) => {
+    // Was SCRUM486_AC6_a_%s_refusal_reads_the_same_to_a_lead_and_a_holder: the
+    // holder no longer hands over. None tells the Lead the event was theirs.
     vi.mocked(reassignEventRequest).mockRejectedValue(httpError(status));
     const user = userEvent.setup();
 
-    for (const [userId, role] of [[LEAD, "event_coordinator_lead"], [HOLDER, "event_coordinator"]]) {
+    for (const [userId, role] of [[LEAD, "event_coordinator_lead"]]) {
       vi.mocked(useAuth).mockReturnValue({ user: { id: userId, role } });
       const view = render(<ReassignEventPanel request={REQUEST} onCancel={vi.fn()} onReassigned={vi.fn()} />);
 

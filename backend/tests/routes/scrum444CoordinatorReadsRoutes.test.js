@@ -169,6 +169,28 @@ describe('SCRUM-444 AC1: a coordinator reads only the events they hold; the Lead
     }
   });
 
+  // Every read under /:id that would hand the id to Postgres, as a role its gate lets through.
+  it.each([
+    ['status', '/status', ROLE.EVENT_ORGANISER],
+    ['status_history', '/status-history', ROLE.EVENT_ORGANISER],
+    ['clarification_history', '/clarification-history', ROLE.EVENT_COORDINATOR],
+    ['decision_history', '/decision-history', ROLE.EVENT_COORDINATOR],
+    ['change_history', '/change-history', ROLE.EVENT_COORDINATOR],
+    ['change_requests', '/change-requests', ROLE.EVENT_ORGANISER],
+    ['review', '/review', ROLE.EVENT_COORDINATOR],
+    ['cancellation_impact', '/cancellation-impact', ROLE.EVENT_COORDINATOR_LEAD],
+    ['assignments', '/assignments', ROLE.EVENT_ORGANISER],
+    ['assignments_review', '/assignments/review', ROLE.EVENT_COORDINATOR],
+  ])('SCRUM444_AC1_%s_refuses_a_malformed_id_with_400_before_any_read', async (_name, suffix, role) => {
+    const client = createEventRequestClient([]);
+
+    const res = await request(appWith(client, as(role, HOLDER_ID))).get(`/api/event-requests/not-a-uuid${suffix}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body.details).toEqual([{ field: 'id', message: 'must be a valid id' }]);
+    expect(client.calls).toHaveLength(0);
+  });
+
   it('SCRUM444_AC1_get_by_id_refuses_a_malformed_id_with_400_before_the_read', async () => {
     // GET /:id, the Organiser's read: a 400, not Postgres's 22P02 as a 500.
     const client = createEventRequestClient([]);
@@ -223,6 +245,22 @@ describe('SCRUM-444 AC5: closing notes reach no non-holder', () => {
     // The holder still reads them (SCRUM-379).
     const holder = await read(`/api/event-requests/${EVENT_ID}/review`, { event: completed, role: ROLE.EVENT_COORDINATOR, userId: HOLDER_ID });
     expect(holder.res.body.closingNotes).toBe(SECRET);
+  });
+});
+
+describe('SCRUM-444 AC2: a clarification request by a non-holder, over HTTP', () => {
+  it('SCRUM444_AC2_a_non_holder_asking_for_clarification_is_refused_403_before_the_function', async () => {
+    // requestEventClarification answers first, as before 056: the 403 a write
+    // keeps (D6), and the function, which now refuses with 42501 too, is never asked.
+    const client = createEventRequestClient([ok(row({ status: STATUS.UNDER_REVIEW }))]);
+
+    const res = await request(appWith(client, as(ROLE.EVENT_COORDINATOR, OTHER_COORDINATOR_ID)))
+      .post(`/api/event-requests/${EVENT_ID}/clarification`)
+      .send({ note: 'How many will attend?' });
+
+    expect(res.status).toBe(403);
+    expect(res.body).toEqual({ error: `Only the coordinator assigned to event request ${EVENT_ID} can request clarification on it.` });
+    expect(client.calls.map((call) => call.operation)).toEqual(['select']);
   });
 });
 

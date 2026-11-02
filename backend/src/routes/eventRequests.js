@@ -151,6 +151,16 @@ function parseBooleanQuery(raw, field, message) {
   return raw === 'true';
 }
 
+/**
+ * SCRUM-444: a malformed event id is a 400 before any read, not Postgres's
+ * 22P02 from the uuid cast, which arrives as a 500.
+ */
+function requirePlausibleEventId(id) {
+  if (!isPlausibleId(id)) {
+    throw new ValidationError('Invalid event request id', [{ field: 'id', message: 'must be a valid id' }]);
+  }
+}
+
 
 /**
  * Attach the Organiser-facing view of the status to a stored request.
@@ -470,6 +480,7 @@ export function createEventRequestRouter({
    * two -- but the ordering is what someone adding a route later will copy.
    */
   router.get('/:id/status', async (req, res) => {
+    requirePlausibleEventId(req.params.id);
     const request = await getEventRequestForOrganiser(req.params.id, req.user.id, { client });
     const display = getStatusDisplay(request.status);
 
@@ -506,11 +517,13 @@ export function createEventRequestRouter({
    * Organiser-facing label for each (SCRUM-323), and no more.
    */
   router.get('/:id/status-history', async (req, res) => {
+    requirePlausibleEventId(req.params.id);
     const history = await getEventRequestStatusHistory(req.params.id, req.user.id, { client });
     res.status(200).json(history);
   });
 
   router.get('/:id/clarification-history', async (req, res) => {
+    requirePlausibleEventId(req.params.id);
     const history = await getEventClarificationHistory(
       req.params.id,
       req.user.id,
@@ -522,6 +535,7 @@ export function createEventRequestRouter({
 
   // SCRUM-355: past decisions, gated as the clarification history is.
   router.get('/:id/decision-history', async (req, res) => {
+    requirePlausibleEventId(req.params.id);
     const history = await getEventDecisionHistory(
       req.params.id,
       req.user.id,
@@ -538,6 +552,7 @@ export function createEventRequestRouter({
    * coordinator and a Lead read it, and answers anyone else 404.
    */
   router.get('/:id/change-history', async (req, res) => {
+    requirePlausibleEventId(req.params.id);
     const history = await getEventChangeHistory(
       req.params.id,
       req.user.id,
@@ -574,6 +589,7 @@ export function createEventRequestRouter({
    * two, but the ordering is what someone adding a route later will copy.
    */
   router.get('/:id/change-requests', async (req, res) => {
+    requirePlausibleEventId(req.params.id);
     await getEventRequestForOrganiser(req.params.id, req.user.id, { client });
 
     const changeRequests = await getChangeRequestsForEvent(
@@ -648,6 +664,7 @@ export function createEventRequestRouter({
    * Both roles that pass the gate are coordinator-side; an Organiser never reaches this route.
    */
   router.get('/:id/review', coordinatorOrLead, async (req, res) => {
+    requirePlausibleEventId(req.params.id);
     const request = await getEventRequestForCoordinator(req.params.id, { client, withClosingNotes: true });
     assertCoordinatorMayRead(request, req.user.id, req.user.role, req.params.id);
     res.status(200).json(withStatusDisplay(request));
@@ -657,6 +674,7 @@ export function createEventRequestRouter({
   // preview which event is the function's to decide (011 gave it p_caller); the
   // read first still answers 404 for a draft or a missing id, as /:id/review does.
   router.get('/:id/cancellation-impact', coordinatorOrLead, async (req, res) => {
+    requirePlausibleEventId(req.params.id);
     await getEventRequestForCoordinator(req.params.id, { client });
     const impact = await getEventCancellationImpact(req.params.id, req.user.id, { client });
     res.status(200).json(impact);
@@ -701,6 +719,7 @@ export function createEventRequestRouter({
    * /mine and /queue included, do not carry a growing array nothing displays.
    */
   router.get('/:id/assignments', async (req, res) => {
+    requirePlausibleEventId(req.params.id);
     await getEventRequestForOrganiser(req.params.id, req.user.id, { client });
 
     const history = await listAssignmentHistory(req.params.id, { includeNotes: false }, { client });
@@ -731,6 +750,7 @@ export function createEventRequestRouter({
    * Organiser, whom this gate still refuses.
    */
   router.get('/:id/assignments/review', coordinatorOrLead, async (req, res) => {
+    requirePlausibleEventId(req.params.id);
     const event = await getEventRequestForCoordinator(req.params.id, { client });
     assertCoordinatorMayRead(event, req.user.id, req.user.role, req.params.id);
 
@@ -744,9 +764,7 @@ export function createEventRequestRouter({
    * 404 like a missing id. ?noEquipmentConfirmed= is 'true', 'false' or absent.
    */
   router.get('/:id/readiness', coordinatorOrLead, async (req, res) => {
-    if (!isPlausibleId(req.params.id)) {
-      throw new ValidationError('Invalid event request id', [{ field: 'id', message: 'must be a valid id' }]);
-    }
+    requirePlausibleEventId(req.params.id);
     const noEquipmentConfirmed = parseBooleanQuery(
       req.query.noEquipmentConfirmed,
       'noEquipmentConfirmed',
@@ -772,9 +790,7 @@ export function createEventRequestRouter({
    * a removed one-segment path such as /coordinators lands here.
    */
   router.get('/:id', async (req, res) => {
-    if (!isPlausibleId(req.params.id)) {
-      throw new ValidationError('Invalid event request id', [{ field: 'id', message: 'must be a valid id' }]);
-    }
+    requirePlausibleEventId(req.params.id);
     const request = await getEventRequestForOrganiser(req.params.id, req.user.id, { client });
     res.status(200).json(withStatusDisplay(request));
   });
