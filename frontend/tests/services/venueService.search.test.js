@@ -92,6 +92,26 @@ describe("searchActiveVenues", () => {
     }
   });
 
+  it("SCRUM592_AC1_q_is_sent_as_q_beside_the_other_filters", async () => {
+    await searchActiveVenues({ q: "meeting", minCapacity: 50, startsAt: STARTS_AT, endsAt: ENDS_AT });
+    expect(apiClient.get).toHaveBeenCalledWith("/venues/search", {
+      params: { q: "meeting", minCapacity: 50, startsAt: STARTS_AT, endsAt: ENDS_AT },
+    });
+  });
+
+  it("SCRUM592_AC3_a_blank_or_absent_q_sends_no_q_key", async () => {
+    await searchActiveVenues({ q: "", minCapacity: 50 });
+    await searchActiveVenues({ q: undefined, minCapacity: 50 });
+    for (const [, { params }] of apiClient.get.mock.calls) {
+      expect(params).toStrictEqual({ minCapacity: 50 });
+    }
+  });
+
+  it("SCRUM592_AC3_location_is_still_sent_when_given", async () => {
+    await searchActiveVenues({ q: "meeting", location: "Level" });
+    expect(apiClient.get.mock.calls[0][1].params).toStrictEqual({ q: "meeting", location: "Level" });
+  });
+
   it("lets an error through unchanged", async () => {
     const err = httpError(400, { details: [{ field: "endsAt", message: "is required when a start is given" }] });
     vi.mocked(apiClient.get).mockRejectedValue(err);

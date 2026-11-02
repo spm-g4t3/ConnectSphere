@@ -118,6 +118,9 @@ export default defineConfig({
         // SCRUM-478: the registration list service and its labels are new and owned outright.
         'src/services/registrationListService.js': FULL,
         'src/domain/registrationEntryStatus.js': FULL,
+        // SCRUM-592: the escaping is a new pure file only this bug owns; the
+        // search edits sit in SCRUM-15's shared files and do not gate.
+        'src/http/likePattern.js': FULL,
       },
     },
   },

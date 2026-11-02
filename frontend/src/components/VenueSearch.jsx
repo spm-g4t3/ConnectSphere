@@ -1,7 +1,12 @@
 // VenueSearch.jsx
-// Matches the backend's real supported filters (location, minCapacity, and an
+// Matches the backend's real supported filters (q, minCapacity, and an
 // optional startsAt/endsAt window) and response shape ({ id, name, location,
 // maxCapacity }).
+//
+// SCRUM-592: the text box sends q, which the backend matches against the
+// venue's name or location. It used to send location, which matches the
+// location only, so "meeting" could never find a venue named "Meeting room".
+// The page no longer sends or reads location; nothing links here with it.
 //
 // SCRUM-130 (part of SCRUM-17, AC2) added the window: with both dates set,
 // venues blocked at any point in [From, To) are left out. It is optional and
@@ -41,7 +46,7 @@
 //     set, with a hint saying why; neither is ever cleared behind the user's
 //     back.
 //   - It is a filter, so it seeds from the query string (?includeRetired=true,
-//     the same spelling the API takes) exactly like location and minCapacity:
+//     the same spelling the API takes) exactly like q and minCapacity:
 //     once, on first render, and its presence alone triggers the auto-search.
 //   - A retired row's "View calendar" opens on the week the venue retired,
 //     which is where its past bookings end.
@@ -122,7 +127,8 @@ export default function VenueSearch({ role, userId, onRequestSubmitted } = {}) {
   // invites the next reader to "simplify" it into a value that does get
   // reapplied. The function form says once and means it.
   const [filters, setFilters] = useState(() => ({
-    location: searchParams.get("location") ?? "",
+    // SCRUM-592: ?q=, the API's own spelling, like the other seeds.
+    q: searchParams.get("q") ?? "",
     minCapacity: searchParams.get("minCapacity") ?? "",
     startsAt: "",
     endsAt: "",
@@ -179,7 +185,7 @@ export default function VenueSearch({ role, userId, onRequestSubmitted } = {}) {
     setError(null);
     try {
       const venues = await searchActiveVenues({
-        location: filters.location || undefined,
+        q: filters.q || undefined,
         minCapacity: filters.minCapacity ? Number(filters.minCapacity) : undefined,
         ...searchWindow,
         // Spread in only when set, so a default search's filters keep exactly
@@ -255,7 +261,7 @@ export default function VenueSearch({ role, userId, onRequestSubmitted } = {}) {
   useEffect(() => {
     if (autoSearched.current) return;
     if (
-      !searchParams.get("location") &&
+      !searchParams.get("q") &&
       !searchParams.get("minCapacity") &&
       // The URL, not the live checkbox: ticking the box must not search.
       !(canIncludeRetired && searchParams.get("includeRetired") === INCLUDE_RETIRED_PARAM)
@@ -297,15 +303,19 @@ export default function VenueSearch({ role, userId, onRequestSubmitted } = {}) {
       )}
 
       <div className="venue-search__filters">
+        {/* SCRUM-592: a placeholder is not an accessible name, so each input
+            gets an aria-label, and a screen reader announces what it is. */}
         <input
           type="text"
-          placeholder="Location"
-          value={filters.location}
-          onChange={(e) => setFilters({ ...filters, location: e.target.value })}
+          aria-label="Venue name or location"
+          placeholder="Venue name or location"
+          value={filters.q}
+          onChange={(e) => setFilters({ ...filters, q: e.target.value })}
         />
         <input
           type="number"
           min="1"
+          aria-label="Min capacity"
           placeholder="Min capacity"
           value={filters.minCapacity}
           onChange={(e) => setFilters({ ...filters, minCapacity: e.target.value })}

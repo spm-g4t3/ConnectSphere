@@ -590,6 +590,49 @@ describe('routing and query handling', () => {
     expect(stub.args('ilike')).toEqual(['location', '%SCIS%']);
   });
 
+  // SCRUM-592: the search box's text.
+  it('SCRUM592_AC1_passes_q_through_to_a_name_or_location_filter', async () => {
+    const stub = queryStub(ok([]));
+    from.mockReturnValueOnce(stub);
+
+    const res = await request(appWith()).get('/api/venues/search?q=meeting%20room');
+
+    expect(res.status).toBe(200);
+    expect(stub.args('or')).toEqual(['name.ilike."%meeting room%",location.ilike."%meeting room%"']);
+    expect(stub.called('ilike')).toBe(false);
+  });
+
+  it('SCRUM592_AC2_a_url_encoded_comma_and_parentheses_stay_inside_the_quoted_value', async () => {
+    const stub = queryStub(ok([]));
+    from.mockReturnValueOnce(stub);
+
+    await request(appWith()).get('/api/venues/search?q=a%2Cb%20(x)');
+
+    expect(stub.args('or')).toEqual(['name.ilike."%a,b (x)%",location.ilike."%a,b (x)%"']);
+  });
+
+  it('SCRUM592_AC2_a_repeated_q_answers_400_naming_q', async () => {
+    const res = await request(appWith()).get('/api/venues/search?q=a&q=b');
+
+    expect(res.status).toBe(400);
+    expect(res.body.details).toEqual([{ field: 'q', message: 'must be text' }]);
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM592_AC3_a_blank_q_searches_exactly_as_no_q', async () => {
+    const plain = queryStub(ok([]));
+    from.mockReturnValueOnce(plain);
+    await request(appWith()).get('/api/venues/search');
+    const blank = queryStub(ok([]));
+    from.mockReturnValueOnce(blank);
+
+    const res = await request(appWith()).get('/api/venues/search?q=%20%20');
+
+    expect(res.status).toBe(200);
+    expect(blank.called('or')).toBe(false);
+    expect(blank.calls).toEqual(plain.calls);
+  });
+
   it('SCRUM15_AC1_answers_400_rather_than_500_for_a_malformed_id', async () => {
     const res = await request(appWith()).get('/api/venues/not-a-uuid');
 

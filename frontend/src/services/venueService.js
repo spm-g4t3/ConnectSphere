@@ -14,9 +14,11 @@
 //   - Response rows: { id, name, location, maxCapacity }, plus retiredAt on
 //     the catalogue listing — and no `status` field. `status` is not a
 //     backend concept anywhere in this API, so nothing should read one.
-//   - Supported filters: location (substring, case-insensitive), minCapacity,
-//     and an optional startsAt/endsAt window -- both or neither -- that drops
-//     venues blocked during it (SCRUM-130). Bookings are not considered.
+//   - Supported filters: q (SCRUM-592: substring of the name or the location,
+//     case-insensitive, every character literal), location (the location
+//     only), minCapacity, and an optional startsAt/endsAt window -- both or
+//     neither -- that drops venues blocked during it (SCRUM-130). Bookings are
+//     not considered.
 //   - /venues/:id/blocks lists, creates, changes and removes venue blocks.
 //     Venue Staff and Event Coordinators may list them (SCRUM-130); every
 //     write is Venue Staff only (SCRUM-127), and so is reading one block's
@@ -47,8 +49,14 @@ import { getData, patchData, postData } from "./apiData";
  * naming the missing field in details[]. Each date is omitted from the query
  * when unset, so a dateless search is exactly the request it always was.
  *
+ * SCRUM-592: q is the search box's text, matched against the name or the
+ * location. location is still sent when given and still means the location
+ * only; the search page no longer sends it.
+ *
  * @param {Object} filters
- * @param {string} [filters.location]     substring match, case-insensitive
+ * @param {string} [filters.q]            SCRUM-592: substring of the name or
+ *                                        the location, case-insensitive
+ * @param {string} [filters.location]     substring of the location only, case-insensitive
  * @param {number} [filters.minCapacity]  minimum seats needed
  * @param {string} [filters.startsAt]     ISO with an explicit offset
  * @param {string} [filters.endsAt]       ISO with an explicit offset, after startsAt
@@ -57,6 +65,7 @@ import { getData, patchData, postData } from "./apiData";
  */
 export async function searchActiveVenues(filters = {}) {
   const params = {};
+  if (filters.q) params.q = filters.q;
   if (filters.location) params.location = filters.location;
   if (filters.minCapacity) params.minCapacity = filters.minCapacity;
   if (filters.startsAt) params.startsAt = filters.startsAt;

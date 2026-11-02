@@ -50,11 +50,15 @@
  * (032) -- the same function the block writers, the booking request and the
  * calendar call. One formula, in one place, so search can never offer a venue
  * that a booking request at the same period would then refuse.
+ *
+ * SCRUM-592: searchVenues also takes q, the search box's text, matched
+ * against the name or the location, every character literally (below).
  */
 
 import { supabase } from '../config/supabaseClient.js';
 import { ValidationError, NotFoundError, ConflictError } from '../errors.js';
 import { createPgTranslator, rejected, conflict, notFound } from '../http/pgErrors.js';
+import { toIlikePattern, anyColumnContains } from '../http/likePattern.js';
 import {
   validateCreateVenue,
   validateUpdateVenue,
@@ -532,7 +536,42 @@ async function findAvailableVenueIds(venueIds, startsAt, endsAt, excludeHoldEven
  * Operating hours are still not checked. Whether a venue is open then is
  * SCRUM-20's.
  *
+ * SCRUM-592: q is the search box's text, matched against the name or the
+ * location. Before it the box sent location, so "meeting" never found a
+ * venue named "Meeting room". q is a new filter rather than location widened
+ * to names: location means "location only" in findVenuesForEvent (SCRUM-141)
+ * too, an API parameter called location that also matches names misleads
+ * whoever reads it next, and SCRUM-111's tests and docs would change meaning
+ * unannounced. So location keeps its meaning, and q and location may be
+ * combined (ANDed).
+ *
+ * Every character of q and location is matched literally: http/likePattern.js
+ * escapes LIKE's wildcards and, for q's .or(), PostgREST's list syntax (the
+ * layers are set out there). The ilike is the database's pre-filter, and it
+ * can over-match: PostgREST rewrites * as % before Postgres sees it, and no
+ * escape survives that. So each returned row is re-checked in JavaScript
+ * with String.prototype.includes, which has no metacharacters at all, before
+ * availability is asked. The re-check is exact for every character, so it
+ * also backs up the %, _ and \ escaping rather than replacing it, while the
+ * ilike still does the narrowing in the database. ilike and toLowerCase()
+ * agree for ASCII; for other scripts their case folding may differ. Only q is
+ * re-checked: ?location=* still over-matches, accepted for a parameter no
+ * screen sends.
+ *
+ * Rejected for *: the regex operators (match, imatch) for q, a second
+ * escaping scheme beside LIKE's in which every regex metacharacter is a trap;
+ * moving location to regex too, which changes location's meaning and its
+ * tests; and leaving * as a known limit.
+ *
+ * Rejected: two queries, one per column, merged in JavaScript (two round
+ * trips, the dated search run on a merged list, and name order becomes the
+ * merge's job); and a new SQL function (a migration for a one-line filter,
+ * repeating the retired and capacity rules in SQL).
+ *
  * @param {object} [filters]
+ * @param {string} [filters.q]            SCRUM-592: matched as a substring of
+ *                                        the name or the location,
+ *                                        case-insensitively
  * @param {string} [filters.location]     matched as a substring, case-insensitively
  * @param {number} [filters.minCapacity]  venues that seat at least this many
  * @param {string} [filters.startsAt]     SCRUM-130: ISO 8601 with an offset
@@ -555,8 +594,13 @@ export async function searchVenues(filters = {}) {
         .select('id, name, location, max_capacity')
         .is('retired_at', null);
 
+  // SCRUM-592: only when typed, so a search without q sends no new call.
+  if (search.q !== undefined) {
+    query = query.or(anyColumnContains(['name', 'location'], search.q));
+  }
+
   if (search.location !== undefined) {
-    query = query.ilike('location', `%${search.location}%`);
+    query = query.ilike('location', toIlikePattern(search.location));
   }
 
   if (search.minCapacity !== undefined) {
@@ -569,9 +613,19 @@ export async function searchVenues(filters = {}) {
 
   let rows = data ?? [];
 
+  // SCRUM-592 (D3): the ilike can over-match (PostgREST reads * as %), so each
+  // row is re-checked with includes(), which has no metacharacters. Before
+  // availability, so it is asked only about real matches.
+  if (search.q !== undefined) {
+    const text = search.q.toLowerCase();
+    rows = rows.filter(
+      (row) => row.name.toLowerCase().includes(text) || row.location.toLowerCase().includes(text),
+    );
+  }
+
   // SCRUM-484: after the venues query, not before it as SCRUM-130's blocks
   // read was. available_venue_ids() answers for the venues it is given, so it
-  // is asked only about the ones that passed location and capacity -- one
+  // is asked only about the ones that passed the text and capacity filters -- one
   // call, and none when nothing did. A dateless search sends exactly the
   // query it always has. Filtering keeps the name order; the Set is a
   // membership test, not a second copy of the rule.

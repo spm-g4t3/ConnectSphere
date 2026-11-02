@@ -527,7 +527,14 @@ function isUnset(value) {
  * the same checkTimeWindow the block window uses. No length cap: how long an
  * event may run is SCRUM-20's rule, and a search should not invent one.
  *
+ * SCRUM-592 adds q, the search box's text, matched against name or location.
+ * It is shaped like location: trimmed, blank is unset, and anything but text
+ * (a repeated ?q=a&q=b arrives as an array) is a 400 naming q.
+ *
  * @param {object} [filters]
+ * @param {string} [filters.q]            SCRUM-592: matched as a substring of
+ *                                        the name or the location,
+ *                                        case-insensitively
  * @param {string} [filters.location]     matched as a substring, case-insensitively
  * @param {number} [filters.minCapacity]  venues that seat at least this many
  * @param {string} [filters.startsAt]     SCRUM-130: ISO 8601 with an offset
@@ -547,6 +554,10 @@ export function validateSearchFilters(filters = {}) {
 
   const errors = createErrorCollector();
   const normalised = {};
+
+  if (!isUnset(filters.q)) {
+    normalised.q = checkRequiredText(errors, 'q', filters.q);
+  }
 
   if (!isUnset(filters.location)) {
     normalised.location = checkRequiredText(errors, 'location', filters.location);
