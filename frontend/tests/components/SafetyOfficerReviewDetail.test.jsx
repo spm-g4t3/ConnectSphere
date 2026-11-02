@@ -132,7 +132,7 @@ describe("SCRUM-490 Safety Officer review details", () => {
     expect(screen.getByText(/Affected bookings: 1; equipment request affected: yes/)).toBeInTheDocument();
     expect(screen.getByText(/Affected bookings: 0; equipment request affected: no/)).toBeInTheDocument();
 
-    await user.selectOptions(screen.getByRole("combobox"), "changes_requested");
+    await user.click(screen.getByRole("radio", { name: "Request changes" }));
     const affectedBookings = screen.getAllByLabelText("Mark this booking as affected");
     await user.click(affectedBookings[0]);
     await user.click(affectedBookings[0]);
@@ -172,7 +172,9 @@ describe("SCRUM-490 Safety Officer review details", () => {
       />,
     );
 
-    expect(screen.getByRole("status")).toHaveTextContent("This event is now safety_approved");
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "This event is now Safety approved. No further response can be submitted.",
+    );
     expect(screen.queryByRole("button", { name: "Submit response" })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Mark this booking as affected")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Mark the equipment request as affected")).not.toBeInTheDocument();

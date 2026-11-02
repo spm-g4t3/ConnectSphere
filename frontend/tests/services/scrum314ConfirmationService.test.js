@@ -24,7 +24,6 @@ import {
   isStaleEquipmentError,
 } from "../../src/services/equipmentErrors";
 import { describeAffected, summariseAffected, impactHeading } from "../../src/services/equipmentImpactDisplay";
-import { formatEventPeriod } from "../../src/services/eventPeriodFormat";
 
 const failure = (status, data) => ({ response: { status, data } });
 
@@ -235,7 +234,7 @@ describe("SCRUM310 wording one affected reservation", () => {
     expect(describeAffected(item())).toEqual({
       id: R1,
       eventName: "Open Day",
-      period: formatEventPeriod("2026-11-05T01:00:00+00:00", "2026-11-05T05:00:00+00:00"),
+      period: "5 Nov 2026, 9:00 am – 1:00 pm",
       quantity: "3 units",
       coordinator: "Cara Coordinator",
       alreadyFlagged: false,

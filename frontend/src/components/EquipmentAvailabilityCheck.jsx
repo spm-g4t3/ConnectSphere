@@ -14,11 +14,18 @@
 // The result is dropped as soon as an input changes, so what is on screen is
 // always the answer to what is in the form. A check changes nothing (AC12).
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { checkEquipmentAvailability, listActiveEquipmentTypes } from "../services/equipmentAvailabilityService";
-import { availabilityErrorMessages } from "../services/availabilityErrors";
+import { availabilityErrorMessages, canRetryAvailabilityRead } from "../services/availabilityErrors";
 import { deviceTimeZoneLabel, toOffsetIsoString } from "../services/datetimeFormat";
-import { formatRange } from "../services/displayFormat";
+import { formatDateTimeRange } from "../services/displayFormat";
+import Button from "./ui/Button";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import LoadingText from "./ui/LoadingText";
+import StatusBadge from "./ui/StatusBadge";
+import useFocusAfterRetry from "./useFocusAfterRetry";
 import "./EquipmentAvailabilityCheck.css";
 
 const RESULT_CLASS = {
@@ -96,13 +103,13 @@ function AvailabilityResult({ result }) {
                 {reservations.map((reservation) => (
                   <tr key={reservation.id}>
                     <td>{reservation.eventName}</td>
-                    <td>{formatRange(reservation.startAt, reservation.endAt)}</td>
+                    <td>{formatDateTimeRange(reservation.startAt, reservation.endAt)}</td>
                     <td className="availability-reservations__number">{reservation.quantity}</td>
                     <td>
                       {reservation.flagged ? (
-                        <span className="availability-reservations__flag">Flagged for review</span>
+                        <StatusBadge tone="danger">Flagged for review</StatusBadge>
                       ) : (
-                        "Reserved"
+                        <StatusBadge tone="success">Reserved</StatusBadge>
                       )}
                     </td>
                   </tr>
@@ -120,29 +127,43 @@ const EMPTY_FORM = { equipmentTypeId: "", quantity: "", startAt: "", endAt: "" }
 
 export default function EquipmentAvailabilityCheck() {
   const [types, setTypes] = useState(null);
-  const [typesError, setTypesError] = useState(null);
+  const [typesError, setTypesError] = useState(null); // { message, retryable }
   const [form, setForm] = useState(EMPTY_FORM);
   const [errors, setErrors] = useState([]);
   const [result, setResult] = useState(null);
   const [checking, setChecking] = useState(false);
 
-  // The picker's list, loaded once. Declared inside the effect, as React's docs
-  // write a fetch, so a response arriving after unmounting is dropped.
+  // The picker's list, loaded on arrival and again on Try again. A response
+  // arriving after unmounting is dropped.
+  const mounted = useRef(true);
   useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      try {
-        const data = await listActiveEquipmentTypes();
-        if (!cancelled) setTypes(data);
-      } catch (err) {
-        if (!cancelled) setTypesError(availabilityErrorMessages(err, "load")[0]);
-      }
-    }
-    load();
+    // Set here as well as initially, so StrictMode's remount turns it back on.
+    mounted.current = true;
     return () => {
-      cancelled = true;
+      mounted.current = false;
     };
   }, []);
+
+  const loadTypes = useCallback(
+    () =>
+      listActiveEquipmentTypes().then(
+        (data) => mounted.current && setTypes(data),
+        (err) =>
+          mounted.current &&
+          setTypesError({ message: availabilityErrorMessages(err, "load")[0], retryable: canRetryAvailabilityRead(err) }),
+      ),
+    [],
+  );
+
+  useEffect(() => {
+    loadTypes();
+  }, [loadTypes]);
+
+  const reloadTypes = useCallback(() => {
+    setTypesError(null);
+    return loadTypes();
+  }, [loadTypes]);
+  const { headingRef, retry: retryTypes } = useFocusAfterRetry(reloadTypes);
 
   function bind(field) {
     return {
@@ -183,11 +204,23 @@ export default function EquipmentAvailabilityCheck() {
     <div className="dashboard dashboard--tech-support availability-check">
       <h1>Check equipment availability</h1>
 
-      {types === null && !typesError && <p>Loading equipment types...</p>}
-      {typesError && <p role="alert">{typesError}</p>}
-      {noTypes && <p>No active equipment types yet. Add one in the equipment catalogue first.</p>}
+      {types === null && !typesError && <LoadingText />}
+      {typesError && <ErrorNotice message={typesError.message} onRetry={typesError.retryable ? retryTypes : undefined} />}
+      {noTypes && (
+        <EmptyState
+          message="No active equipment types yet."
+          nextStep="Add one in the equipment catalogue first."
+          action={
+            <Link className="ui-button ui-button--primary" to="/equipment-catalogue">
+              Open the equipment catalogue
+            </Link>
+          }
+        />
+      )}
 
       <form onSubmit={handleSubmit} noValidate>
+        <h2 ref={headingRef} tabIndex={-1}>Choose equipment and period</h2>
+
         <div className="availability-check__field">
           <label htmlFor="availability-type">Equipment type</label>
           <select id="availability-type" {...bind("equipmentTypeId")}>
@@ -227,9 +260,9 @@ export default function EquipmentAvailabilityCheck() {
           </ul>
         )}
 
-        <button type="submit" disabled={checking || noTypes}>
+        <Button type="submit" disabled={checking || noTypes}>
           {checking ? "Checking..." : "Check availability"}
-        </button>
+        </Button>
       </form>
 
       {result && <AvailabilityResult result={result} />}

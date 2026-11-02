@@ -289,6 +289,15 @@ const SCRUM584_FILES = [
   'src/components/ui/ConfirmDialog.jsx',
 ]
 
+// SCRUM-591: the Safety Officer screens' shared labels and focus-return hook,
+// plus the review pane, which gained the response choices and reject confirm.
+// SafetyReviewHistory.jsx stays ungated: its SCRUM-490 fallbacks are untested.
+const SCRUM591_FILES = [
+  'src/components/safetyReviewLabels.js',
+  'src/components/SafetyReviewDetail.jsx',
+  'src/components/useReturnFocus.js',
+]
+
 // https://vite.dev/config/
 //
 // defineConfig comes from vitest/config rather than vite so the `test` block
@@ -348,6 +357,7 @@ export default defineConfig({
         ...SCRUM347_FILES.map((file) => [file, FULL]),
         ...SCRUM478_FILES.map((file) => [file, FULL]),
         ...SCRUM584_FILES.map((file) => [file, FULL]),
+        ...SCRUM591_FILES.map((file) => [file, FULL]),
       ]),
     },
   },
