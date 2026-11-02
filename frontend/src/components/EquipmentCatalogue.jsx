@@ -11,7 +11,7 @@
 // (AC8).
 //
 // Follows VenueCatalogue: one panel at a time with a Back button rather than a
-// modal, a ConfirmDialog before retiring, and a refetch after every change
+// modal, a two-step confirm for retiring, and a refetch after every change
 // rather than splicing a response into the list.
 //
 // SCRUM-314: retiring a type that has reservations shows them under its row and
@@ -19,41 +19,22 @@
 // forms use); a type with no reservations retires at once after the existing
 // "Confirm retire".
 
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import {
   listEquipment,
   retireEquipment,
   reinstateEquipment,
   previewEquipmentChange,
 } from "../services/equipmentService";
-import { canRetryEquipmentRead, equipmentErrorMessages, isStaleEquipmentError } from "../services/equipmentErrors";
+import { equipmentErrorMessages, isStaleEquipmentError } from "../services/equipmentErrors";
 import EquipmentImpactConfirmation from "./EquipmentImpactConfirmation";
 import useConfirmedChange from "./useConfirmedChange";
 import EquipmentForm from "./EquipmentForm";
 import EquipmentConditionForm from "./EquipmentConditionForm";
 import EquipmentHistory from "./EquipmentHistory";
-import Button from "./ui/Button";
-import ConfirmDialog from "./ui/ConfirmDialog";
-import EmptyState from "./ui/EmptyState";
-import ErrorNotice from "./ui/ErrorNotice";
-import LoadingText from "./ui/LoadingText";
-import useFocusAfterRetry from "./useFocusAfterRetry";
 import "./EquipmentCatalogue.css";
 
 const COLUMNS = 8;
-
-const loadFailure = (err) => ({ message: equipmentErrorMessages(err, "load")[0], retryable: canRetryEquipmentRead(err) });
-
-// A panel replaces the list, so its title is the page's h1. It sits here, not in
-// the form, so it stays while the form gives way to the confirmation step.
-function panelTitle({ mode, type }) {
-  if (mode === "create") return "Add an equipment type";
-  if (mode === "edit") return `Edit ${type.name}`;
-  if (mode === "condition") return `Damage and maintenance: ${type.name}`;
-  return `History: ${type.name}`;
-}
-
-const panelKey = ({ mode, type }) => `${mode}:${type?.id ?? ""}`;
 
 function EquipmentTable({
   types, retired, confirmingId, busyId, rowError, flow, onPanel, onConfirm, onCancelRetire, onChangeRetirement,
@@ -75,67 +56,65 @@ function EquipmentTable({
       <tbody>
         {types.map((type) => {
           const reinstating = busyId === type.id;
-          const reviewing = confirmingId === type.id && flow.reviewing;
+          const confirming = confirmingId === type.id;
+          const retiring = confirming && flow.busy;
+          const reviewing = confirming && flow.reviewing;
           const anyBusy = Boolean(busyId) || flow.busy || flow.reviewing;
           return (
             <Fragment key={type.id}>
             <tr>
               <td>{type.name}</td>
-              {/* data-label names the cell when a narrow screen stacks the row as a card. */}
-              <td data-label="Category">{type.category ?? "-"}</td>
-              <td data-label="Location">{type.location ?? "-"}</td>
-              <td data-label="Total" className="equipment-table__number">{type.totalQuantity}</td>
-              <td data-label="Damaged" className="equipment-table__number">{type.damagedQuantity}</td>
-              <td data-label="Under maintenance" className="equipment-table__number">{type.underMaintenanceQuantity}</td>
-              <td data-label="Usable" className="equipment-table__number">{type.usableQuantity}</td>
+              <td>{type.category ?? "-"}</td>
+              <td>{type.location ?? "-"}</td>
+              <td className="equipment-table__number">{type.totalQuantity}</td>
+              <td className="equipment-table__number">{type.damagedQuantity}</td>
+              <td className="equipment-table__number">{type.underMaintenanceQuantity}</td>
+              <td className="equipment-table__number">{type.usableQuantity}</td>
               <td>
                 <div className="equipment-table__actions">
-                  <Button
-                    data-opener={`edit:${type.id}`}
-                    variant="secondary"
-                    aria-label={`Edit ${type.name}`}
-                    onClick={() => onPanel({ mode: "edit", type })}
-                  >
+                  <button aria-label={`Edit ${type.name}`} onClick={() => onPanel({ mode: "edit", type })}>
                     Edit
-                  </Button>
+                  </button>
                   {!retired && (
-                    <Button
-                      data-opener={`condition:${type.id}`}
-                      variant="secondary"
+                    <button
                       aria-label={`Damage and maintenance for ${type.name}`}
                       onClick={() => onPanel({ mode: "condition", type })}
                     >
                       Damage and maintenance
-                    </Button>
+                    </button>
                   )}
-                  <Button
-                    data-opener={`history:${type.id}`}
-                    variant="secondary"
-                    aria-label={`History for ${type.name}`}
-                    onClick={() => onPanel({ mode: "history", type })}
-                  >
+                  <button aria-label={`History for ${type.name}`} onClick={() => onPanel({ mode: "history", type })}>
                     History
-                  </Button>
+                  </button>
                   {retired ? (
-                    <Button
-                      data-opener={`reinstate:${type.id}`}
-                      variant="secondary"
+                    <button
                       aria-label={`Reinstate ${type.name}`}
                       disabled={anyBusy}
                       onClick={() => onChangeRetirement(type, "reinstate")}
                     >
                       {reinstating ? "Reinstating..." : "Reinstate"}
-                    </Button>
+                    </button>
+                  ) : confirming ? (
+                    <>
+                      <button
+                        aria-label={`Confirm retire ${type.name}`}
+                        disabled={anyBusy}
+                        onClick={() => onChangeRetirement(type, "retire")}
+                      >
+                        {retiring ? "Checking..." : "Confirm retire"}
+                      </button>
+                      <button
+                        aria-label={`Cancel retire ${type.name}`}
+                        disabled={flow.busy}
+                        onClick={onCancelRetire}
+                      >
+                        Cancel
+                      </button>
+                    </>
                   ) : (
-                    <Button
-                      data-opener={`retire:${type.id}`}
-                      variant="danger"
-                      aria-label={`Retire ${type.name}`}
-                      disabled={anyBusy}
-                      onClick={() => onConfirm(type.id)}
-                    >
+                    <button aria-label={`Retire ${type.name}`} disabled={anyBusy} onClick={() => onConfirm(type.id)}>
                       Retire
-                    </Button>
+                    </button>
                   )}
                 </div>
               </td>
@@ -181,7 +160,7 @@ function EquipmentTable({
 export default function EquipmentCatalogue() {
   const [types, setTypes] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(null); // { message, retryable }
+  const [loadError, setLoadError] = useState(null);
 
   // { mode: "create" } | { mode: "edit" | "condition" | "history", type } | null
   const [activePanel, setActivePanel] = useState(null);
@@ -196,14 +175,6 @@ export default function EquipmentCatalogue() {
   // would leave short and asks for a confirmation when there are any.
   const retireFlow = useConfirmedChange();
 
-  // The buttons that open a dialog or a panel carry data-opener="action:id". When
-  // the dialog or panel goes, focus returns to the button used, or to a stable one
-  // nearby, instead of falling to the page body.
-  const listRef = useRef(null);
-  const [returnFocus, setReturnFocus] = useState(null); // { to }, a new object per request
-  const focusOn = (to) => setReturnFocus({ to });
-  const panelTitleRef = useRef(null);
-
   // The list stays on screen while it refreshes after a change, so this does
   // not raise `loading` again: it starts true and drops once the first load
   // settles. (It also keeps setState out of the synchronous part of the effect
@@ -213,7 +184,7 @@ export default function EquipmentCatalogue() {
       setTypes(await listEquipment());
       setLoadError(null);
     } catch (err) {
-      setLoadError(loadFailure(err));
+      setLoadError(equipmentErrorMessages(err, "load")[0]);
     }
   }, []);
 
@@ -229,7 +200,7 @@ export default function EquipmentCatalogue() {
           setLoadError(null);
         }
       } catch (err) {
-        if (!cancelled) setLoadError(loadFailure(err));
+        if (!cancelled) setLoadError(equipmentErrorMessages(err, "load")[0]);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -240,39 +211,8 @@ export default function EquipmentCatalogue() {
     };
   }, []);
 
-  const { headingRef, retry } = useFocusAfterRetry(refreshTypes);
-  // The list and its Try again stay on screen while the read runs, so a second
-  // click must not send a second read.
-  const retrying = useRef(false);
-  async function retryOnce() {
-    if (retrying.current) return;
-    retrying.current = true;
-    try {
-      await retry();
-    } finally {
-      retrying.current = false;
-    }
-  }
-
-  // A panel replaces the list, so its title takes focus.
-  useEffect(() => {
-    if (activePanel) panelTitleRef.current?.focus();
-  }, [activePanel]);
-
-  // The opener can be gone (a retired row, a failed reload), so Active equipment is the fallback.
-  useEffect(() => {
-    if (!returnFocus) return;
-    const openers = [...(listRef.current?.querySelectorAll("[data-opener]") ?? [])];
-    (openers.find((button) => button.dataset.opener === returnFocus.to) ?? headingRef.current)?.focus();
-  }, [returnFocus, headingRef]);
-
-  function closePanel() {
-    focusOn(panelKey(activePanel));
-    setActivePanel(null);
-  }
-
   function handleSaved() {
-    closePanel();
+    setActivePanel(null);
     refreshTypes();
   }
 
@@ -282,13 +222,10 @@ export default function EquipmentCatalogue() {
     try {
       await reinstateEquipment(type.id);
       await refreshTypes();
-      // The row has moved back to the active list.
-      focusOn(`retire:${type.id}`);
     } catch (err) {
       setRowError({ id: type.id, messages: equipmentErrorMessages(err, "reinstate") });
       // Our copy of the row is stale, whoever made it so.
       if (isStaleEquipmentError(err)) await refreshTypes();
-      focusOn(`reinstate:${type.id}`);
     } finally {
       setBusyId(null);
       setConfirmingId(null);
@@ -304,8 +241,6 @@ export default function EquipmentCatalogue() {
       onSaved: async () => {
         setConfirmingId(null);
         await refreshTypes();
-        // The row is now under Retired equipment, where Reinstate undoes it.
-        focusOn(`reinstate:${type.id}`);
       },
       onFailure: async (err, messages, backTo) => {
         // Failing before the staff member saw a list, or because our copy of the
@@ -316,7 +251,6 @@ export default function EquipmentCatalogue() {
           if (stale) retireFlow.cancel();
           setRowError({ id: type.id, messages });
           setConfirmingId(null);
-          focusOn(`retire:${type.id}`);
         }
         if (stale) await refreshTypes();
       },
@@ -328,7 +262,6 @@ export default function EquipmentCatalogue() {
   }
 
   function cancelRetire() {
-    focusOn(`retire:${confirmingId}`);
     retireFlow.cancel();
     setRowError(null);
     setConfirmingId(null);
@@ -339,12 +272,11 @@ export default function EquipmentCatalogue() {
     return (
       <div className="dashboard dashboard--tech-support equipment-catalogue">
         <section>
-          <Button variant="link" onClick={closePanel}>&larr; Back to the equipment catalogue</Button>
-          <h1 ref={panelTitleRef} tabIndex={-1}>{panelTitle(activePanel)}</h1>
+          <button onClick={() => setActivePanel(null)}>&larr; Back to the equipment catalogue</button>
           {mode === "create" && <EquipmentForm onSaved={handleSaved} />}
           {mode === "edit" && <EquipmentForm type={type} onSaved={handleSaved} />}
           {mode === "condition" && <EquipmentConditionForm type={type} onSaved={handleSaved} />}
-          {mode === "history" && <EquipmentHistory type={type} titleRef={panelTitleRef} />}
+          {mode === "history" && <EquipmentHistory type={type} />}
         </section>
       </div>
     );
@@ -352,7 +284,6 @@ export default function EquipmentCatalogue() {
 
   const active = types.filter((type) => !type.retiredAt);
   const retired = types.filter((type) => type.retiredAt);
-  const confirmingType = active.find((type) => type.id === confirmingId);
   const tableProps = {
     confirmingId,
     busyId,
@@ -365,19 +296,17 @@ export default function EquipmentCatalogue() {
   };
 
   return (
-    <div ref={listRef} className="dashboard dashboard--tech-support equipment-catalogue">
+    <div className="dashboard dashboard--tech-support equipment-catalogue">
       <h1>Equipment catalogue</h1>
 
       <section>
         <div className="equipment-catalogue__bar">
-          <h2 ref={headingRef} tabIndex={-1}>Active equipment</h2>
-          <Button data-opener="create:" onClick={() => setActivePanel({ mode: "create" })}>Add equipment type</Button>
+          <h2>Active equipment</h2>
+          <button onClick={() => setActivePanel({ mode: "create" })}>Add equipment type</button>
         </div>
-        {loading && <LoadingText />}
-        {loadError && <ErrorNotice message={loadError.message} onRetry={loadError.retryable ? retryOnce : undefined} />}
-        {!loading && !loadError && active.length === 0 && (
-          <EmptyState message="No active equipment types yet." nextStep="Add an equipment type to start." />
-        )}
+        {loading && <p>Loading equipment...</p>}
+        {loadError && <p role="alert">{loadError}</p>}
+        {!loading && !loadError && active.length === 0 && <p>No active equipment types yet.</p>}
         {active.length > 0 && <EquipmentTable types={active} retired={false} {...tableProps} />}
       </section>
 
@@ -387,21 +316,6 @@ export default function EquipmentCatalogue() {
           <EquipmentTable types={retired} retired {...tableProps} />
         </section>
       )}
-
-      {/* Confirming runs the reservations check; if any are affected, the dialog
-          gives way to the list under the row (flow.reviewing). */}
-      <ConfirmDialog
-        open={Boolean(confirmingType) && !retireFlow.reviewing}
-        title={`Retire ${confirmingType?.name}?`}
-        confirmLabel={retireFlow.busy ? "Checking..." : "Confirm retire"}
-        danger
-        busy={retireFlow.busy}
-        onConfirm={() => changeRetirement(confirmingType, "retire")}
-        onCancel={cancelRetire}
-      >
-        It can no longer be reserved, and you can reinstate it later. If events have it reserved, you will see them
-        before anything is saved.
-      </ConfirmDialog>
     </div>
   );
 }

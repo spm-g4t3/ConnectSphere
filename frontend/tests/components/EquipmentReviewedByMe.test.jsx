@@ -64,7 +64,7 @@ describe("what the list shows", () => {
 
     expect(await screen.findByText("Annual Dinner")).toBeInTheDocument();
     expect(screen.getByText("Under review")).toBeInTheDocument();
-    expect(screen.getByText("Last worked on: 5 Jan 2030, 9:00 am")).toBeInTheDocument();
+    expect(screen.getByText(/Last worked on: 2030-01-05 09:00/)).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "Reviewed by me" })).toBeInTheDocument();
   });
 
@@ -206,7 +206,7 @@ describe("loading and failures", () => {
     vi.mocked(getReviewedByMe).mockReturnValue(new Promise((resolve) => { finish = resolve; }));
     renderList();
 
-    expect(screen.getByRole("status")).toHaveTextContent("Loading...");
+    expect(screen.getByRole("status")).toHaveTextContent("Loading your reviewed requests...");
     finish(answer([row()]));
     expect(await screen.findByText("Annual Dinner")).toBeInTheDocument();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
@@ -225,7 +225,7 @@ describe("loading and failures", () => {
     vi.mocked(getReviewedByMe).mockRejectedValueOnce(new Error("network")).mockResolvedValueOnce(answer([row()]));
     renderList();
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Your reviewed requests could not be loaded.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Your reviewed requests could not be loaded. Try again.");
     await userEvent.click(screen.getByRole("button", { name: "Try again" }));
 
     expect(await screen.findByText("Annual Dinner")).toBeInTheDocument();

@@ -1,18 +1,18 @@
 // equipmentRequestStatus.js
 //
-// The StatusBadge tone for an equipment request's status, shared by the review
-// screen and the dashboard lists. Labels come from the server (statusLabel), so a
-// new status only needs a tone here.
+// The CSS modifier for an equipment request's status badge, shared by the review
+// screen and the dashboard queue. Labels come from the server (statusLabel), so a
+// new status only needs a class here.
 
-const STATUS_TONE = {
-  pending_review: "warning",
-  under_review: "info",
-  arranged: "success",
-  cannot_be_fully_arranged: "danger",
-  cancelled: "neutral",
+const STATUS_CLASS = {
+  pending_review: "pending",
+  under_review: "under",
+  arranged: "arranged",
+  cannot_be_fully_arranged: "cannot",
+  cancelled: "cancelled",
 };
 
-/** The tone for a status; an unknown one reads as pending (warning). */
-export function equipmentStatusTone(status) {
-  return STATUS_TONE[status] ?? "warning";
+/** The modifier for a status; an unknown one reads as pending. */
+export function equipmentStatusClass(status) {
+  return STATUS_CLASS[status] ?? "pending";
 }

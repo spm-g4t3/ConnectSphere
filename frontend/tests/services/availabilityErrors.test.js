@@ -46,7 +46,7 @@ describe("availabilityErrorMessages", () => {
 
   it.each([
     ["check", "Could not check availability. Please try again."],
-    ["load", "Could not load the equipment types."],
+    ["load", "Could not load the equipment types. Please try again."],
     ["other", "Something went wrong. Please try again."],
   ])("SCRUM23_falls_back_to_a_message_for_%s", (action, message) => {
     expect(availabilityErrorMessages(failure(500, { error: "driver text" }), action)).toEqual([message]);

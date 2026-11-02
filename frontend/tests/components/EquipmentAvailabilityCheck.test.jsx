@@ -6,7 +6,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, within, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
 
 vi.mock("../../src/services/equipmentAvailabilityService", () => ({
   listActiveEquipmentTypes: vi.fn(),
@@ -70,12 +69,7 @@ describe("the form", () => {
 
   it("SCRUM23_AC2_says_so_and_disables_the_check_when_there_are_no_active_types", async () => {
     service.listActiveEquipmentTypes.mockResolvedValue([]);
-    // The empty state links to the catalogue, so it needs a router.
-    render(
-      <MemoryRouter>
-        <EquipmentAvailabilityCheck />
-      </MemoryRouter>,
-    );
+    render(<EquipmentAvailabilityCheck />);
 
     expect(await screen.findByText(/No active equipment types yet/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Check availability" })).toBeDisabled();
@@ -86,7 +80,7 @@ describe("the form", () => {
     render(<EquipmentAvailabilityCheck />);
 
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("Could not load the equipment types.");
+    expect(alert).toHaveTextContent("Could not load the equipment types. Please try again.");
     expect(alert).not.toHaveTextContent("secret");
   });
 

@@ -11,20 +11,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { getEquipmentQueue } from "../services/equipmentQueueService";
-import { equipmentStatusTone } from "../services/equipmentRequestStatus";
-import { formatEventDateTimeRange } from "../services/eventPeriodFormat";
-import EmptyState from "./ui/EmptyState";
-import ErrorNotice from "./ui/ErrorNotice";
-import LoadingText from "./ui/LoadingText";
-import StatusBadge from "./ui/StatusBadge";
-import useFocusAfterRetry from "./useFocusAfterRetry";
+import { equipmentStatusClass } from "../services/equipmentRequestStatus";
+import { formatEventPeriod } from "../services/eventPeriodFormat";
 import "./EquipmentRequestQueue.css";
 
 const LOAD_ERRORS = {
   400: "That filter was not accepted. Choose another status and try again.",
   403: "Only technical support staff can see equipment requests.",
 };
-const GENERIC_LOAD_ERROR = "The equipment requests could not be loaded.";
+const GENERIC_LOAD_ERROR = "The equipment requests could not be loaded. Try again.";
 
 const itemsLabel = (count) => `${count} ${count === 1 ? "item" : "items"}`;
 
@@ -37,9 +32,6 @@ function venuesLabel(venues) {
 function loadErrorMessage(err) {
   return LOAD_ERRORS[err?.response?.status] ?? GENERIC_LOAD_ERROR;
 }
-
-// A refused filter or role gives the same answer again; only the generic failure is worth retrying.
-const isRetryable = (message) => message === GENERIC_LOAD_ERROR;
 
 // How the person can shorten a list, from the filters that actually apply to it.
 function narrowing({ status, includePast }) {
@@ -59,9 +51,11 @@ function RequestRow({ row, showFlagReasons }) {
       <div className="equipment-queue__main">
         <div className="equipment-queue__title">
           <strong>{row.eventName}</strong>
-          <StatusBadge tone={equipmentStatusTone(row.status)}>{row.statusLabel}</StatusBadge>
+          <span className={`equipment-queue__status equipment-queue__status--${equipmentStatusClass(row.status)}`}>
+            {row.statusLabel}
+          </span>
         </div>
-        <p className="equipment-queue__detail">{formatEventDateTimeRange(row.proposedStart, row.proposedEnd)}</p>
+        <p className="equipment-queue__detail">{formatEventPeriod(row.proposedStart, row.proposedEnd)}</p>
         <p className="equipment-queue__detail">
           {venuesLabel(row.venues)}
           {" · "}
@@ -136,32 +130,31 @@ export default function EquipmentRequestQueue() {
   const needsAction = needsList?.rows ?? [];
   const requests = requestList?.rows ?? [];
   const firstLoad = loading && statuses === null;
-  const { headingRef, retry } = useFocusAfterRetry(load);
 
   return (
     <>
-      {/* After Try again focus goes to Needs action, or to this notice when a first
-          load fails again and there is no heading yet. */}
       {error && (
-        <section className="equipment-queue" ref={needsList ? undefined : headingRef} tabIndex={-1}>
-          <ErrorNotice message={error} onRetry={isRetryable(error) ? retry : undefined} />
+        <section className="equipment-queue">
+          <p role="alert" className="equipment-queue__error">
+            {error}
+          </p>
+          <button type="button" onClick={load}>
+            Try again
+          </button>
         </section>
       )}
 
       {firstLoad && !error && (
         <section className="equipment-queue">
-          <LoadingText />
+          <p role="status">Loading equipment requests...</p>
         </section>
       )}
 
       {needsList && (
         <section className="equipment-queue" aria-labelledby="equipment-queue-needs-action" aria-busy={loading}>
-          <h2 ref={headingRef} tabIndex={-1} id="equipment-queue-needs-action">{`Needs action (${needsList.total})`}</h2>
+          <h2 id="equipment-queue-needs-action">{`Needs action (${needsList.total})`}</h2>
           {needsAction.length === 0 ? (
-            <EmptyState
-              message="Nothing needs your action."
-              nextStep="Requests waiting for review, or with a flagged reservation, appear here."
-            />
+            <p>Nothing needs your action.</p>
           ) : (
             <ul>
               {needsAction.map((row) => (
@@ -203,16 +196,13 @@ export default function EquipmentRequestQueue() {
               Include past events
             </label>
           </div>
-          {loading && !requestList && <LoadingText />}
+          {loading && !requestList && <p role="status">Loading equipment requests...</p>}
           {requestList && requests.length === 0 && (
-            status || includePast ? (
-              <EmptyState message="No equipment requests match these filters." nextStep="Change or clear the filters." />
-            ) : (
-              <EmptyState
-                message="No equipment requests for upcoming events."
-                nextStep="New requests appear here when coordinators request equipment for an event."
-              />
-            )
+            <p>
+              {status || includePast
+                ? "No equipment requests match these filters."
+                : "No equipment requests for upcoming events."}
+            </p>
           )}
           {requests.length > 0 && (
             <ul>

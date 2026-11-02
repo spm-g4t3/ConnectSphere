@@ -22,7 +22,7 @@ const STATUS_MESSAGES = {
 
 const DEFAULT_MESSAGES = {
   check: "Could not check availability. Please try again.",
-  load: "Could not load the equipment types.",
+  load: "Could not load the equipment types. Please try again.",
 };
 
 /**
@@ -44,10 +44,4 @@ export function availabilityErrorMessages(err, action) {
   if (response?.status === 400) return ["Some details were not accepted. Please check the form."];
 
   return [DEFAULT_MESSAGES[action] ?? "Something went wrong. Please try again."];
-}
-
-/** Whether reading again could help: a refused role or bad input answers the same again. */
-export function canRetryAvailabilityRead(err) {
-  const status = err?.response?.status;
-  return status !== 400 && status !== 403;
 }

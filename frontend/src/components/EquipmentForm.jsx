@@ -18,7 +18,6 @@ import { useState } from "react";
 import { createEquipment, updateEquipment, previewEquipmentChange } from "../services/equipmentService";
 import { equipmentErrorMessages } from "../services/equipmentErrors";
 import EquipmentImpactConfirmation from "./EquipmentImpactConfirmation";
-import Button from "./ui/Button";
 import useConfirmedChange from "./useConfirmedChange";
 
 function buildPayload(values, type) {
@@ -116,7 +115,6 @@ export default function EquipmentForm({ type = null, onSaved }) {
         cancelLabel="Go back"
         onConfirm={flow.confirm}
         onCancel={flow.cancel}
-        headingLevel={2}
       />
     );
   }
@@ -126,6 +124,8 @@ export default function EquipmentForm({ type = null, onSaved }) {
 
   return (
     <form className="equipment-form" onSubmit={handleSubmit} noValidate>
+      <h2>{editing ? `Edit ${type.name}` : "Add an equipment type"}</h2>
+
       <div className="equipment-form__field">
         <label htmlFor="equipment-name">Name</label>
         <input id="equipment-name" type="text" {...bind("name")} />
@@ -162,9 +162,9 @@ export default function EquipmentForm({ type = null, onSaved }) {
         </ul>
       )}
 
-      <Button type="submit" disabled={working}>
+      <button type="submit" disabled={working}>
         {flow.stage === "checking" ? "Checking..." : working ? "Saving..." : editing ? "Save changes" : "Add equipment type"}
-      </Button>
+      </button>
     </form>
   );
 }

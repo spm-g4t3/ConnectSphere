@@ -34,12 +34,12 @@ const STATUS_MESSAGES = {
 };
 
 const DEFAULT_MESSAGES = {
-  load: "Could not load the equipment catalogue.",
+  load: "Could not load the equipment catalogue. Please try again.",
   save: "Could not save the equipment type. Please try again.",
   condition: "Could not save the quantities. Please try again.",
   retire: "Could not retire this type. Please try again.",
   reinstate: "Could not reinstate this type. Please try again.",
-  history: "Could not load this type's history.",
+  history: "Could not load this type's history. Please try again.",
   preview: "Could not check which reservations this change affects. Nothing was saved. Please try again.",
 };
 
@@ -110,10 +110,4 @@ export function affectedFromError(err) {
   return conflicts.filter(
     (item) => item !== null && typeof item === "object" && typeof item.reservationId === "string",
   );
-}
-
-/** Whether reading again could help: a refused role, a missing type or bad input answers the same again. */
-export function canRetryEquipmentRead(err) {
-  const status = err?.response?.status;
-  return status !== 400 && status !== 403 && status !== 404;
 }

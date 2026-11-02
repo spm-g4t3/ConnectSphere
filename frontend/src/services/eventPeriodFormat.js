@@ -5,7 +5,6 @@
 // Its own file so the component files export only components (react-refresh).
 
 import { VENUE_TIME_ZONE } from "./datetimeFormat";
-import { formatDateTimeRange } from "./displayFormat";
 
 const isValid = (date) => !Number.isNaN(date.getTime());
 
@@ -36,15 +35,4 @@ export function formatEventPeriod(start, end) {
     return `${fromDay}, ${timeFormat.format(from)} to ${timeFormat.format(to)}`;
   }
   return `${fromDay}, ${timeFormat.format(from)} to ${dayFormat.format(to)}, ${timeFormat.format(to)}`;
-}
-
-/**
- * As formatEventPeriod, in the standard display format: "1 Dec 2030, 10:00 am –
- * 12:00 pm". An event without both dates still reads as one "Date not set".
- */
-export function formatEventDateTimeRange(start, end) {
-  const from = start ? new Date(start) : null;
-  const to = end ? new Date(end) : null;
-  if (!from || !to || !isValid(from) || !isValid(to)) return "Date not set";
-  return formatDateTimeRange(start, end);
 }

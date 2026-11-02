@@ -19,7 +19,6 @@ vi.mock("../../src/services/equipmentService", () => ({
 
 import * as service from "../../src/services/equipmentService";
 import EquipmentCatalogue from "../../src/components/EquipmentCatalogue";
-import { stubDialogElement } from "../helpers/dialog.js";
 
 const projector = {
   id: "p1",
@@ -66,9 +65,6 @@ beforeEach(() => {
 });
 
 
-// ConfirmDialog calls showModal and close, which jsdom lacks.
-stubDialogElement();
-
 describe("AC5: the list", () => {
   it("SCRUM275_AC5_lists_a_type_with_total_damaged_under_maintenance_and_usable", async () => {
     await openCatalogue();
@@ -101,7 +97,7 @@ describe("AC5: the list", () => {
     render(<EquipmentCatalogue />);
 
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("Could not load the equipment catalogue.");
+    expect(alert).toHaveTextContent("Could not load the equipment catalogue. Please try again.");
     expect(alert).not.toHaveTextContent("secret");
   });
 });
@@ -337,7 +333,7 @@ describe("AC6: retiring and reinstating", () => {
 
     await user.click(screen.getByRole("button", { name: "Retire Projector (HD)" }));
     expect(service.retireEquipment).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "Confirm retire" }));
+    await user.click(screen.getByRole("button", { name: "Confirm retire Projector (HD)" }));
 
     await waitFor(() => expect(service.retireEquipment).toHaveBeenCalledWith("p1", { confirmedReservationIds: [] }));
     await waitFor(() => expect(service.listEquipment).toHaveBeenCalledTimes(2));
@@ -348,7 +344,7 @@ describe("AC6: retiring and reinstating", () => {
     await openCatalogue();
 
     await user.click(screen.getByRole("button", { name: "Retire Projector (HD)" }));
-    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await user.click(screen.getByRole("button", { name: "Cancel retire Projector (HD)" }));
 
     expect(service.retireEquipment).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Retire Projector (HD)" })).toBeInTheDocument();
@@ -360,7 +356,7 @@ describe("AC6: retiring and reinstating", () => {
     await openCatalogue();
 
     await user.click(screen.getByRole("button", { name: "Retire Projector (HD)" }));
-    await user.click(screen.getByRole("button", { name: "Confirm retire" }));
+    await user.click(screen.getByRole("button", { name: "Confirm retire Projector (HD)" }));
 
     expect(await screen.findByText("This type has already been retired. The list has been refreshed.")).toBeInTheDocument();
     await waitFor(() => expect(service.listEquipment).toHaveBeenCalledTimes(2));
@@ -372,7 +368,7 @@ describe("AC6: retiring and reinstating", () => {
     await openCatalogue();
 
     await user.click(screen.getByRole("button", { name: "Retire Projector (HD)" }));
-    await user.click(screen.getByRole("button", { name: "Confirm retire" }));
+    await user.click(screen.getByRole("button", { name: "Confirm retire Projector (HD)" }));
 
     expect(await screen.findByText("Could not retire this type. Please try again.")).toBeInTheDocument();
     expect(service.listEquipment).toHaveBeenCalledTimes(1);
@@ -429,6 +425,6 @@ describe("AC8: the change history", () => {
 
     await user.click(screen.getByRole("button", { name: "History for Projector (HD)" }));
 
-    expect(await screen.findByText("Could not load this type's history.")).toBeInTheDocument();
+    expect(await screen.findByText("Could not load this type's history. Please try again.")).toBeInTheDocument();
   });
 });

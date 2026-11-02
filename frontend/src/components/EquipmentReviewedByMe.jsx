@@ -11,20 +11,15 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { getReviewedByMe } from "../services/equipmentQueueService";
-import { equipmentStatusTone } from "../services/equipmentRequestStatus";
-import { formatEventDateTimeRange } from "../services/eventPeriodFormat";
-import { formatDateTime } from "../services/displayFormat";
-import EmptyState from "./ui/EmptyState";
-import ErrorNotice from "./ui/ErrorNotice";
-import LoadingText from "./ui/LoadingText";
-import StatusBadge from "./ui/StatusBadge";
-import useFocusAfterRetry from "./useFocusAfterRetry";
+import { equipmentStatusClass } from "../services/equipmentRequestStatus";
+import { formatEventPeriod } from "../services/eventPeriodFormat";
+import { formatVenueTimestamp } from "../services/datetimeFormat";
 import "./EquipmentRequestQueue.css";
 
 const LOAD_ERRORS = {
   403: "Only technical support staff can see the requests they have reviewed.",
 };
-const GENERIC_LOAD_ERROR = "Your reviewed requests could not be loaded.";
+const GENERIC_LOAD_ERROR = "Your reviewed requests could not be loaded. Try again.";
 
 function ReviewedRow({ row }) {
   return (
@@ -32,10 +27,12 @@ function ReviewedRow({ row }) {
       <div className="equipment-queue__main">
         <div className="equipment-queue__title">
           <strong>{row.eventName}</strong>
-          <StatusBadge tone={equipmentStatusTone(row.status)}>{row.statusLabel}</StatusBadge>
+          <span className={`equipment-queue__status equipment-queue__status--${equipmentStatusClass(row.status)}`}>
+            {row.statusLabel}
+          </span>
         </div>
-        <p className="equipment-queue__detail">{formatEventDateTimeRange(row.proposedStart, row.proposedEnd)}</p>
-        <p className="equipment-queue__detail">{`Last worked on: ${formatDateTime(row.lastWorkedAt, "Not set")}`}</p>
+        <p className="equipment-queue__detail">{formatEventPeriod(row.proposedStart, row.proposedEnd)}</p>
+        <p className="equipment-queue__detail">{`Last worked on: ${formatVenueTimestamp(row.lastWorkedAt)}`}</p>
         {row.interruptedReason && (
           <p className="equipment-queue__detail">{`Your review ended: ${row.interruptedReason.replace(/\.$/, "")}.`}</p>
         )}
@@ -73,20 +70,22 @@ export default function EquipmentReviewedByMe() {
   useEffect(() => {
     load();
   }, [load]);
-  const { headingRef, retry } = useFocusAfterRetry(load);
 
   return (
     <section className="equipment-queue" aria-labelledby="equipment-reviewed-by-me" aria-busy={loading}>
-      <h2 ref={headingRef} tabIndex={-1} id="equipment-reviewed-by-me">Reviewed by me</h2>
-      {loading && !list && !error && <LoadingText />}
-      {/* A 403 gives the same answer again, so only the generic failure offers a retry. */}
-      {error && <ErrorNotice message={error} onRetry={error === GENERIC_LOAD_ERROR ? retry : undefined} />}
-      {list && list.requests.length === 0 && (
-        <EmptyState
-          message="You have not reviewed any equipment requests yet."
-          nextStep="Requests you start or take over appear here."
-        />
+      <h2 id="equipment-reviewed-by-me">Reviewed by me</h2>
+      {loading && !list && !error && <p role="status">Loading your reviewed requests...</p>}
+      {error && (
+        <>
+          <p role="alert" className="equipment-queue__error">
+            {error}
+          </p>
+          <button type="button" onClick={load}>
+            Try again
+          </button>
+        </>
       )}
+      {list && list.requests.length === 0 && <p>You have not reviewed any equipment requests yet.</p>}
       {list && list.requests.length > 0 && (
         <ul>
           {list.requests.map((row) => (

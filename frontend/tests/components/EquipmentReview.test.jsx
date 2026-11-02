@@ -22,7 +22,6 @@ import {
   takeOverEquipmentReview,
 } from "../../src/services/equipmentReviewService";
 import { useAuth } from "../../src/auth/AuthContext";
-import { stubDialogElement } from "../helpers/dialog.js";
 
 vi.mock("../../src/services/equipmentReviewService", () => ({
   clearEquipmentLineOutcome: vi.fn(),
@@ -120,9 +119,6 @@ beforeEach(() => {
   vi.resetAllMocks();
   useAuth.mockReturnValue({ user: { id: ME, role: "technical_support_staff" } });
 });
-
-// ConfirmDialog calls showModal and close, which jsdom lacks.
-stubDialogElement();
 
 describe("EquipmentReview: what is shown", () => {
   it("SCRUM290_AC4_shows_event_venue_coordinator_and_status", async () => {
@@ -348,9 +344,7 @@ describe("EquipmentReview: completing", () => {
     await userEvent.click(screen.getByRole("button", { name: "Complete review" }));
     await userEvent.click(screen.getByRole("button", { name: "Yes, complete review" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Projector needs a note");
-    // The dialog closes so the refusal is not hidden behind it; Complete review is the retry.
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Complete review" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Yes, complete review" })).toBeInTheDocument();
   });
 
   it("SCRUM290_AC7_a_stale_completion_is_explained_and_the_state_read_again", async () => {
@@ -446,7 +440,7 @@ describe("EquipmentReview: stock back for missing items", () => {
   it("SCRUM574_AC2_part_of_one_line_counts_as_some", async () => {
     await open(cannot([missing({ quantity: 2, available: 1 })]));
     expect(hint()).toHaveTextContent("1 of 1 missing item can now be reserved: Projector \u00D71 of 2.");
-    expect(screen.getByRole("button", { name: "Review again" })).toHaveClass("ui-button--secondary");
+    expect(screen.getByRole("button", { name: "Review again" })).toHaveClass("er-btn--secondary");
   });
 
   it("SCRUM574_AC3_reservable_quantity_is_capped_at_what_is_missing", async () => {
@@ -473,9 +467,9 @@ describe("EquipmentReview: stock back for missing items", () => {
   });
 
   it.each([
-    ["some", "ui-button--secondary"],
-    ["all", "ui-button--primary"],
-    ["none", "ui-button--secondary"],
+    ["some", "er-btn--secondary"],
+    ["all", "er-btn--primary"],
+    ["none", "er-btn--secondary"],
   ])("SCRUM574_AC5_review_again_works_for_%s_and_is_styled_%s", async (outcome, style) => {
     await open(cannot(OUTCOMES[outcome]));
     const button = screen.getByRole("button", { name: "Review again" });

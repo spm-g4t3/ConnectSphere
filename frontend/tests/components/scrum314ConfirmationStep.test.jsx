@@ -28,7 +28,7 @@ vi.mock("../../src/services/equipmentService", () => ({
 
 import * as service from "../../src/services/equipmentService";
 import EquipmentCatalogue from "../../src/components/EquipmentCatalogue";
-import { stubDialogElement } from "../helpers/dialog.js";
+import { formatEventPeriod } from "../../src/services/eventPeriodFormat";
 
 const projector = {
   id: "p1",
@@ -135,9 +135,6 @@ beforeEach(() => {
 });
 
 
-// ConfirmDialog calls showModal and close, which jsdom lacks.
-stubDialogElement();
-
 describe("AC2: the edit form checks a smaller total", () => {
   it("SCRUM310_AC2_asks_which_reservations_the_new_total_affects_before_saving", async () => {
     const user = userEvent.setup();
@@ -207,11 +204,11 @@ describe("AC2: the edit form checks a smaller total", () => {
     const items = affectedItems();
     expect(items).toHaveLength(2);
     expect(items[0]).toHaveTextContent("Open Day");
-    expect(items[0]).toHaveTextContent("5 Nov 2026, 9:00 am – 1:00 pm");
+    expect(items[0]).toHaveTextContent(formatEventPeriod("2026-11-05T01:00:00+00:00", "2026-11-05T05:00:00+00:00"));
     expect(items[0]).toHaveTextContent("Quantity: 3 units");
     expect(items[0]).toHaveTextContent("Coordinator: Cara Coordinator");
     expect(items[1]).toHaveTextContent("Alumni Gala");
-    expect(items[1]).toHaveTextContent("1 Dec 2026, 10:00 am – 5:00 pm");
+    expect(items[1]).toHaveTextContent(formatEventPeriod("2026-12-01T02:00:00+00:00", "2026-12-01T09:00:00+00:00"));
     expect(items[1]).toHaveTextContent("Quantity: 1 unit");
     expect(items[1]).toHaveTextContent("Coordinator: Dev Lee");
   });
@@ -553,7 +550,7 @@ describe("AC7: a change that affects nothing saves without a confirmation", () =
 
     await user.click(screen.getByRole("button", { name: "Retire Projector (HD)" }));
     expect(service.previewEquipmentChange).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "Confirm retire" }));
+    await user.click(screen.getByRole("button", { name: "Confirm retire Projector (HD)" }));
 
     await waitFor(() => expect(service.retireEquipment).toHaveBeenCalledWith("p1", { confirmedReservationIds: [] }));
     expect(screen.queryByRole("region", { name: /Reservations affected/ })).not.toBeInTheDocument();
@@ -617,7 +614,7 @@ describe("AC7: a change that affects nothing saves without a confirmation", () =
 describe("AC2 and AC4 for a retirement", () => {
   async function startRetire(user, name = "Projector (HD)") {
     await user.click(screen.getByRole("button", { name: `Retire ${name}` }));
-    await user.click(screen.getByRole("button", { name: "Confirm retire" }));
+    await user.click(screen.getByRole("button", { name: `Confirm retire ${name}` }));
   }
 
   it("SCRUM310_AC2_a_retirement_that_affects_reservations_lists_them_under_the_row_and_retires_nothing", async () => {
@@ -695,8 +692,10 @@ describe("AC2 and AC4 for a retirement", () => {
 
     await startRetire(user);
 
-    expect(screen.getByRole("button", { name: "Checking..." })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    const confirm = screen.getByRole("button", { name: "Confirm retire Projector (HD)" });
+    expect(confirm).toHaveTextContent("Checking...");
+    expect(confirm).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Cancel retire Projector (HD)" })).toBeDisabled();
     expect(service.retireEquipment).not.toHaveBeenCalled();
 
     checking.resolve(preview([]));
@@ -893,7 +892,7 @@ describe("AC2: the list moved between the preview and the save", () => {
     await openCatalogue();
 
     await user.click(screen.getByRole("button", { name: "Retire Projector (HD)" }));
-    await user.click(screen.getByRole("button", { name: "Confirm retire" }));
+    await user.click(screen.getByRole("button", { name: "Confirm retire Projector (HD)" }));
     await screen.findByRole("region", { name: /Reservations affected/ });
     await user.click(screen.getByRole("button", { name: "Retire and flag these reservations" }));
     await screen.findByRole("alert");
@@ -912,7 +911,7 @@ describe("AC2: the list moved between the preview and the save", () => {
     await openCatalogue();
 
     await user.click(screen.getByRole("button", { name: "Retire Projector (HD)" }));
-    await user.click(screen.getByRole("button", { name: "Confirm retire" }));
+    await user.click(screen.getByRole("button", { name: "Confirm retire Projector (HD)" }));
     await screen.findByRole("region", { name: /Reservations affected/ });
     await user.click(screen.getByRole("button", { name: "Retire and flag these reservations" }));
     await screen.findByRole("alert");
@@ -976,7 +975,7 @@ describe("when the preview fails nothing is saved", () => {
     await openCatalogue();
 
     await user.click(screen.getByRole("button", { name: "Retire Projector (HD)" }));
-    await user.click(screen.getByRole("button", { name: "Confirm retire" }));
+    await user.click(screen.getByRole("button", { name: "Confirm retire Projector (HD)" }));
 
     expect(await screen.findByText(/Could not check which reservations this change affects/)).toBeInTheDocument();
     expect(service.retireEquipment).not.toHaveBeenCalled();
@@ -990,7 +989,7 @@ describe("when the preview fails nothing is saved", () => {
     await openCatalogue();
 
     await user.click(screen.getByRole("button", { name: "Retire Projector (HD)" }));
-    await user.click(screen.getByRole("button", { name: "Confirm retire" }));
+    await user.click(screen.getByRole("button", { name: "Confirm retire Projector (HD)" }));
 
     expect(await screen.findByText("That equipment type no longer exists. The list has been refreshed.")).toBeInTheDocument();
     await waitFor(() => expect(service.listEquipment).toHaveBeenCalledTimes(2));
@@ -1094,7 +1093,7 @@ describe("when the save fails after the list was shown", () => {
     await openCatalogue();
 
     await user.click(screen.getByRole("button", { name: "Retire Projector (HD)" }));
-    await user.click(screen.getByRole("button", { name: "Confirm retire" }));
+    await user.click(screen.getByRole("button", { name: "Confirm retire Projector (HD)" }));
     await screen.findByRole("region", { name: /Reservations affected/ });
     await user.click(screen.getByRole("button", { name: "Retire and flag these reservations" }));
 
@@ -1111,7 +1110,7 @@ describe("when the save fails after the list was shown", () => {
     await openCatalogue();
 
     await user.click(screen.getByRole("button", { name: "Retire Projector (HD)" }));
-    await user.click(screen.getByRole("button", { name: "Confirm retire" }));
+    await user.click(screen.getByRole("button", { name: "Confirm retire Projector (HD)" }));
     await screen.findByRole("region", { name: /Reservations affected/ });
     await user.click(screen.getByRole("button", { name: "Retire and flag these reservations" }));
 
@@ -1127,10 +1126,10 @@ describe("when the save fails after the list was shown", () => {
     await openCatalogue();
 
     await user.click(screen.getByRole("button", { name: "Retire Projector (HD)" }));
-    await user.click(screen.getByRole("button", { name: "Confirm retire" }));
+    await user.click(screen.getByRole("button", { name: "Confirm retire Projector (HD)" }));
 
     expect(await screen.findByText("Could not retire this type. Please try again.")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Confirm retire" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Confirm retire Projector (HD)" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Retire Projector (HD)" })).toBeEnabled();
   });
 });
@@ -1405,7 +1404,7 @@ describe("a refusal that leaves nothing affected, on the other two screens", () 
     await openCatalogue();
 
     await user.click(screen.getByRole("button", { name: "Retire Projector (HD)" }));
-    await user.click(screen.getByRole("button", { name: "Confirm retire" }));
+    await user.click(screen.getByRole("button", { name: "Confirm retire Projector (HD)" }));
     await screen.findByRole("region", { name: /Reservations affected/ });
     await user.click(screen.getByRole("button", { name: "Retire and flag these reservations" }));
     await screen.findByText("No reservations are affected by this change.");
@@ -1467,9 +1466,9 @@ describe("reinstating and refreshing still report their failures", () => {
     await openCatalogue();
 
     await user.click(screen.getByRole("button", { name: "Retire Projector (HD)" }));
-    await user.click(screen.getByRole("button", { name: "Confirm retire" }));
+    await user.click(screen.getByRole("button", { name: "Confirm retire Projector (HD)" }));
 
-    expect(await screen.findByText("Could not load the equipment catalogue.")).toBeInTheDocument();
+    expect(await screen.findByText("Could not load the equipment catalogue. Please try again.")).toBeInTheDocument();
   });
 });
 
