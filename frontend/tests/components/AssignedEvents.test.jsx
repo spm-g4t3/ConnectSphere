@@ -66,7 +66,7 @@ describe("SCRUM486_AC6 the Lead's list of assigned events", () => {
 
     expect(within(first).getByText("Organiser: Aisha Rahman")).toBeInTheDocument();
     expect(within(first).getByText("Coordinator: Priya Nair")).toBeInTheDocument();
-    expect(within(first).getByText("Planning")).toHaveClass("status-badge", "status--approved");
+    expect(within(first).getByText("Planning")).toHaveClass("ui-status-badge", "ui-status-badge--success");
     expect(within(first).getByText(formatTimestamp(HELD_BY_A.proposedStart))).toBeInTheDocument();
     // The server's order is kept: earliest first, undated last.
     expect(within(second).getByText("Freshers Welcome")).toBeInTheDocument();

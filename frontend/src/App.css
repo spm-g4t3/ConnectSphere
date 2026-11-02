@@ -142,10 +142,10 @@ button { cursor: pointer; }
 .my-event-requests { margin: 0 auto; max-width: 1080px; padding: 54px 24px; }
 .my-event-requests__header { align-items: center; display: flex; gap: 20px; justify-content: space-between; margin-bottom: 24px; }
 .my-event-requests__header h1 { color: var(--ink); font-size: 1.8rem; margin: 0; }
-.my-event-requests__header > button, .my-event-requests__item-actions button, .my-event-requests__back, .review-queue__back, .unassigned-queue__back, .venue-search__back { background: var(--teal); border: 0; border-radius: 6px; color: white; padding: 10px 14px; }
+.my-event-requests__header > button, .my-event-requests__item-actions button, .my-event-requests__back, .review-queue__back, .venue-search__back { background: var(--teal); border: 0; border-radius: 6px; color: white; padding: 10px 14px; }
 .my-event-requests__header > button:hover, .my-event-requests__item-actions button:hover { background: var(--teal-dark); }
-.my-event-requests__back, .review-queue__back, .unassigned-queue__back, .venue-search__back { background: transparent; border: 1px solid var(--line); color: var(--teal-dark); margin-bottom: 18px; }
-.my-event-requests__back:hover, .review-queue__back:hover, .unassigned-queue__back:hover, .venue-search__back:hover { background: #eef6f3; }
+.my-event-requests__back, .review-queue__back, .venue-search__back { background: transparent; border: 1px solid var(--line); color: var(--teal-dark); margin-bottom: 18px; }
+.my-event-requests__back:hover, .review-queue__back:hover, .venue-search__back:hover { background: #eef6f3; }
 .my-event-requests__list { display: grid; gap: 14px; list-style: none; margin: 0; padding: 0; }
 .my-event-requests__item { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 18px rgba(24, 61, 58, 0.05); display: block; padding: 20px; transition: background-color 0.8s ease, border-color 0.8s ease, box-shadow 0.8s ease; }
 /* SCRUM-172 (AC7): the event a notification was opened for. */
@@ -728,12 +728,12 @@ button { cursor: pointer; }
 /* The confirmation after an assignment, the same green notice the handover
    confirmation uses. The <p role="status"> has no class of its own. */
 .unassigned-queue > p[role="status"] { background: #e8f7f1; border-radius: 6px; color: #17684f; margin: 0 0 14px; padding: 8px 12px; }
-/* SCRUM-539. A row's Assign and Cancel request side by side; Cancel outlined
-   in the cancel button's red, so it is not mistaken for Assign. The panel's
+/* SCRUM-539. A row's Assign and Cancel request side by side. The panel's
    error reuses .unassigned-queue__error. */
 .unassigned-queue__actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.dashboard .unassigned-queue__cancel { background: transparent; border: 1px solid #a43c32; color: #a43c32; }
-.dashboard .unassigned-queue__cancel:hover { background: #fff0ee; }
+/* The waiting count beside the title reads as a note, not part of the name. */
+.unassigned-queue__count { color: var(--color-muted); font-weight: 400; }
+.dashboard--coordinator-lead > section > .ui-button--link { margin-bottom: var(--space-3); }
 /* SCRUM-486 (SCRUM-519). The Lead's picker: the handover panel's layout and
    values (.reassign-event__*, above), which are scoped to the coordinator's
    dashboard and so do not reach the Lead's. Scoped to its own class instead,
@@ -1148,6 +1148,8 @@ button.event-registration-page__back { background: none; border: 0; cursor: poin
 .coordinator-workload td { font-variant-numeric: tabular-nums; }
 .assigned-events__filters { align-items: center; display: flex; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 12px; }
 .assigned-events__filters select { border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; }
+/* The row title has no column gap, so the badge keeps the space the old per-screen badge had. */
+.assigned-events .my-assigned-events__title .ui-status-badge { margin-left: var(--space-2); }
 
 /* SCRUM-258: Venue Staff's pending booking requests. Each card is a block, not
    the flex row .dashboard li makes it, and its toggle reads as a row rather

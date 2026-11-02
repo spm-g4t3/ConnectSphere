@@ -14,7 +14,7 @@
 // (below).
 //
 // Built the way UnassignedQueue is: a <section> that takes its card styling
-// and badge colours from the wrapper App.jsx mounts it in, a status-keyed
+// from the wrapper App.jsx mounts it in, a status-keyed
 // error table, and loading, error and empty states said in words. The rows
 // borrow My events' row classes, so the two lists of events look alike
 // without a stylesheet of their own. No refetch on focus: the Lead leaves this
@@ -56,10 +56,8 @@ import CoordinatorWorkloadTable from "./CoordinatorWorkloadTable";
 import AssignedEventsFilters from "./AssignedEventsFilters";
 import { listAssignedEventsForLead, listCoordinatorOverview } from "../services/eventRequestService";
 import { formatTimestamp } from "../services/displayFormat";
-import {
-  readStatusDisplay,
-  statusClassName,
-} from "../services/eventRequestStatusDisplay";
+import { readStatusDisplay, statusTone } from "../services/eventRequestStatusDisplay";
+import StatusBadge from "./ui/StatusBadge";
 
 // 403 has its own words, as in UnassignedQueue: it means the account is not a
 // Lead, an administration problem, not a breakage.
@@ -143,7 +141,7 @@ export default function AssignedEvents() {
 
   return (
     <section className="assigned-events">
-      <h2>Assigned events</h2>
+      <h1>Assigned events</h1>
       <p>Every coordinator&apos;s events and workload.</p>
 
       {/* SCRUM-487 AC4 (SCRUM-543): the requests nobody holds yet, counted,
@@ -152,7 +150,7 @@ export default function AssignedEvents() {
       <UnassignedCount />
 
       {/* SCRUM-487 AC2 (SCRUM-544). */}
-      <h3>Coordinators</h3>
+      <h2>Coordinators</h2>
       <CoordinatorWorkloadTable
         coordinators={coordinators}
         statuses={activeStatuses}
@@ -161,7 +159,7 @@ export default function AssignedEvents() {
       />
 
       {/* SCRUM-487 AC3 (SCRUM-544). */}
-      <h3>Events</h3>
+      <h2>Events</h2>
       <AssignedEventsFilters
         coordinators={coordinators}
         statuses={statuses}
@@ -189,9 +187,7 @@ export default function AssignedEvents() {
               <div className="my-assigned-events__summary">
                 <span className="my-assigned-events__title">
                   <strong>{event.eventName}</strong>
-                  <span className={`status-badge ${statusClassName(display.group)}`}>
-                    {display.label}
-                  </span>
+                  <StatusBadge tone={statusTone(display.group)}>{display.label}</StatusBadge>
                 </span>
                 <span className="my-assigned-events__meta">
                   <span>{formatTimestamp(event.proposedStart, "Date not set")}</span>

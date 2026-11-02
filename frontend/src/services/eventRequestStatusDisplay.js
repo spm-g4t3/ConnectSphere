@@ -52,6 +52,32 @@ export function statusClassName(group) {
   return CLASS_BY_GROUP[group] ?? CLASS_BY_GROUP.UNKNOWN;
 }
 
+// Each group's StatusBadge tone, picked to keep the colour its status--* class
+// has today, so a badge means the same thing once a screen moves over.
+const TONE_BY_GROUP = {
+  DRAFT: "neutral",
+  AWAITING_REVIEW: "warning",
+  UNDER_REVIEW: "info",
+  ACTION_REQUIRED: "danger",
+  APPROVED: "success",
+  CONFIRMED: "accent",
+  COMPLETED: "neutral",
+  REJECTED: "danger",
+  CANCELLED: "neutral",
+  UNAVAILABLE: "neutral",
+  UNKNOWN: "neutral",
+};
+
+/**
+ * The StatusBadge tone for a status group.
+ *
+ * @param {string} group  from statusDisplay.group
+ * @returns {"neutral"|"info"|"warning"|"danger"|"success"|"accent"}
+ */
+export function statusTone(group) {
+  return TONE_BY_GROUP[group] ?? "neutral";
+}
+
 /**
  * The last-resort display, for when no statusDisplay reached us at all.
  *

@@ -28,6 +28,7 @@
 import { useEffect, useState } from "react";
 import { assignEventRequest, listCoordinatorWorkload } from "../services/eventRequestService";
 import { activeEventsText, coordinatorName } from "../services/coordinatorDisplay";
+import Button from "./ui/Button";
 
 const LOAD_ERROR_MESSAGES = {
   403: "Only the Event Coordinator Lead can assign event requests.",
@@ -152,9 +153,9 @@ export default function AssignCoordinatorPanel({ request, onCancel, onAssigned }
           on the form can fix. */}
       {!loading && !showForm && (
         <div className="assign-coordinator__actions">
-          <button type="button" onClick={onCancel}>
+          <Button variant="secondary" onClick={onCancel}>
             Back to the queue
-          </button>
+          </Button>
         </div>
       )}
 
@@ -202,12 +203,12 @@ export default function AssignCoordinatorPanel({ request, onCancel, onAssigned }
           )}
 
           <div className="assign-coordinator__actions">
-            <button type="submit" disabled={submitting || !coordinatorId}>
+            <Button type="submit" disabled={submitting || !coordinatorId}>
               {submitting ? "Assigning..." : "Confirm assignment"}
-            </button>
-            <button type="button" onClick={onCancel} disabled={submitting}>
+            </Button>
+            <Button variant="secondary" onClick={onCancel} disabled={submitting}>
               Cancel
-            </button>
+            </Button>
           </div>
         </form>
       )}

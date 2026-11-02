@@ -186,7 +186,7 @@ describe("SCRUM486_AC3 assigning from the queue", () => {
 
     expect(screen.getByRole("heading", { name: "Assign IS212 Industry Night" })).toBeInTheDocument();
     expect(await screen.findByRole("radio", { name: "Priya Nair, 0 active events" })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Unassigned queue" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /^Unassigned queue/ })).not.toBeInTheDocument();
   });
 
   it("SCRUM486_AC3_an_assignment_returns_to_the_queue_says_who_and_re_reads_it", async () => {
@@ -228,7 +228,7 @@ describe("SCRUM486_AC3 assigning from the queue", () => {
 
     await user.click(screen.getByRole("button", { name }));
 
-    expect(await screen.findByRole("heading", { name: "Unassigned queue" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /^Unassigned queue/ })).toBeInTheDocument();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
     expect(assignEventRequest).not.toHaveBeenCalled();
     expect(listUnassignedEventRequests).toHaveBeenCalledTimes(2);
@@ -265,7 +265,7 @@ describe("SCRUM486_AC3 assigning from the queue", () => {
     await user.click(screen.getByRole("button", { name: "Assign Freshers Welcome" }));
     await user.click(await screen.findByRole("button", { name: "Cancel" }));
 
-    await screen.findByRole("heading", { name: "Unassigned queue" });
+    await screen.findByRole("heading", { name: /^Unassigned queue/ });
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 });
@@ -306,7 +306,7 @@ describe("SCRUM539_AC2 cancelling from the queue", () => {
 
     expect(screen.getByRole("heading", { name: "Cancel Freshers Welcome" })).toBeInTheDocument();
     // One panel at a time: the list and the assign picker are gone.
-    expect(screen.queryByRole("heading", { name: "Unassigned queue" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /^Unassigned queue/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: /^Assign / })).not.toBeInTheDocument();
     expect(listCoordinatorWorkload).not.toHaveBeenCalled();
   });
@@ -339,7 +339,7 @@ describe("SCRUM539_AC2 cancelling from the queue", () => {
 
     await user.click(screen.getByRole("button", { name: /Back to the unassigned queue/ }));
 
-    expect(await screen.findByRole("heading", { name: "Unassigned queue" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /^Unassigned queue/ })).toBeInTheDocument();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
     expect(listUnassignedEventRequests).toHaveBeenCalledTimes(2);
     expect(cancelEventRequest).not.toHaveBeenCalled();
@@ -357,7 +357,7 @@ describe("SCRUM539_AC2 cancelling from the queue", () => {
     await user.click(screen.getByRole("button", { name: "Cancel Freshers Welcome" }));
     await user.click(screen.getByRole("button", { name: /Back to the unassigned queue/ }));
 
-    await screen.findByRole("heading", { name: "Unassigned queue" });
+    await screen.findByRole("heading", { name: /^Unassigned queue/ });
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 });

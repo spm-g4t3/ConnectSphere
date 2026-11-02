@@ -9,12 +9,19 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import UnassignedRequestCancelPanel from "../../src/components/UnassignedRequestCancelPanel.jsx";
-import { cancelEventRequest, getEventCancellationImpact } from "../../src/services/eventRequestService";
+import UnassignedQueue from "../../src/components/UnassignedQueue.jsx";
+import {
+  cancelEventRequest,
+  getEventCancellationImpact,
+  listUnassignedEventRequests,
+} from "../../src/services/eventRequestService";
 import { deferred, httpError } from "../helpers/async.js";
 
 vi.mock("../../src/services/eventRequestService", () => ({
   cancelEventRequest: vi.fn(),
   getEventCancellationImpact: vi.fn(),
+  // The back link is drawn by the queue the panel opens from.
+  listUnassignedEventRequests: vi.fn(),
 }));
 
 const REQUEST = { id: "22222222-2222-4222-8222-222222222222", eventName: "IS212 Industry Night" };
@@ -35,10 +42,9 @@ const CONFIRM = "I have reviewed the impact and confirm cancelling this request.
 
 function renderPanel() {
   const user = userEvent.setup();
-  const onCancel = vi.fn();
   const onCancelled = vi.fn();
-  render(<UnassignedRequestCancelPanel request={REQUEST} onCancel={onCancel} onCancelled={onCancelled} />);
-  return { user, onCancel, onCancelled };
+  render(<UnassignedRequestCancelPanel request={REQUEST} onCancelled={onCancelled} />);
+  return { user, onCancelled };
 }
 
 const reasonBox = () => screen.getByLabelText("Cancellation reason");
@@ -154,11 +160,14 @@ describe("SCRUM539_AC1 the Lead's cancel form", () => {
   });
 
   it("SCRUM539_AC1_back_returns_to_the_queue_and_sends_nothing", async () => {
-    const { user, onCancel } = renderPanel();
+    vi.mocked(listUnassignedEventRequests).mockResolvedValue([REQUEST]);
+    const user = userEvent.setup();
+    render(<UnassignedQueue />);
+    await user.click(await screen.findByRole("button", { name: `Cancel ${REQUEST.eventName}` }));
 
     await user.click(screen.getByRole("button", { name: /Back to the unassigned queue/ }));
 
-    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole("heading", { name: /^Unassigned queue/ })).toBeInTheDocument();
     expect(cancelEventRequest).not.toHaveBeenCalled();
   });
 });

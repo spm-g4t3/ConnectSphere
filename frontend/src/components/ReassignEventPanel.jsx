@@ -27,6 +27,7 @@ import {
   reassignEventRequest,
 } from "../services/eventRequestService";
 import { coordinatorOptionLabel } from "../services/coordinatorDisplay";
+import Button from "./ui/Button";
 
 // 403 reworded in SCRUM-521. It said "Only Event Coordinators can hand an
 // event over", which has been false since 052 let the Lead hand over too.
@@ -203,9 +204,9 @@ export default function ReassignEventPanel({
           instead of returning to it. */}
       {!loading && (loadError || choices.length === 0) && (
         <div className="reassign-event__actions">
-          <button type="button" onClick={onCancel}>
+          <Button variant="secondary" onClick={onCancel}>
             Back to the event
-          </button>
+          </Button>
         </div>
       )}
 
@@ -251,12 +252,12 @@ export default function ReassignEventPanel({
           )}
 
           <div className="reassign-event__actions">
-            <button type="submit" disabled={submitting || !newCoordinatorId}>
+            <Button type="submit" disabled={submitting || !newCoordinatorId}>
               {submitting ? "Handing over..." : "Confirm handover"}
-            </button>
-            <button type="button" onClick={onCancel} disabled={submitting}>
+            </Button>
+            <Button variant="secondary" onClick={onCancel} disabled={submitting}>
               Cancel
-            </button>
+            </Button>
           </div>
         </form>
       )}
