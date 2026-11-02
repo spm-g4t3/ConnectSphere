@@ -53,3 +53,11 @@
    that takes focus after Try again. Names can be one long word, so they wrap. */
 .availability-check :is(a, button, input, select, [tabindex="-1"]):focus-visible { outline: 3px solid var(--color-accent); outline-offset: 2px; }
 .availability-check { overflow-wrap: anywhere; }
+/* `anywhere` also lets a table column shrink to one letter (Quantity became QUANTI/TY, 10 became 1/0, the badges broke
+   letter by letter). In the tables only the event name may break mid-word; every other cell wraps at spaces. */
+.availability-check :is(.availability-breakdown, .availability-reservations) :is(th, td) { overflow-wrap: break-word; }
+.availability-check .availability-reservations td:first-child { min-width: 8em; overflow-wrap: anywhere; }
+.availability-check .availability-reservations td:nth-child(2) { min-width: 11em; }
+/* Four columns do not fit a phone, so the table scrolls sideways inside its card and the page does not. */
+.availability-check .availability-reservations__scroll { overflow-x: auto; }
+.availability-check .availability-reservations__scroll:focus-visible { outline: 3px solid var(--color-accent); outline-offset: 2px; }

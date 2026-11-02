@@ -58,7 +58,7 @@ export default function EquipmentHistory({ type, titleRef }) {
         <EmptyState message="No changes recorded." nextStep="Changes to this equipment type will appear here." />
       )}
       {entries?.length > 0 && (
-        <table className="equipment-table">
+        <table className="equipment-table equipment-table--history">
           <thead>
             <tr>
               <th>When</th>

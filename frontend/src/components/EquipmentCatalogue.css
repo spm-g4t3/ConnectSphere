@@ -50,6 +50,9 @@
 /* In the table only a long name may break mid-word; other cells wrap at spaces. */
 .equipment-table :is(th, td) { overflow-wrap: break-word; }
 .equipment-table td:first-child { min-width: 8em; overflow-wrap: anywhere; }
+/* A history note is free text, so one very long word must wrap inside the card at every width, not push the
+   page wider. Only the note column breaks mid-word, so the date, change and name columns keep their width. */
+.equipment-table--history td:nth-child(3) { overflow-wrap: anywhere; }
 
 /* Eight columns and the actions cannot fit a narrow screen, so up to 1080px wide each type is a
    card: the name on top, then each figure with its column name (data-label). The

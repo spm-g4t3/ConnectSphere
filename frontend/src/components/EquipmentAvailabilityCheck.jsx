@@ -90,6 +90,7 @@ function AvailabilityResult({ result }) {
           {reservations.length === 0 ? (
             <p>No reservations overlap this period.</p>
           ) : (
+            <div className="availability-reservations__scroll" role="region" aria-label="Overlapping reservations" tabIndex={0}>
             <table className="availability-reservations">
               <thead>
                 <tr>
@@ -116,6 +117,7 @@ function AvailabilityResult({ result }) {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </>
       )}
