@@ -33,7 +33,6 @@ describe("availabilityErrorMessages", () => {
   });
 
   it.each([
-    [401, "Your session has expired. Please sign in again."],
     [403, "Only Technical Support Staff can check equipment availability."],
   ])("SCRUM23_AC1_explains_status_%s", (status, message) => {
     expect(availabilityErrorMessages(failure(status, {}), "check")).toEqual([message]);
@@ -47,7 +46,7 @@ describe("availabilityErrorMessages", () => {
 
   it.each([
     ["check", "Could not check availability. Please try again."],
-    ["load", "Could not load the equipment types. Please try again."],
+    ["load", "Could not load the equipment types."],
     ["other", "Something went wrong. Please try again."],
   ])("SCRUM23_falls_back_to_a_message_for_%s", (action, message) => {
     expect(availabilityErrorMessages(failure(500, { error: "driver text" }), action)).toEqual([message]);

@@ -30,6 +30,14 @@ const MY_BOOKING_REQUESTS = { lines: 100, branches: 98.07, functions: 100, state
 // only starts the check. The guard is cheap defence behind the button.
 const BOOKING_REQUEST_PANEL = { lines: 100, branches: 99.4, functions: 100, statements: 99.3 }
 
+// SCRUM-583: the expiry and idle files are new or rewritten and owned outright.
+const SCRUM583_FILES = [
+  'src/auth/AuthContext.jsx',
+  'src/auth/SessionTimeout.jsx',
+  'src/auth/sessionExpiry.js',
+  'src/services/apiClient.js',
+]
+
 const SCRUM17_FILES = [
   'src/components/VenueBlocksPanel.jsx',
   'src/components/VenueBlockForm.jsx',
@@ -281,6 +289,15 @@ const SCRUM584_FILES = [
   'src/components/ui/ConfirmDialog.jsx',
 ]
 
+// SCRUM-591: the Safety Officer screens' shared labels and focus-return hook,
+// plus the review pane, which gained the response choices and reject confirm.
+// SafetyReviewHistory.jsx stays ungated: its SCRUM-490 fallbacks are untested.
+const SCRUM591_FILES = [
+  'src/components/safetyReviewLabels.js',
+  'src/components/SafetyReviewDetail.jsx',
+  'src/components/useReturnFocus.js',
+]
+
 // https://vite.dev/config/
 //
 // defineConfig comes from vitest/config rather than vite so the `test` block
@@ -306,6 +323,7 @@ export default defineConfig({
           file === 'src/components/VenueBlocksPanel.jsx' ? PANEL : FULL,
         ]),
         ...SCRUM186_FILES.map((file) => [file, FULL]),
+        ...SCRUM583_FILES.map((file) => [file, FULL]),
         ...SCRUM178_FILES.map((file) => [file, FULL]),
         ...SCRUM137_FILES.map((file) => [file, FULL]),
         ...SCRUM141_FILES.map((file) => [file, FULL]),
@@ -339,6 +357,7 @@ export default defineConfig({
         ...SCRUM347_FILES.map((file) => [file, FULL]),
         ...SCRUM478_FILES.map((file) => [file, FULL]),
         ...SCRUM584_FILES.map((file) => [file, FULL]),
+        ...SCRUM591_FILES.map((file) => [file, FULL]),
       ]),
     },
   },

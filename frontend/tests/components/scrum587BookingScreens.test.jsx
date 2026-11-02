@@ -273,7 +273,6 @@ describe("SCRUM587 AC4 loading, empty and error states on the booking screens", 
   it.each([
     ["approve after a server failure", "approve", httpError(500), "Could not record the decision. Please try again.", true],
     ["approve refused with a 409", "approve", httpError(409, { code: "VENUE_RETIRED" }), "This venue has been retired, so the request can't be approved.", false],
-    ["approve with an expired session", "approve", httpError(401), "Your session has expired. Please sign in again.", false],
     ["reject after a server failure", "reject", httpError(500), "Could not record the decision. Please try again.", false],
     ["reinstate after a server failure", "reinstate", httpError(500), "Could not resolve the flagged booking. Please try again.", false],
     ["cancel after a server failure", "cancel", httpError(500), "Could not resolve the flagged booking. Please try again.", false],

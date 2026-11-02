@@ -9,7 +9,6 @@
 
 import { useState } from "react";
 import { submitChangeRequest } from "../services/changeRequestService";
-import { SESSION_EXPIRED } from "../services/apiErrors";
 import {
   CHANGE_FIELD_OPTIONS,
   toChangeField,
@@ -21,7 +20,6 @@ const NOTE_MAX_LENGTH = 2000;
 
 const SUBMIT_ERROR_MESSAGES = {
   400: "Your change request can't be submitted as written. Check each change and try again.",
-  401: SESSION_EXPIRED,
   403: "This event can't be changed from your account.",
   404: "This event can't be found. It may have been removed.",
 };

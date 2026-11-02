@@ -14,7 +14,7 @@ import {
   previewCoordinatorChangeRequest,
   processCoordinatorChangeRequest,
 } from "../services/eventRequestService";
-import { SESSION_EXPIRED, codeOf, makeErrorMapper } from "../services/apiErrors";
+import { codeOf, makeErrorMapper } from "../services/apiErrors";
 import { formatTimestamp } from "../services/displayFormat";
 import {
   changeClassLabel,
@@ -54,7 +54,6 @@ const errorMessage = makeErrorMapper({
   },
   statusMessages: {
     400: "This change request can't be applied as it stands. Review it again to see which values are refused, or decline it.",
-    401: SESSION_EXPIRED,
     403: "You're no longer the coordinator for this event.",
   },
   notFoundMessages: { process: "This change request no longer exists.", preview: "This change request no longer exists." },

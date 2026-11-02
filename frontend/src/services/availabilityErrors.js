@@ -7,7 +7,6 @@
 // backend"). Anything else gets a fixed message: outside a 400 the server's own
 // text is database prose and never reaches the screen.
 
-import { SESSION_EXPIRED } from "./apiErrors";
 
 const FIELD_LABELS = {
   equipmentTypeId: "Equipment type",
@@ -18,13 +17,12 @@ const FIELD_LABELS = {
 };
 
 const STATUS_MESSAGES = {
-  401: SESSION_EXPIRED,
   403: "Only Technical Support Staff can check equipment availability.",
 };
 
 const DEFAULT_MESSAGES = {
   check: "Could not check availability. Please try again.",
-  load: "Could not load the equipment types. Please try again.",
+  load: "Could not load the equipment types.",
 };
 
 /**
@@ -46,4 +44,10 @@ export function availabilityErrorMessages(err, action) {
   if (response?.status === 400) return ["Some details were not accepted. Please check the form."];
 
   return [DEFAULT_MESSAGES[action] ?? "Something went wrong. Please try again."];
+}
+
+/** Whether reading again could help: a refused role or bad input answers the same again. */
+export function canRetryAvailabilityRead(err) {
+  const status = err?.response?.status;
+  return status !== 400 && status !== 403;
 }

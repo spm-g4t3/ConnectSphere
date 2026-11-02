@@ -46,11 +46,9 @@ import LoadingText from "./ui/LoadingText";
 import EmptyState from "./ui/EmptyState";
 import ErrorNotice from "./ui/ErrorNotice";
 import { BOOKING_GROUP_TONES, toneFor } from "../services/venueStatusTones";
-import { SESSION_EXPIRED } from "../services/apiErrors";
 
 const BOOKINGS_ERROR_MESSAGES = {
   400: "That venue id was not recognised. Please go back and refresh.",
-  401: SESSION_EXPIRED,
   // SCRUM-182 gated the route. Only Venue Staff reach this panel in practice,
   // but the map names every status the API can now return.
   403: "Only Venue Staff and Event Coordinators can see a venue's bookings.",
@@ -64,14 +62,12 @@ const BOOKINGS_ERROR_MESSAGES = {
 
 const SAFETY_ERROR_MESSAGES = {
   400: "That venue id was not recognised. Please go back and refresh.",
-  401: SESSION_EXPIRED,
   404: "That venue no longer exists. Go back and refresh the catalogue.",
   500: "The safety information could not be loaded. Please try again.",
 };
 
 const HISTORY_ERROR_MESSAGES = {
   400: "That venue id was not recognised. Please go back and refresh.",
-  401: SESSION_EXPIRED,
   403: "Only Venue Staff can see a venue's change history.",
   500: "The change history could not be loaded. Please try again.",
 };
@@ -244,10 +240,8 @@ export default function VenueDetail({ venue, headingRef }) {
     }
   }, [venueId]);
 
-  // "Try again" goes back to Loading... so a second failure is visibly a new
-  // one. An expired session gets none: only signing in again fixes it.
-  function retryFor(error, setError, setLoading, fetch) {
-    if (error === SESSION_EXPIRED) return undefined;
+  // "Try again" goes back to Loading... so a second failure is visibly a new one.
+  function retryFor(setError, setLoading, fetch) {
     return () => {
       setError(null);
       setLoading(true);
@@ -283,7 +277,7 @@ export default function VenueDetail({ venue, headingRef }) {
         {detailsError && (
           <ErrorNotice
             message={detailsError}
-            onRetry={retryFor(detailsError, setDetailsError, setLoadingDetails, fetchDetails)}
+            onRetry={retryFor(setDetailsError, setLoadingDetails, fetchDetails)}
           />
         )}
 
@@ -304,7 +298,7 @@ export default function VenueDetail({ venue, headingRef }) {
         {bookingsError && (
           <ErrorNotice
             message={bookingsError}
-            onRetry={retryFor(bookingsError, setBookingsError, setLoadingBookings, fetchBookings)}
+            onRetry={retryFor(setBookingsError, setLoadingBookings, fetchBookings)}
           />
         )}
         {!loadingBookings && !bookingsError && bookings.length === 0 && (
@@ -371,7 +365,7 @@ export default function VenueDetail({ venue, headingRef }) {
         {historyError && (
           <ErrorNotice
             message={historyError}
-            onRetry={retryFor(historyError, setHistoryError, setLoadingHistory, fetchHistory)}
+            onRetry={retryFor(setHistoryError, setLoadingHistory, fetchHistory)}
           />
         )}
         {!loadingHistory && !historyError && history.length === 0 && (

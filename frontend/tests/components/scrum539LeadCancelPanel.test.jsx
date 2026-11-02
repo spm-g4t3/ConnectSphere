@@ -10,7 +10,6 @@ import userEvent from "@testing-library/user-event";
 
 import UnassignedRequestCancelPanel from "../../src/components/UnassignedRequestCancelPanel.jsx";
 import { cancelEventRequest, getEventCancellationImpact } from "../../src/services/eventRequestService";
-import { SESSION_EXPIRED } from "../../src/services/apiErrors";
 import { deferred, httpError } from "../helpers/async.js";
 
 vi.mock("../../src/services/eventRequestService", () => ({
@@ -206,7 +205,6 @@ describe("SCRUM539 refusals, keyed on the status", () => {
 
   it.each([
     [400, "Enter a cancellation reason and select who initiated it."],
-    [401, SESSION_EXPIRED],
     [404, "This event request no longer exists."],
     [500, "The request could not be cancelled. No changes have been made; try again."],
   ])("SCRUM539_AC7_a_%s_from_the_cancel_shows_its_own_message", async (status, message) => {

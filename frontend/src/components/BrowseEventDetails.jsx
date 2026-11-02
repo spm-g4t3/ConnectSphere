@@ -19,10 +19,8 @@ import {
   formatEventEndTime,
   formatEventStartTime,
 } from "../services/openEventDisplay";
-import { SESSION_EXPIRED } from "../services/apiErrors";
 
 const LOAD_ERROR_MESSAGES = {
-  401: SESSION_EXPIRED,
   403: "Only Attendees can browse open events.",
   500: "This event could not be loaded. Please try again.",
   503: REGISTRATION_UNAVAILABLE_MESSAGE,

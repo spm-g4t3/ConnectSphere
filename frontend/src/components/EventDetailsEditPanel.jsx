@@ -12,7 +12,7 @@
 
 import { useId, useState } from "react";
 import { getEventRequestForReview, updateEventRequestDetails } from "../services/eventRequestService";
-import { SESSION_EXPIRED, codeOf, fieldErrorsFrom, makeErrorMapper } from "../services/apiErrors";
+import { codeOf, fieldErrorsFrom, makeErrorMapper } from "../services/apiErrors";
 import { readStatusDisplay } from "../services/eventRequestStatusDisplay";
 import {
   deviceTimeZoneLabel,
@@ -59,7 +59,6 @@ const errorMessage = makeErrorMapper({
   },
   statusMessages: {
     400: "These changes could not be saved as written. Check each field and the reason, then try again.",
-    401: SESSION_EXPIRED,
     403: "You're no longer the coordinator for this event.",
   },
   notFoundMessages: { save: "This event can't be found. It may have been removed." },

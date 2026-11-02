@@ -42,7 +42,6 @@ import {
   formatWeekdayShort,
 } from "../services/displayFormat";
 import { formatOccupiedPeriod } from "../services/occupiedPeriodDisplay";
-import { SESSION_EXPIRED } from "../services/apiErrors";
 import Button from "./ui/Button";
 import StatusBadge from "./ui/StatusBadge";
 import LoadingText from "./ui/LoadingText";
@@ -55,7 +54,6 @@ import { VENUE_TONES } from "../services/venueStatusTones";
 // database prose carrying raw uuids.
 const ERROR_MESSAGES = {
   400: "That venue id was not recognised. Please go back and refresh.",
-  401: SESSION_EXPIRED,
   403: "Only Venue Staff and Event Coordinators can see a venue's calendar.",
   404: "That venue does not exist. It may have been removed.",
   500: "The calendar could not be loaded. Please try again.",
@@ -259,7 +257,7 @@ export default function VenueCalendar({ venueId, initialDate = new Date() }) {
       {!loading && result.error && (
         <ErrorNotice
           message={result.error}
-          onRetry={result.error === SESSION_EXPIRED ? undefined : () => setAttempt((n) => n + 1)}
+          onRetry={() => setAttempt((n) => n + 1)}
         />
       )}
 

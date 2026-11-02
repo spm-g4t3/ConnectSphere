@@ -11,7 +11,6 @@ import userEvent from "@testing-library/user-event";
 
 import CoordinatorAttentionList from "../../src/components/CoordinatorAttentionList.jsx";
 import { getNeedsAttention } from "../../src/services/eventRequestService";
-import { SESSION_EXPIRED } from "../../src/services/apiErrors";
 import { setVisibility } from "../helpers/visibility.js";
 
 vi.mock("../../src/services/eventRequestService", () => ({
@@ -214,11 +213,14 @@ describe("SCRUM379 Needs attention: what it shows", () => {
 });
 
 describe("SCRUM379 Needs attention: failures", () => {
-  it("SCRUM379_AC7_a_401_shows_the_session_message", async () => {
+  it("SCRUM379_AC7_a_401_has_no_session_wording_of_its_own", async () => {
+    // SCRUM-583: the app words an expiry once; a 401 reaching the list is a plain failure.
     vi.mocked(getNeedsAttention).mockRejectedValue(refusal(401));
     renderList();
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(SESSION_EXPIRED);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Your Needs attention list could not be loaded. Please try again.");
+    expect(alert).not.toHaveTextContent(/session/i);
   });
 
   it("SCRUM379_AC7_a_403_says_only_coordinators_have_the_list", async () => {

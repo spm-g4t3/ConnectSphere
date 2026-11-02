@@ -55,7 +55,6 @@ describe("bookingRequestErrorMessage", () => {
 
   it.each([
     [400, /check the form/],
-    [401, /sign in again/],
     [403, /assigned to this event/],
     [404, /no longer exists/],
     [503, /suitability checking is not available/],
@@ -202,7 +201,6 @@ describe("withdrawErrorMessage (SCRUM-255)", () => {
   });
 
   it.each([
-    [401, /sign in again/],
     [403, /assigned to this event can withdraw/],
     [404, /no longer exists.*refreshed/],
   ])("SCRUM255_explains_a_%i", (status, pattern) => {

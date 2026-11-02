@@ -51,7 +51,6 @@ import LoadingText from "./ui/LoadingText";
 import EmptyState from "./ui/EmptyState";
 import ErrorNotice from "./ui/ErrorNotice";
 import ConfirmDialog from "./ui/ConfirmDialog";
-import { SESSION_EXPIRED } from "../services/apiErrors";
 import { BLOCK_PHASE_TONES, toneFor } from "../services/venueStatusTones";
 
 /** "1 booking was" / "3 bookings were". */
@@ -483,7 +482,7 @@ export default function VenueBlocksPanel({ venue, currentUserId, headingRef }) {
         {listError && (
           <ErrorNotice
             message={listError}
-            onRetry={listError === SESSION_EXPIRED ? undefined : retryBlocks}
+            onRetry={retryBlocks}
           />
         )}
         {!loadingBlocks && !listError && blocks.length === 0 && (

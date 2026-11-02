@@ -4,9 +4,24 @@
 // lands on a page it already has and is authorised for; no new pages.
 
 import { normaliseRole } from "../auth/normaliseRole";
-import { attendeeEventPath } from "./attendeeEventRoutes";
+import { attendeeEventPath, REGISTERED_EVENTS_PATH } from "./attendeeEventRoutes";
 
 const eventRequestPage = (id) => ({ to: `/event-requests/${id}` });
+
+// SCRUM-177: one person can be on an event's waiting list and hold a staff role,
+// so these open the page for the audience the notice was sent to, never the
+// page for whichever role the reader signed in with.
+const REGISTRATION_NOTICE_PAGES = {
+  organiser: (id) => ({ to: `/events/${id}/registration` }),
+  coordinator: eventRequestPage,
+  waitlisted: () => ({ to: REGISTERED_EVENTS_PATH }),
+};
+const REGISTRATION_NOTICE_TYPES = new Set([
+  "registration_opened",
+  "registration_closed",
+  "registration_capacity_reached",
+  "registration_place_released",
+]);
 
 const VENUE_STAFF_PAGES = {
   booking_request_submitted: { to: "/booking-requests" },
@@ -66,13 +81,17 @@ const LINKS_BY_ROLE = {
 /**
  * The page a notification opens for this role, or null when it opens none.
  *
- * @param {{ type: string, eventRequestId?: string|null }} notification
+ * @param {{ type: string, eventRequestId?: string|null, payload?: object }} notification
  * @param {*} role  the signed-in user's role, however it is spelled
  * @returns {{ to: string, state?: object } | null}
  */
 export function notificationLink(notification, role) {
   const id = notification.eventRequestId;
   if (!id) return null;
+  if (REGISTRATION_NOTICE_TYPES.has(notification.type)) {
+    const pageFor = REGISTRATION_NOTICE_PAGES[notification.payload?.audience];
+    return pageFor ? pageFor(id) : null;
+  }
   const linkFor = LINKS_BY_ROLE[normaliseRole(role)];
   return linkFor ? linkFor(notification.type, id) : null;
 }

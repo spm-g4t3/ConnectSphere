@@ -28,7 +28,6 @@ import {
   blockHistoryChanges,
   isCurrentUser,
 } from "../services/venueBlockHistoryDisplay";
-import { SESSION_EXPIRED } from "../services/apiErrors";
 import LoadingText from "./ui/LoadingText";
 import EmptyState from "./ui/EmptyState";
 import ErrorNotice from "./ui/ErrorNotice";
@@ -36,7 +35,6 @@ import ErrorNotice from "./ui/ErrorNotice";
 // Keyed by status. The server's `error` is never shown: it is database prose
 // that can carry raw uuids.
 const HISTORY_ERROR_MESSAGES = {
-  401: SESSION_EXPIRED,
   403: "Only Venue Staff can see a block's history.",
   404: "That block no longer exists.",
 };
@@ -161,7 +159,7 @@ export default function BlockHistory({ venueId, blockId, refreshKey, currentUser
   return (
     <section className="block-history" id={id} aria-label="Change history">
       {loading && entries.length === 0 && <LoadingText />}
-      {error && <ErrorNotice message={error} onRetry={error === SESSION_EXPIRED ? undefined : retry} />}
+      {error && <ErrorNotice message={error} onRetry={retry} />}
       {!loading && !error && entries.length === 0 && (
         <EmptyState
           message="No changes have been recorded for this block."

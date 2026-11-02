@@ -43,7 +43,6 @@ describe("equipmentErrorMessages", () => {
   });
 
   it.each([
-    [401, "Your session has expired. Please sign in again."],
     [403, "Only Technical Support Staff can manage the equipment catalogue."],
     [404, "That equipment type no longer exists. The list has been refreshed."],
   ])("SCRUM280_explains_status_%s", (status, message) => {
@@ -57,12 +56,12 @@ describe("equipmentErrorMessages", () => {
   });
 
   it.each([
-    ["load", "Could not load the equipment catalogue. Please try again."],
+    ["load", "Could not load the equipment catalogue."],
     ["save", "Could not save the equipment type. Please try again."],
     ["condition", "Could not save the quantities. Please try again."],
     ["retire", "Could not retire this type. Please try again."],
     ["reinstate", "Could not reinstate this type. Please try again."],
-    ["history", "Could not load this type's history. Please try again."],
+    ["history", "Could not load this type's history."],
   ])("SCRUM280_falls_back_to_a_message_for_%s", (action, message) => {
     expect(equipmentErrorMessages(failure(500, { error: "driver text" }), action)).toEqual([message]);
     expect(equipmentErrorMessages(new Error("network down"), action)).toEqual([message]);

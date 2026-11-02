@@ -131,7 +131,7 @@ the server's text (`releaseErrorMessage`, `frontend/src/services/bookingRequestE
 | Response | The section says | Where |
 |---|---|---|
 | 400 | "Give a reason of up to 1,000 characters." | On the booking |
-| 401 | "Your session has expired. Please sign in again." | On the booking |
+| 401 | No wording of its own: SCRUM-583 sends the user to login with "Your session expired. Please sign in again.". | On the booking |
 | 403 | "Only the coordinator assigned to this event can release its venues." | On the booking |
 | 404 | "This booking no longer exists." | On the booking |
 | 409 `EVENT_NOT_APPROVED` | "Venues can be released only while the event is Approved." | Above the list, which refetches |

@@ -23,24 +23,21 @@ import { notificationLink } from "../services/notificationLink";
 import { useUnreadCount } from "../notifications/UnreadCountContext";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 import { useAuth } from "../auth/AuthContext";
-import { SESSION_EXPIRED } from "../services/apiErrors";
 import Button from "./ui/Button";
 import EmptyState from "./ui/EmptyState";
 import ErrorNotice from "./ui/ErrorNotice";
 import LoadingText from "./ui/LoadingText";
 
-// Keyed by status, the same shape as ReviewQueue's QUEUE_ERROR_MESSAGES. No
-// 403: the route has no role gate, so a 403 cannot happen. A 500 reads the
-// same as any other failure, so it takes the fallback below.
+// Keyed by status, the same shape as ReviewQueue's QUEUE_ERROR_MESSAGES. Every
+// status takes the fallback below: a 401 is worded once by the app (SCRUM-583),
+// and there is no 403 because the route has no role gate.
 const LIST_ERROR_MESSAGES = {
-  401: SESSION_EXPIRED,
 };
 
 // The same idea for a single row. 404 gets its own words because it is the
 // one failure with a known cause -- the notification is gone or is not this
 // account's -- and retrying the button will never fix it.
 const MARK_ERROR_MESSAGES = {
-  401: SESSION_EXPIRED,
   404: "This notification is no longer available.",
 };
 
@@ -143,12 +140,8 @@ export default function NotificationInbox() {
       <h2>Notifications{unreadCount > 0 && ` (${unreadCount} unread)`}</h2>
 
       {loading && <LoadingText />}
-      {/* No Try again for an expired session: only signing in again fixes it. */}
       {error && (
-        <ErrorNotice
-          message={error}
-          onRetry={error === SESSION_EXPIRED ? undefined : fetchNotifications}
-        />
+        <ErrorNotice message={error} onRetry={fetchNotifications} />
       )}
       {!loading && !error && notifications.length === 0 && (
         <EmptyState

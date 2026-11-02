@@ -64,7 +64,6 @@ describe("SCRUM-27 withdrawal service", () => {
     [httpError(409, { error: "A reason added later", code: "NEW_REASON" }), /^A reason added later$/, true],
     [httpError(404, { error: "Registration not found" }), /could not be found/, true],
     [httpError(403), /Only Attendees/, true],
-    [httpError(401), /session has expired/, true],
     [httpError(409, { error: "x", code: "REGISTRATION_CHANGED" }), /Please try again/, false],
     [httpError(409, { error: "  " }), /^This registration cannot be withdrawn/, true],
     [httpError(503), /temporarily unavailable/, false],

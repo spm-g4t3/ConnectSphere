@@ -285,7 +285,7 @@ server's text (`EventDetailsEditPanel.jsx:47–68`):
 | 409 `EVENT_HOLDS_ARRANGEMENTS` | "This request still holds venue bookings, holds or equipment from before it was reopened. Release them, or approve the request and use Revise event details, before changing the date, time, attendance, requirements or equipment. The name, purpose and description can still be saved on their own." | D4 (AC2) |
 | 409 `EVENT_CHANGED_SINCE_OPENED` | "Someone changed this event after you opened the form. Go back to see the current details, then make your change again." What was typed stays until Back | AC9 |
 | Any other 409 | "This event has changed since you opened the form. Go back to see the current details, then try again." | A code this build does not know |
-| 401 | "Your session has expired. Please sign in again." | — |
+| 401 | No wording of its own: SCRUM-583 sends the user to login with "Your session expired. Please sign in again.". | — |
 | Anything else | "Your changes could not be saved. Please try again." | — |
 
 Each of these is pinned by `SCRUM387_AC1_AC3_AC4_AC5_AC9_%s_is_said_in_the_screens_own_words`,

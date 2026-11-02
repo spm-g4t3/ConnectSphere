@@ -40,7 +40,6 @@ import StatusBadge from "./ui/StatusBadge";
 import LoadingText from "./ui/LoadingText";
 import EmptyState from "./ui/EmptyState";
 import ErrorNotice from "./ui/ErrorNotice";
-import { SESSION_EXPIRED } from "../services/apiErrors";
 import { HOLD_EXPIRING_TONE, HOLD_TONE } from "../services/venueStatusTones";
 import { describeHoldExpiry } from "../services/holdExpiry";
 
@@ -261,7 +260,7 @@ export default function VenueHoldsPanel({ venue, currentUserId, headingRef }) {
             candidates={candidates}
             loadingCandidates={loadingCandidates}
             candidatesError={candidatesError}
-            onRetryCandidates={candidatesError === SESSION_EXPIRED ? undefined : retryCandidates}
+            onRetryCandidates={retryCandidates}
             onSubmit={send}
             onCancel={closeForm}
             submitting={submitting}
@@ -280,7 +279,7 @@ export default function VenueHoldsPanel({ venue, currentUserId, headingRef }) {
         {listError && (
           <ErrorNotice
             message={listError}
-            onRetry={listError === SESSION_EXPIRED ? undefined : retryHolds}
+            onRetry={retryHolds}
           />
         )}
         {!loadingHolds && !listError && activeHolds.length === 0 && (

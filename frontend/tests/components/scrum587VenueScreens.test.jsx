@@ -357,7 +357,6 @@ describe("SCRUM587 venue screens on the UI standard", () => {
 describe("SCRUM587_AC4 venue screens use the shared loading, empty, error and date formats", () => {
   const never = () => new Promise(() => {});
   const serverError = { response: { status: 500 } };
-  const sessionExpired = { response: { status: 401 } };
 
   function renderCatalogueNow() {
     return render(
@@ -545,22 +544,6 @@ describe("SCRUM587_AC4 venue screens use the shared loading, empty, error and da
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     },
   );
-
-  it.each([
-    ["venue detail", getVenueBookings, () => render(<VenueDetail venue={VENUE} />)],
-    ["blocks", listVenueBlocks, () => render(<VenueBlocksPanel venue={VENUE} currentUserId="d1" />)],
-    ["block history", getVenueBlockHistory, renderBlockHistory],
-    ["holds", listVenueHolds, () => render(<VenueHoldsPanel venue={VENUE} currentUserId="d1" />)],
-    ["hold event picker", getHoldCandidates, openHoldForm],
-    ["calendar", getVenueCalendar, () => render(<VenueCalendar venueId={VENUE.id} initialDate={WED_7_OCT} />)],
-  ])("SCRUM587_AC4_an_expired_session_offers_no_try_again (%s)", async (_name, load, renderScreen) => {
-    vi.mocked(load).mockReset().mockRejectedValue(sessionExpired);
-    await renderScreen();
-
-    const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("Your session has expired. Please sign in again.");
-    expect(within(alert).queryByRole("button")).not.toBeInTheDocument();
-  });
 
   it.each([
     [

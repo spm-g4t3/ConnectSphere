@@ -13,7 +13,6 @@ import {
   completionErrorMessage,
   eventHasEnded,
 } from "../../src/services/eventCompletion.js";
-import { SESSION_EXPIRED } from "../../src/services/apiErrors.js";
 
 const NOW = new Date("2030-06-15T09:00:00Z");
 const at = (seconds) => new Date(NOW.getTime() + seconds * 1000).toISOString();
@@ -159,8 +158,11 @@ describe("SCRUM379 completionErrorMessage", () => {
     expect(completionErrorMessage(refusal(403))).toBe("Only the coordinator assigned to this event can mark it as completed.");
   });
 
-  it("SCRUM379_AC1_a_401_is_the_session_message", () => {
-    expect(completionErrorMessage(refusal(401))).toBe(SESSION_EXPIRED);
+  it("SCRUM379_AC1_a_401_has_no_session_wording_of_its_own", () => {
+    // SCRUM-583: the app words an expiry once; a 401 reaching here is a plain failure.
+    const message = completionErrorMessage(refusal(401));
+    expect(message).toBe("The event could not be marked as completed. No changes have been made; try again.");
+    expect(message).not.toMatch(/session/i);
   });
 
   it("SCRUM379_AC1_a_404_says_the_event_is_gone", () => {

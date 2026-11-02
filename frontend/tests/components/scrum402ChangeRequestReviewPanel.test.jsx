@@ -333,7 +333,8 @@ describe("SCRUM-402 accept and decline", () => {
     ["EVENT_HOLDS_ARRANGEMENTS", httpError(409, { error: SERVER_TEXT, code: "EVENT_HOLDS_ARRANGEMENTS" }), "Release them, or decline the change request."],
     ["an_unknown_409_code", httpError(409, { error: SERVER_TEXT, code: "SOMETHING_NEW" }), "This event or change request has changed."],
     ["a_400", httpError(400, { error: SERVER_TEXT }), "can't be applied as it stands"],
-    ["a_401", httpError(401, { error: SERVER_TEXT }), "Your session has expired."],
+    // SCRUM-583: an expiry is worded once, by the app; a 401 reaching the panel gets no wording of its own.
+    ["a_401_has_no_wording_of_its_own", httpError(401, { error: SERVER_TEXT }), "The change request could not be processed. Please try again."],
     ["a_403", httpError(403, { error: SERVER_TEXT }), "You're no longer the coordinator for this event."],
     ["a_404", httpError(404, { error: SERVER_TEXT }), "This change request no longer exists."],
     ["a_500", httpError(500, { error: SERVER_TEXT }), "The change request could not be processed. Please try again."],

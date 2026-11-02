@@ -8,8 +8,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 
-const { rpc, requireAuth } = vi.hoisted(() => ({
+const { rpc, requireAuth, startBackgroundJobs } = vi.hoisted(() => ({
   rpc: vi.fn(),
+  startBackgroundJobs: vi.fn(() => []),
   // Counts each authentication: the real one is a getUser call and a profile read.
   requireAuth: vi.fn((req, _res, next) => {
     req.user = { id: '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d', email: 'tech@example.com', role: 'technical_support_staff' };
@@ -18,6 +19,8 @@ const { rpc, requireAuth } = vi.hoisted(() => ({
 }));
 
 vi.mock('dotenv/config', () => ({}));
+
+vi.mock('../src/jobs/backgroundJobs.js', () => ({ startBackgroundJobs }));
 
 vi.mock('../src/config/supabaseClient.js', () => {
   const client = { rpc };
@@ -32,10 +35,19 @@ vi.mock('../src/middleware/requireAuth.js', () => ({
 const listen = vi.spyOn(express.application, 'listen').mockImplementation(() => ({}));
 const { default: app } = await import('../src/app.js');
 listen.mockRestore();
+// Vitest clears call history before each test, so the import's calls are kept here.
+const jobStartsAtImport = startBackgroundJobs.mock.calls.slice();
 
 beforeEach(() => {
   rpc.mockReset();
   requireAuth.mockClear();
+});
+
+describe('background jobs', () => {
+  it('SCRUM177_AC1_the_app_starts_its_background_jobs_once_with_the_process_environment', () => {
+    // Which jobs that starts, and their switches, are in tests/jobs/backgroundJobs.test.js.
+    expect(jobStartsAtImport).toEqual([[]]);
+  });
 });
 
 describe('the equipment availability mount', () => {
