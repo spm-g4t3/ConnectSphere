@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 
@@ -427,7 +427,7 @@ describe("SCRUM587_AC4 venue screens use the shared loading, empty, error and da
       () => vi.mocked(listVenueBlocks).mockResolvedValue([]),
       () => render(<VenueBlocksPanel venue={VENUE} currentUserId="d1" />),
       "This venue has no blocks.",
-      "Add a block with + Add a block when the venue cannot be booked.",
+      "Use + Add a block to close the venue for a period.",
     ],
     [
       "blocks on a retired venue",
@@ -448,7 +448,7 @@ describe("SCRUM587_AC4 venue screens use the shared loading, empty, error and da
       () => vi.mocked(listVenueHolds).mockResolvedValue([]),
       () => render(<VenueHoldsPanel venue={VENUE} currentUserId="d1" />),
       "This venue has no active holds.",
-      "Place a hold with + Place a hold to keep this venue for an Approved event.",
+      "Use + Place a hold to keep this venue for an Approved event.",
     ],
     [
       "holds on a retired venue",
@@ -1077,6 +1077,24 @@ describe("SCRUM587_AC1 venue screen refinements", () => {
     const soon = screen.getByText("Board Meeting").closest("li");
     expect(soon.querySelector(".venue-holds__audit")).toHaveTextContent("Expires 1 Dec 2026, 1:00 pm (in 5 hours) ·");
     expect(within(soon).getByText("Expires soon", { selector: ".ui-status-badge--warning" })).toBeInTheDocument();
+  });
+
+  it("SCRUM587_AC1_hold_expiry_wording_updates_while_the_panel_is_open", async () => {
+    // Fakes setInterval too, so the panel's minute tick runs on the fake clock.
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    const now = new Date("2026-12-01T00:00:00Z");
+    vi.setSystemTime(now);
+    vi.mocked(listVenueHolds).mockResolvedValue([
+      { ...HOLD, placedAt: now.toISOString(), expiresAt: new Date(now.getTime() + DAY + HOUR / 2).toISOString() },
+    ]);
+    render(<VenueHoldsPanel venue={VENUE} currentUserId="d1" />);
+
+    const row = (await screen.findByText("Product Launch")).closest("li");
+    expect(within(row).queryByText("Expires soon")).not.toBeInTheDocument();
+
+    await act(() => vi.advanceTimersByTime(HOUR));
+    expect(within(row).getByText("Expires soon", { selector: ".ui-status-badge--warning" })).toBeInTheDocument();
+    expect(row.querySelector(".venue-holds__audit")).toHaveTextContent("(in 24 hours)");
   });
 
   it("SCRUM587_AC1_the_calendar_key_names_each_entry_colour", async () => {

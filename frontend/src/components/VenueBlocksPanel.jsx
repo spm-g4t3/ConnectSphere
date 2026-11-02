@@ -491,7 +491,7 @@ export default function VenueBlocksPanel({ venue, currentUserId, headingRef }) {
             nextStep={
               venueRetired
                 ? "A retired venue cannot be blocked."
-                : "Add a block with + Add a block when the venue cannot be booked."
+                : "Use + Add a block to close the venue for a period."
             }
           />
         )}

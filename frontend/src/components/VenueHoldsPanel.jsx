@@ -88,6 +88,9 @@ export default function VenueHoldsPanel({ venue, currentUserId, headingRef }) {
   // Seeded from the prop, then set by a VENUE_RETIRED answer: the venue can
   // be retired by someone else while this panel is open.
   const [venueRetired, setVenueRetired] = useState(Boolean(venue.retiredAt));
+  // Ticks every minute, so "Expires soon", "(in N hours)" and the expired-hold
+  // filter keep up while the panel stays open.
+  const [now, setNow] = useState(() => new Date());
 
   const fetchHolds = useCallback(async () => {
     setLoadingHolds(true);
@@ -118,6 +121,11 @@ export default function VenueHoldsPanel({ venue, currentUserId, headingRef }) {
   useEffect(() => {
     fetchHolds();
   }, [fetchHolds]);
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 60 * 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   // The error clears first, so a second failure is visibly a new one.
   function retryHolds() {
@@ -222,7 +230,6 @@ export default function VenueHoldsPanel({ venue, currentUserId, headingRef }) {
     return <BlockActor id={hold.placedBy} currentUserId={currentUserId} />;
   }
 
-  const now = new Date();
   // AC7: a hold past its expiry holds nothing, whether or not the server has
   // marked it yet.
   const activeHolds = holds.filter((hold) => new Date(hold.expiresAt) > now);
@@ -288,7 +295,7 @@ export default function VenueHoldsPanel({ venue, currentUserId, headingRef }) {
             nextStep={
               venueRetired
                 ? "A retired venue cannot be held."
-                : "Place a hold with + Place a hold to keep this venue for an Approved event."
+                : "Use + Place a hold to keep this venue for an Approved event."
             }
           />
         )}

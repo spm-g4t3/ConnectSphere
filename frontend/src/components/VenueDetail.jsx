@@ -225,7 +225,6 @@ export default function VenueDetail({ venue, headingRef }) {
     }
   }, [venueId]);
 
-
   const fetchHistory = useCallback(async () => {
     try {
       setHistory(await getVenueHistory(venueId));
