@@ -109,8 +109,8 @@ describe("SCRUM485_AC3 each new role lands on its own dashboard", () => {
     // AC3-05, and AC1-04.
     renderDashboardAs("safety_officer");
 
-    expect(screen.getByRole("heading", { level: 1, name: "Safety Officer" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 2, name: "Safety review" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Safety review" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Waiting for review" })).toBeInTheDocument();
   });
 
   it.each(["event_coordinator_lead", "safety_officer"])(
@@ -212,9 +212,9 @@ describe("SCRUM485_AC3 each new role lands on its own dashboard", () => {
   });
 
   it.each([
-    ["Safety Officer", "Safety Officer"],
-    ["safety-officer", "Safety Officer"],
-    ["SAFETY_OFFICER", "Safety Officer"],
+    ["Safety Officer", "Safety review"],
+    ["safety-officer", "Safety review"],
+    ["SAFETY_OFFICER", "Safety review"],
     ["EVENT_COORDINATOR_LEAD", "Event Coordinator Lead"],
     ["event coordinator lead", "Event Coordinator Lead"],
     ["  event_coordinator_lead  ", "Event Coordinator Lead"],
@@ -267,7 +267,7 @@ describe("SCRUM485_AC6 the existing roles land where they did", () => {
     expect(container.querySelector(".dashboard--attendee")).toBeInTheDocument();
     expect(screen.queryByText(NO_DASHBOARD)).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { level: 1, name: "Event Coordinator Lead" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("heading", { level: 1, name: "Safety Officer" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 1, name: "Safety review" })).not.toBeInTheDocument();
     expect(screen.queryByTestId("dashboard-stub")).not.toBeInTheDocument();
   });
 

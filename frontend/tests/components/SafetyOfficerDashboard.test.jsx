@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import SafetyOfficerDashboard from "../../src/components/SafetyOfficerDashboard.jsx";
 import {
@@ -47,6 +47,16 @@ function queueEvent(id, waitingSeconds, overrides = {}) {
   };
 }
 
+// jsdom has no showModal or close, so the reject confirmation's dialog gets
+// minimal stand-ins that toggle the open attribute.
+const originalShowModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, "showModal");
+const originalClose = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, "close");
+
+function restoreDialogMethod(name, original) {
+  if (original) Object.defineProperty(HTMLDialogElement.prototype, name, original);
+  else delete HTMLDialogElement.prototype[name];
+}
+
 function failure(message, status) {
   return Object.assign(new Error(message), {
     response: { data: message ? { error: message } : {}, status },
@@ -58,6 +68,21 @@ beforeEach(() => {
   getSafetyReviewQueue.mockResolvedValue([]);
   getSafetyReview.mockResolvedValue(DETAIL);
   submitSafetyReviewResponse.mockResolvedValue({});
+  Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
+    configurable: true,
+    value() { this.setAttribute("open", ""); },
+  });
+  Object.defineProperty(HTMLDialogElement.prototype, "close", {
+    configurable: true,
+    value() { this.removeAttribute("open"); },
+  });
+});
+
+afterEach(() => {
+  // Unmount while the stubs exist: an open dialog's cleanup calls close().
+  cleanup();
+  restoreDialogMethod("showModal", originalShowModal);
+  restoreDialogMethod("close", originalClose);
 });
 
 describe("SCRUM-490 Safety Officer dashboard", () => {
@@ -190,17 +215,20 @@ describe("SCRUM-490 Safety Officer dashboard", () => {
   });
 
   it.each([
-    ["request changes", "changes_requested", "Changes requested"],
-    ["reject", "rejected", "Safety arrangement rejected"],
-  ])("records the %s outcome with its label", async (_name, outcome, label) => {
+    ["request changes", "Request changes", "Changes requested"],
+    ["reject", "Reject the safety arrangement", "Safety arrangement rejected"],
+  ])("records the %s outcome with its label", async (_name, choice, label) => {
     const user = userEvent.setup();
     getSafetyReviewQueue.mockResolvedValue([queueEvent("event-1", 60)]);
     render(<SafetyOfficerDashboard user={{ name: "Riley" }} />);
 
     await user.click(await screen.findByRole("button", { name: "Review event" }));
-    await user.selectOptions(screen.getByRole("combobox"), outcome);
+    await user.click(screen.getByRole("radio", { name: choice }));
     await user.type(screen.getByRole("textbox"), "Update the plan.");
     await user.click(screen.getByRole("button", { name: "Submit response" }));
+    if (choice === "Reject the safety arrangement") {
+      await user.click(screen.getByRole("button", { name: "Reject arrangement" }));
+    }
 
     expect(await screen.findByRole("status")).toHaveTextContent(`Response recorded: ${label}.`);
   });
