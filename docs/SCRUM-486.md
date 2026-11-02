@@ -318,7 +318,7 @@ reads it makes on mount; SCRUM-521), and the picker's filter (it left out
 the caller, which for a Lead removed nobody and offered the holder, a choice the
 function refuses; SCRUM-521).
 
-*Changed by SCRUM-444 (Week 9 Q&A row 40), 2 November 2026: only the Lead hands an event over. 055 removes the holder's branch from `reassign_event_request`, and `POST /:id/reassign` is `leadOnly`. SCRUM-486 stays Done.*
+*Changed by SCRUM-444 (Week 9 Q&A, sheet G3-5, row 18), 2 November 2026: only the Lead hands an event over. 055 removes the holder's branch from `reassign_event_request`, and `POST /:id/reassign` is `leadOnly`. SCRUM-486 stays Done.*
 
 ### D5. The Lead cannot be assigned events
 
@@ -340,7 +340,7 @@ lets any coordinator view any event. The shared queue is that viewing right as a
 worklist: what colleagues have waiting, which a coordinator covering for someone,
 or choosing who to hand an event to, needs. Removing it would take away something
 the customer allowed in order to enforce a restriction the customer never made.
-*Changed by SCRUM-444 (Week 9 Q&A row 40), 2 November 2026: a coordinator views only the events assigned to them, and `GET /queue` lists only the caller's.*
+*Changed by SCRUM-444 (Week 9 Q&A, sheet G3-5, row 16), 2 November 2026: a coordinator views only the events assigned to them, and `GET /queue` lists only the caller's.*
 
 What the customer *did* reserve is the choice of who takes a new request: the
 Lead's. So the only rows taken out are those that belong to nobody. Listed, they

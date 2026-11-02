@@ -383,7 +383,8 @@ describe('SCRUM-486 AC6: POST /:id/reassign admits the Lead (since SCRUM-444, on
 
   it('SCRUM444_AC3_the_holder_is_refused_the_handover_with_403_and_queries_nothing', async () => {
     // Was SCRUM486_AC6_a_coordinator_still_reaches_it. SCRUM-444 AC3 (Week 9
-    // Q&A): the holder may no longer hand over, so leadOnly refuses them first.
+    // Q&A, sheet G3-5, row 18): the holder may no longer hand over, so leadOnly
+    // refuses them first.
     const client = createFakeClient([handedOver()]);
 
     const res = await handOver(client, signedInWithRole(ROLE.EVENT_COORDINATOR, COORDINATOR_A));

@@ -2136,7 +2136,7 @@ describe('SCRUM-331: an event is handed to another coordinator over HTTP (by the
 // The cost is two URLs for one event, and the frontend picks by role, as it
 // already does between GET / and GET /queue.
 //
-// SCRUM-444 AC1, AC4 (Week 9 Q&A): only the holder and the Lead read an event
+// SCRUM-444 AC1, AC4 (Week 9 Q&A, sheet G3-5, row 16): only the holder and the Lead read an event
 // here. Another coordinator, and the previous holder after a handover, get a
 // missing id's 404, as a draft does.
 

@@ -46,7 +46,7 @@ brackets.
 
 1. An Event Coordinator can view only the events assigned to them, including their
    clarification history. The Event Coordinator Lead can view every event
-   (SCRUM-487). Week 9 Q&A: "The co-ordinator will have access to his own assigned
+   (SCRUM-487). Week 9 Q&A, sheet G3-5, row 16: "The co-ordinator will have access to his own assigned
    events."
 2. Only the assigned coordinator can start review, request clarification, approve
    or reject, reject an approved event, edit event information, apply a significant
@@ -54,7 +54,7 @@ brackets.
    confirm, cancel, mark completed, release a venue booking (SCRUM-492), and manage
    equipment lines, venue booking requests and on-site support assignments.
 3. Only the Event Coordinator Lead can assign and reassign a coordinator
-   (SCRUM-486). A coordinator cannot reassign their own events (Week 9 Q&A).
+   (SCRUM-486). A coordinator cannot reassign their own events (Week 9 Q&A, sheet G3-5, row 18).
 4. After a reassignment, the previous coordinator can no longer view or act on the
    event.
 5. Only coordinators can add closing notes on completed events.
@@ -192,7 +192,8 @@ The two `it.each` above have 19 rows each (AC2-01 to AC2-08 together).
 - **A flaky frontend test.** `SCRUM583_AC1_no_screen_adds_its_own_expiry_wording`
   (`frontend/tests/flows/scrum583ExpiredSessionFlow.test.jsx`) failed once in
   the full frontend run with "Target cannot be null or undefined" and passed alone
-  (19 of 19). It touches no 444 code; it looks timing-dependent under load.
+  (19 of 19); 3 of 3 runs passed in brief 2. It touches no 444 code; it looks
+  timing-dependent under load.
 
 ---
 

@@ -70,7 +70,7 @@ Test names follow the repo convention `SCRUM434_AC<n>_<behaviour>`.
 - **Every coordinator reads a submitted event's clarification history**, not only the
   assigned one. This is deliberate (the coordinators share one queue, SCRUM-486) and
   is pinned in the access matrix so a change to it is visible.
-  *Changed by SCRUM-444 (Week 9 Q&A row 40), 2 November 2026: only the assigned coordinator and the Lead read it; the matrix row is `SCRUM444_AC1_an_unassigned_coordinator_is_refused_the_clarification_history`.*
+  *Changed by SCRUM-444 (Week 9 Q&A, sheet G3-5, row 16), 2 November 2026: only the assigned coordinator and the Lead read it; the matrix row is `SCRUM444_AC1_an_unassigned_coordinator_is_refused_the_clarification_history`.*
 - **Role gates sit in Express; the SQL functions behind them do not all repeat them.**
   `migrations/AGENTS.md` asks for the role check inside the function too. For the
   Organiser write routes this story adds, the position is:
@@ -103,7 +103,7 @@ Test names follow the repo convention `SCRUM434_AC<n>_<behaviour>`.
 - **Week 9 clarification** says a coordinator "will have access to his own assigned
   events", while the code lets any coordinator open any submitted event for review.
   That is outside the Organiser story and is raised with Calven separately.
-  *Changed by SCRUM-444 (Week 9 Q&A row 40), 2 November 2026: a coordinator now opens only the events assigned to them.*
+  *Changed by SCRUM-444 (Week 9 Q&A, sheet G3-5, row 16), 2 November 2026: a coordinator now opens only the events assigned to them.*
 
 ## 5. Subtasks
 

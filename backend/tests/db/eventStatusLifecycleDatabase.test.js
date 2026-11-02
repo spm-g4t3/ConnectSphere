@@ -1265,7 +1265,7 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
   describe('SCRUM-486 AC6: the Lead reassigns (the holder no longer may, SCRUM-444)', () => {
     it('SCRUM444_AC3_the_holder_cannot_reassign', async () => {
       // Was SCRUM486_AC6_the_holder_reassigns_as_scrum327_allowed. SCRUM-444 AC3
-      // (Week 9 Q&A): only the Lead hands an event over, so 055 refuses the holder.
+      // (Week 9 Q&A, sheet G3-5, row 18): only the Lead hands an event over, so 055 refuses the holder.
       const id = await request(STATUS.UNDER_REVIEW);
       const before = await row(id);
 

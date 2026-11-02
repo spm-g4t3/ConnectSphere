@@ -1936,8 +1936,8 @@ export async function getEventDecisionHistory(id, userId, role, { client } = {})
  * No organiserId, and assertOrganiser is deliberately NOT called: the queue
  * crosses Organisers, so the coordinator is its scope. SCRUM-444 (D3) narrowed
  * it to the events the caller holds. It used to list every held request, on
- * the reading that any coordinator may view any event; the Week 9 Q&A settled
- * the opposite: "The co-ordinator will have access to his own assigned events."
+ * the reading that any coordinator may view any event; the Week 9 Q&A, sheet G3-5, row 16,
+ * settled the opposite: "The co-ordinator will have access to his own assigned events."
  *
  * Which statuses count is not decided here. COORDINATOR_QUEUE_STATUSES owns
  * that, and its docstring carries the argument, including why `draft` is

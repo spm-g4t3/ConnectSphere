@@ -928,7 +928,7 @@ export function createEventRequestRouter({
    * SCRUM-331 (SCRUM-327 AC9): an event handed to another coordinator, with an
    * optional note.
    *
-   * SCRUM-444 AC3 (Week 9 Q&A): behind leadOnly. Only the Lead hands an event
+   * SCRUM-444 AC3 (Week 9 Q&A, sheet G3-5, row 18): behind leadOnly. Only the Lead hands an event
    * over; the holder may not, which reverses SCRUM-486 AC6. Anyone else is
    * refused before the handler runs and the database is never touched, and
    * 055's reassign_event_request refuses a non-Lead with 42501 under the row

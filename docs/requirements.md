@@ -25,7 +25,7 @@ venue booking, equipment and attendee registration [W1 §2]. The core problems i
 | Role | Key | Does |
 |---|---|---|
 | Event Organiser (external) | `event_organiser` | Creates, drafts and submits requests. After submission, changes only through the Coordinator [C4]. |
-| Event Coordinator | `event_coordinator` | Reviews, clarifies, approves or rejects; books venues; records equipment; confirms or cancels. Edits **only events assigned to them**; may view others [C4][W7 #5]. *Changed by SCRUM-444 (Week 9 Q&A row 40), 2 November 2026: views only events assigned to them.* |
+| Event Coordinator | `event_coordinator` | Reviews, clarifies, approves or rejects; books venues; records equipment; confirms or cancels. Edits **only events assigned to them**; may view others [C4][W7 #5]. *Changed by SCRUM-444 (Week 9 Q&A, sheet G3-5, row 16), 2 November 2026: views only events assigned to them.* |
 | Event Coordinator Lead | `event_coordinator_lead` | Sees the unassigned queue, assigns and reassigns, sees all assignments and active events [W7 #5]. |
 | Venue Staff | `venue_staff` | Venue catalogue (create, edit, delete), blocks, booking decisions, tentative holds [C4][W7]. |
 | Technical Support Staff | `technical_support_staff` | Equipment catalogue and status, availability checks, request review, reservations [W4][C4]. |
@@ -75,7 +75,7 @@ and changes ripple to bookings, equipment, registration and notifications [W4].
 ## 4. E1 Access and Identity — SCRUM-92, 434, 444, 453, 485
 - Access depends on role **and** relationship to the event (owner, assigned coordinator), not role alone [W4].
 - A Coordinator can view unassigned events for planning but not edit them [C4].
-- After reassignment, the previous coordinator keeps view-only access [C4].
+- After reassignment, the previous coordinator keeps view-only access [C4]. *Changed by SCRUM-444 (Week 9 Q&A, sheet G3-5, row 16), 2 November 2026: the previous coordinator has no access.*
 
 ## 5. E2 Event Request — SCRUM-10, 14, 412, 420, 427
 - **Minimum fields** [C4]: name, purpose, description, date and time, expected attendance, venue requirements, accessibility, equipment, layout, registration needs.
