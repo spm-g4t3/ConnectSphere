@@ -26,11 +26,22 @@
 import { useCallback, useEffect, useState } from "react";
 import { getHoldCandidates, listVenueHolds, placeVenueHold } from "../services/venueService";
 import { holdConflicts, holdErrorMessage } from "../services/venueHoldErrors";
-import { formatRange, formatTimestamp } from "../services/displayFormat";
+import {
+  formatDateTime,
+  formatDateTimeRange,
+  formatDateTimeRangeOrFallback,
+} from "../services/displayFormat";
 import { formatOccupiedPeriod } from "../services/occupiedPeriodDisplay";
 import { reasonLabel } from "../services/venueBlockReasons";
 import VenueHoldForm from "./VenueHoldForm";
 import { BlockActor } from "./BlockHistory";
+import Button from "./ui/Button";
+import StatusBadge from "./ui/StatusBadge";
+import LoadingText from "./ui/LoadingText";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import { HOLD_EXPIRING_TONE, HOLD_TONE } from "../services/venueStatusTones";
+import { describeHoldExpiry } from "../services/holdExpiry";
 
 /** "1 thing is" / "3 things are", for the conflict heading. */
 function thingsAre(count) {
@@ -43,18 +54,18 @@ function conflictText(conflict) {
     return {
       label: "Blocked",
       detail: conflict.reason ? reasonLabel(conflict.reason) : null,
-      period: formatRange(conflict.startsAt, conflict.endsAt),
+      period: formatDateTimeRange(conflict.startsAt, conflict.endsAt),
     };
   }
   return {
     label: conflict.kind === "hold" ? "Tentatively held" : "Booked",
     detail: conflict.eventName || "Unnamed event",
     // Setup · Event · Turnaround: the whole time that event keeps the venue.
-    period: formatOccupiedPeriod(conflict),
+    period: formatOccupiedPeriod(conflict, formatDateTimeRange),
   };
 }
 
-export default function VenueHoldsPanel({ venue, currentUserId }) {
+export default function VenueHoldsPanel({ venue, currentUserId, headingRef }) {
   const [holds, setHolds] = useState([]);
   const [loadingHolds, setLoadingHolds] = useState(true);
   const [listError, setListError] = useState(null);
@@ -77,6 +88,9 @@ export default function VenueHoldsPanel({ venue, currentUserId }) {
   // Seeded from the prop, then set by a VENUE_RETIRED answer: the venue can
   // be retired by someone else while this panel is open.
   const [venueRetired, setVenueRetired] = useState(Boolean(venue.retiredAt));
+  // Ticks every minute, so "Expires soon", "(in N hours)" and the expired-hold
+  // filter keep up while the panel stays open.
+  const [now, setNow] = useState(() => new Date());
 
   const fetchHolds = useCallback(async () => {
     setLoadingHolds(true);
@@ -107,6 +121,22 @@ export default function VenueHoldsPanel({ venue, currentUserId }) {
   useEffect(() => {
     fetchHolds();
   }, [fetchHolds]);
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 60 * 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // The error clears first, so a second failure is visibly a new one.
+  function retryHolds() {
+    setListError(null);
+    fetchHolds();
+  }
+
+  function retryCandidates() {
+    setCandidatesError(null);
+    fetchCandidates();
+  }
 
   function clearFormFeedback() {
     setServerErrors([]);
@@ -200,39 +230,35 @@ export default function VenueHoldsPanel({ venue, currentUserId }) {
     return <BlockActor id={hold.placedBy} currentUserId={currentUserId} />;
   }
 
-  const now = new Date();
   // AC7: a hold past its expiry holds nothing, whether or not the server has
   // marked it yet.
   const activeHolds = holds.filter((hold) => new Date(hold.expiresAt) > now);
 
   return (
     <div className="venue-holds">
-      <h2>
+      {/* tabIndex -1 and headingRef: the catalogue moves focus here when it opens this panel. */}
+      <h2 ref={headingRef} tabIndex={-1}>
         Tentative holds for {venue.name} — {venue.location}
       </h2>
 
-      {panelError && (
-        <p className="venue-holds__error" role="alert">
-          {panelError}
-        </p>
-      )}
+      {panelError && <ErrorNotice message={panelError} />}
       {notice && (
         <div className="venue-holds__notice" role="status">
           <p>
             Hold placed. {venue.name} is tentatively held for {notice.eventName} until{" "}
-            {formatTimestamp(notice.expiresAt)}.
+            {formatDateTime(notice.expiresAt)}.
           </p>
         </div>
       )}
 
       {!formOpen && (
-        <button
+        <Button
           onClick={openForm}
           disabled={venueRetired}
           title={venueRetired ? "A retired venue cannot be held." : undefined}
         >
           + Place a hold
-        </button>
+        </Button>
       )}
 
       {formOpen && (
@@ -241,6 +267,7 @@ export default function VenueHoldsPanel({ venue, currentUserId }) {
             candidates={candidates}
             loadingCandidates={loadingCandidates}
             candidatesError={candidatesError}
+            onRetryCandidates={retryCandidates}
             onSubmit={send}
             onCancel={closeForm}
             submitting={submitting}
@@ -255,31 +282,45 @@ export default function VenueHoldsPanel({ venue, currentUserId }) {
       <section className="venue-holds__current">
         <h3>Active holds</h3>
 
-        {loadingHolds && holds.length === 0 && <p>Loading...</p>}
+        {loadingHolds && holds.length === 0 && <LoadingText />}
         {listError && (
-          <p className="venue-holds__error" role="alert">
-            {listError}
-          </p>
+          <ErrorNotice
+            message={listError}
+            onRetry={retryHolds}
+          />
         )}
         {!loadingHolds && !listError && activeHolds.length === 0 && (
-          <p>This venue has no active holds.</p>
+          <EmptyState
+            message="This venue has no active holds."
+            nextStep={
+              venueRetired
+                ? "A retired venue cannot be held."
+                : "Use + Place a hold to keep this venue for an Approved event."
+            }
+          />
         )}
 
         {activeHolds.length > 0 && (
           <ul className="venue-holds__list">
-            {activeHolds.map((hold) => (
-              <li key={hold.id} className="venue-holds__item">
-                <div className="venue-holds__item-main">
-                  <strong>{hold.eventName || "Unnamed event"}</strong>
-                  <span>{formatRange(hold.eventStartsAt, hold.eventEndsAt, "no date")}</span>
-                  <span className="status-badge status--hold-active">Tentatively held</span>
-                  <p className="venue-holds__audit">
-                    Expires {formatTimestamp(hold.expiresAt)} · Placed{" "}
-                    {formatTimestamp(hold.placedAt)} {renderPlacer(hold)}
-                  </p>
-                </div>
-              </li>
-            ))}
+            {activeHolds.map((hold) => {
+              // The same `now` as the filter above, so a row and its wording agree.
+              const expiry = describeHoldExpiry(hold.expiresAt, now);
+              return (
+                <li key={hold.id} className="venue-holds__item">
+                  <div className="venue-holds__item-main">
+                    <strong>{hold.eventName || "Unnamed event"}</strong>
+                    <span>{formatDateTimeRangeOrFallback(hold.eventStartsAt, hold.eventEndsAt, "no date")}</span>
+                    <StatusBadge tone={HOLD_TONE}>Tentatively held</StatusBadge>
+                    {expiry.soon && <StatusBadge tone={HOLD_EXPIRING_TONE}>Expires soon</StatusBadge>}
+                    <p className="venue-holds__audit">
+                      Expires {formatDateTime(hold.expiresAt)}
+                      {expiry.relative && ` (${expiry.relative})`} · Placed{" "}
+                      {formatDateTime(hold.placedAt)} {renderPlacer(hold)}
+                    </p>
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>

@@ -4,9 +4,8 @@
 // timestamp recorded"). The pure helpers that turn a block's history rows and
 // its own audit fields into text.
 //
-// Timezone-safe: every expected time string is built here as Singapore time
-// with sgTime(x), from fixtures that carry an offset, so the suite passes in
-// any zone. None of these helpers may throw, so the hostile-value
+// Timezone-safe: every expected time string is the fixed en-SG Singapore
+// text, from fixtures that carry an offset, so the suite passes in any zone. None of these helpers may throw, so the hostile-value
 // tests matter as much as the happy ones.
 
 import { describe, it, expect } from "vitest";
@@ -23,7 +22,6 @@ import {
   formatBlockHistoryValue,
   isCurrentUser,
 } from "../../src/services/venueBlockHistoryDisplay.js";
-import { sgTime } from "../helpers/singaporeTime.js";
 
 const START = "2026-11-01T09:00:00+08:00";
 const END = "2026-11-01T17:00:00+08:00";
@@ -31,10 +29,10 @@ const LATER_END = "2026-11-02T17:00:00+08:00";
 const USER_A = "d1000000-0000-4000-8000-000000000001";
 const USER_B = "d2000000-0000-4000-8000-000000000002";
 
-/** Expected rendering of an instant: Singapore time, whatever zone the suite runs in. */
-function local(iso) {
-  return sgTime(iso);
-}
+// How START, END and LATER_END read: Singapore time, the fixed en-SG format.
+const START_TEXT = "1 Nov 2026, 9:00 am";
+const END_TEXT = "1 Nov 2026, 5:00 pm";
+const LATER_END_TEXT = "2 Nov 2026, 5:00 pm";
 
 describe("blockHistoryActionLabel", () => {
   it("SCRUM17_AC4_labels_the_three_actions", () => {
@@ -108,9 +106,9 @@ describe("HIDDEN_KEYS", () => {
 });
 
 describe("formatBlockHistoryValue", () => {
-  it("SCRUM17_AC4_formats_times_in_the_readers_locale", () => {
-    expect(formatBlockHistoryValue("starts_at", START)).toBe(local(START));
-    expect(formatBlockHistoryValue("ends_at", END)).toBe(local(END));
+  it("SCRUM17_AC4_formats_times_as_singapore_time_in_the_standard_format", () => {
+    expect(formatBlockHistoryValue("starts_at", START)).toBe(START_TEXT);
+    expect(formatBlockHistoryValue("ends_at", END)).toBe(END_TEXT);
   });
 
   it("SCRUM17_AC4_an_unparseable_time_shows_raw", () => {
@@ -174,7 +172,7 @@ describe("blockHistoryChanges", () => {
       newValues: { ends_at: LATER_END },
     });
     expect(changes).toEqual([
-      { key: "ends_at", label: "End", from: local(END), to: local(LATER_END) },
+      { key: "ends_at", label: "End", from: END_TEXT, to: LATER_END_TEXT },
     ]);
   });
 
@@ -264,8 +262,8 @@ describe("blockCreationSummary", () => {
       removed_by: null,
     });
     expect(summary).toEqual([
-      { key: "starts_at", label: "Start", value: local(START) },
-      { key: "ends_at", label: "End", value: local(END) },
+      { key: "starts_at", label: "Start", value: START_TEXT },
+      { key: "ends_at", label: "End", value: END_TEXT },
       { key: "reason", label: "Reason", value: "Maintenance" },
       { key: "notes", label: "Notes", value: "(none)" },
     ]);

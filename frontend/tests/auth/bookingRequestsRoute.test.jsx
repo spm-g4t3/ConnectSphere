@@ -29,7 +29,7 @@ describe("SCRUM258 /booking-requests", () => {
   it("SCRUM258_AC1_venue_staff_see_the_pending_queue_not_a_placeholder", async () => {
     renderAppAt("/booking-requests", "venue_staff");
 
-    const heading = screen.getByRole("heading", { name: "Pending booking requests" });
+    const heading = screen.getByRole("heading", { name: /^Pending booking requests/ });
     // The wrapper is what styles the cards and colours the badges.
     expect(heading.closest(".dashboard--venue-staff")).not.toBeNull();
     expect(await screen.findByText("No pending booking requests.")).toBeInTheDocument();
@@ -43,7 +43,7 @@ describe("SCRUM258 /booking-requests", () => {
     (role) => {
       renderAppAt("/booking-requests", role);
 
-      expect(screen.queryByRole("heading", { name: "Pending booking requests" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: /^Pending booking requests/ })).not.toBeInTheDocument();
       expect(getPendingBookingRequests).not.toHaveBeenCalled();
       expect(window.location.pathname).toBe("/unauthorized");
     },

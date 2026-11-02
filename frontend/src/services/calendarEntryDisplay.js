@@ -58,3 +58,20 @@ export function calendarEntryDisplay(entry) {
   const { label, tone } = BOOKING_DISPLAY[entry.status];
   return { label, detail: entry.eventName || null, tone };
 }
+
+/**
+ * The calendar's key: one row per kind of entry, worded and toned by
+ * calendarEntryDisplay itself so the key cannot disagree with the entries.
+ * A block is shown without a reason, as plain "Blocked".
+ */
+export const CALENDAR_KEY = Object.freeze(
+  [
+    { kind: "booking", status: "approved" },
+    { kind: "booking", status: "flagged_for_review" },
+    { kind: "block" },
+    { kind: "hold" },
+  ].map((entry) => {
+    const { label, tone } = calendarEntryDisplay(entry);
+    return Object.freeze({ label, tone });
+  }),
+);

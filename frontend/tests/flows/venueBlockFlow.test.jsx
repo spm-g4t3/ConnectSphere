@@ -13,7 +13,7 @@
 // reach rejects with "unexpected call".
 //
 // Timezone-safe: instants are compared with getTime(), expected strings come
-// from formatRange / formatTimestamp, datetime-local inputs are set with
+// from formatDateTimeRange / formatDateTime, datetime-local inputs are set with
 // fireEvent.change through toDatetimeLocalValue, and there are no fake
 // timers. Passes under TZ=UTC, Asia/Singapore and America/New_York.
 
@@ -24,9 +24,10 @@ import { MemoryRouter } from "react-router-dom";
 
 import VenueCatalogue from "../../src/components/VenueCatalogue.jsx";
 import * as venueService from "../../src/services/venueService";
-import { formatRange, formatTimestamp } from "../../src/services/displayFormat";
+import { formatDateTime, formatDateTimeRange } from "../../src/services/displayFormat";
 import { toDatetimeLocalValue } from "../../src/services/datetimeFormat";
 import { reasonLabel } from "../../src/services/venueBlockReasons";
+import { stubDialogElement } from "../helpers/dialog.js";
 
 vi.mock("../../src/services/venueService", () => ({
   searchActiveVenues: vi.fn(),
@@ -293,6 +294,8 @@ function noticeEl() {
   return document.querySelector(".venue-blocks__notice");
 }
 
+stubDialogElement();
+
 describe("SCRUM-17 venue block flow (SCRUM-132)", () => {
   it("SCRUM17_AC1_AC3_AC4_staff_block_override_amend_and_remove_flow", async () => {
     const user = userEvent.setup();
@@ -328,7 +331,7 @@ describe("SCRUM-17 venue block flow (SCRUM-132)", () => {
     const conflictList = document.querySelector(".block-conflicts__list");
     expect(within(conflictList).getByText("Tech Talk")).toBeInTheDocument();
     expect(
-      within(conflictList).getByText(formatRange(BOOKING.startsAt, BOOKING.endsAt)),
+      within(conflictList).getByText(formatDateTimeRange(BOOKING.startsAt, BOOKING.endsAt)),
     ).toBeInTheDocument();
     expect(screen.getByText("This venue has no blocks.")).toBeInTheDocument();
     expect(backend.blocks).toHaveLength(0);
@@ -352,7 +355,7 @@ describe("SCRUM-17 venue block flow (SCRUM-132)", () => {
     expect(
       screen.getByText("Flag these bookings for review and notify each event's coordinator?"),
     ).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Yes, override" }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Override and flag" }));
 
     // ---- 5. The flagged notice, and the new row's audit line -----------------
     await waitFor(() => expect(noticeEl()).not.toBeNull());
@@ -374,18 +377,18 @@ describe("SCRUM-17 venue block flow (SCRUM-132)", () => {
     ).toBeInTheDocument();
     expect(within(notice).getByText("Tech Talk")).toBeInTheDocument();
     expect(
-      within(notice).getByText(formatRange(BOOKING.startsAt, BOOKING.endsAt)),
+      within(notice).getByText(formatDateTimeRange(BOOKING.startsAt, BOOKING.endsAt)),
     ).toBeInTheDocument();
     expect(screen.queryByText("This period overlaps 1 approved booking")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Block venue" })).not.toBeInTheDocument();
 
     const [created] = backend.blocks;
-    const rowRange = await screen.findByText(formatRange(START, END));
+    const rowRange = await screen.findByText(formatDateTimeRange(START, END));
     let row = rowRange.closest("li");
     expect(within(row).getByText(reasonLabel("renovation"))).toBeInTheDocument();
     expect(within(row).getByText("Lift works")).toBeInTheDocument();
     const audit = row.querySelector(".venue-blocks__audit");
-    expect(audit.textContent).toBe(`Created ${formatTimestamp(created.createdAt)} by you`);
+    expect(audit.textContent).toBe(`Created ${formatDateTime(created.createdAt)} by you`);
     expect(audit.textContent).not.toContain("Last amended");
     expect(screen.queryByText("This venue has no blocks.")).not.toBeInTheDocument();
 
@@ -396,7 +399,7 @@ describe("SCRUM-17 venue block flow (SCRUM-132)", () => {
     expect(venueService.getVenueBlockHistory).toHaveBeenCalledWith(VENUE.id, created.id);
     let entries = within(historyRegion).getAllByText(/^(Created|Amended|Removed)$/);
     expect(entries.map((el) => el.textContent)).toEqual(["Created"]);
-    expect(within(historyRegion).getByText(`End: ${formatTimestamp(END)}`)).toBeInTheDocument();
+    expect(within(historyRegion).getByText(`End: ${formatDateTime(END)}`)).toBeInTheDocument();
     expect(within(historyRegion).getByText("by you")).toBeInTheDocument();
     const historyCallsBeforeEdit = vi.mocked(venueService.getVenueBlockHistory).mock.calls.length;
 
@@ -414,13 +417,13 @@ describe("SCRUM-17 venue block flow (SCRUM-132)", () => {
     expect(changes.endsAt).toMatch(OFFSET_SUFFIX);
     expect(new Date(changes.endsAt).getTime()).toBe(new Date(NEW_END).getTime());
 
-    row = (await screen.findByText(formatRange(START, NEW_END))).closest("li");
+    row = (await screen.findByText(formatDateTimeRange(START, NEW_END))).closest("li");
     expect(within(noticeEl()).getByText("Block saved.")).toBeInTheDocument();
     expect(noticeEl().textContent).not.toContain("flagged for review");
     const amendedAt = backend.blocks[0].updatedAt;
     expect(new Date(amendedAt).getTime()).toBeGreaterThan(new Date(created.createdAt).getTime());
     expect(row.querySelector(".venue-blocks__audit").textContent).toBe(
-      `Created ${formatTimestamp(created.createdAt)} by you · Last amended ${formatTimestamp(amendedAt)} by you`,
+      `Created ${formatDateTime(created.createdAt)} by you · Last amended ${formatDateTime(amendedAt)} by you`,
     );
 
     // The open history refetched by itself: Amended now sits above Created.
@@ -432,7 +435,7 @@ describe("SCRUM-17 venue block flow (SCRUM-132)", () => {
     entries = within(historyRegion).getAllByText(/^(Created|Amended|Removed)$/);
     expect(entries.map((el) => el.textContent)).toEqual(["Amended", "Created"]);
     expect(
-      within(historyRegion).getByText(`End: ${formatTimestamp(END)} → ${formatTimestamp(NEW_END)}`),
+      within(historyRegion).getByText(`End: ${formatDateTime(END)} → ${formatDateTime(NEW_END)}`),
     ).toBeInTheDocument();
     // Hidden audit keys are not listed as changes.
     expect(historyRegion.textContent).not.toContain("updated_at");
@@ -441,10 +444,9 @@ describe("SCRUM-17 venue block flow (SCRUM-132)", () => {
     // ---- 8. AC4: two-step remove ---------------------------------------------
     await user.click(within(row).getByRole("button", { name: "Remove" }));
     expect(venueService.removeVenueBlock).not.toHaveBeenCalled();
-    expect(
-      within(row).getByText("Remove this block? Bookings it flagged stay flagged for review."),
-    ).toBeInTheDocument();
-    await user.click(within(row).getByRole("button", { name: "Yes, remove" }));
+    const removeDialog = screen.getByRole("dialog", { name: "Remove this block?" });
+    expect(removeDialog).toHaveTextContent("Bookings it flagged stay flagged for review.");
+    await user.click(within(removeDialog).getByRole("button", { name: "Remove block" }));
 
     expect(await screen.findByText("Block removed.")).toBeInTheDocument();
     expect(venueService.removeVenueBlock).toHaveBeenCalledTimes(1);
