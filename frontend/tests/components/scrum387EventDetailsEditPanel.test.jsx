@@ -326,7 +326,6 @@ describe("SCRUM-387 what each refusal says", () => {
   it.each([
     ["a_400_with_no_field_named", httpError(400, { error: SERVER_TEXT }),
       "These changes could not be saved as written. Check each field and the reason, then try again."],
-    ["a_401", httpError(401, { error: SERVER_TEXT }), "Your session has expired. Please sign in again."],
     ["a_403", httpError(403, { error: SERVER_TEXT }), "You're no longer the coordinator for this event."],
     ["a_404", httpError(404, { error: SERVER_TEXT }), "This event can't be found. It may have been removed."],
     ["EVENT_CHANGED_SINCE_OPENED", httpError(409, { error: SERVER_TEXT, code: "EVENT_CHANGED_SINCE_OPENED" }),

@@ -127,7 +127,6 @@ describe("loading, empty and error states (AC1)", () => {
   });
 
   it.each([
-    [401, "Your session has expired. Please sign in again."],
     [403, "Only Venue Staff can see flagged bookings."],
     [500, "Flagged bookings could not be loaded. Please try again."],
   ])("SCRUM266_AC1_a_%i_on_load_is_explained_and_not_shown_as_empty", async (status, message) => {

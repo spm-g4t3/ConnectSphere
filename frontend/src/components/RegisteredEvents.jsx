@@ -4,7 +4,6 @@ import { attendeeEventPath } from "../services/attendeeEventRoutes";
 import { BROWSE_OPEN_EVENTS_PATH } from "../services/openEventRoutes";
 import useOpenEventRead from "./useOpenEventRead";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
-import { SESSION_EXPIRED } from "../services/apiErrors";
 import WaitingListPlaces from "./WaitingListPlaces";
 import Button from "./ui/Button";
 import EmptyState from "./ui/EmptyState";
@@ -13,7 +12,6 @@ import LoadingText from "./ui/LoadingText";
 import useFocusAfterRetry from "./useFocusAfterRetry";
 
 const MESSAGES = {
-  401: SESSION_EXPIRED,
   403: "Only Attendees can view registered events.",
 };
 const FALLBACK = "Registered events could not be loaded. Please try again.";
@@ -31,7 +29,7 @@ export default function RegisteredEvents() {
       <section aria-labelledby="registered-events-heading">
         <h2 ref={headingRef} tabIndex={-1} id="registered-events-heading">Registered</h2>
         {loading && <LoadingText />}
-        {error && <ErrorNotice message={error} onRetry={error === SESSION_EXPIRED ? undefined : retry} />}
+        {error && <ErrorNotice message={error} onRetry={retry} />}
         {refreshFailed && (
           <div className="browse-open-events__notice" role="status">
             <p>Could not refresh the list. Showing the events as last loaded.</p>

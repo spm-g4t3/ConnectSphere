@@ -148,7 +148,6 @@ describe("SCRUM17_AC3 loading and empty states", () => {
 
 describe("SCRUM17_AC3 list errors", () => {
   it.each([
-    ["a 401", httpError(401), "Your session has expired. Please sign in again."],
     ["a 500", httpError(500), "Notifications could not be loaded."],
     ["a 403", httpError(403), "Notifications could not be loaded."],
     ["a 503", httpError(503), "Notifications could not be loaded."],
@@ -198,13 +197,15 @@ describe("SCRUM17_AC3 list errors", () => {
     expect(listNotifications).toHaveBeenCalledTimes(2);
   });
 
-  it("SCRUM584_AC5_an_expired_session_offers_no_Try_again", async () => {
+  it("SCRUM583_AC1_a_401_has_no_wording_of_its_own_in_the_inbox", async () => {
+    // The app words an expiry once and signs the user out; if a 401 ever reached this screen it is a plain failure.
     vi.mocked(listNotifications).mockRejectedValue(httpError(401));
 
     render(<NotificationInbox />, { wrapper: MemoryRouter });
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("Your session has expired. Please sign in again.");
-    expect(within(alert).queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+    expect(alert).toHaveTextContent("Notifications could not be loaded.");
+    expect(alert).not.toHaveTextContent(/session/i);
+    expect(within(alert).getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });
 
@@ -415,7 +416,6 @@ describe("SCRUM17_AC3 marking a notification read", () => {
   // Only a 404 refetches; it has its own test below.
   it.each([
     ["a_500", httpError(500), "This notification could not be marked as read. Please try again."],
-    ["a_401", httpError(401), "Your session has expired. Please sign in again."],
     ["a_network_error", new Error("Network Error"), "This notification could not be marked as read. Please try again."],
   ])("SCRUM17_AC3_%s_shows_its_row_message_re_enables_the_button_and_does_not_refetch", async (_label, error, message) => {
     const user = userEvent.setup();
@@ -757,5 +757,79 @@ describe("SCRUM172_AC7 selecting a notification opens its event", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     // A failed mark changed nothing, so the count is not re-read.
     expect(getUnreadCount).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("SCRUM177 registration notifications in the inbox", () => {
+  const EVENT = "33333333-3333-4333-8333-333333333333";
+  const ORGANISER = { id: "o1", name: "Olu Organiser", role: "event_organiser" };
+  const COORDINATOR = { id: "c1", name: "Priya Nair", role: "event_coordinator" };
+  const registrationNotice = (type, payload) => notification({
+    type,
+    bookingId: null,
+    blockId: null,
+    eventRequestId: EVENT,
+    payload: { eventRequestId: EVENT, eventName: "Tech Talk", ...payload },
+  });
+
+  function Probe({ label }) {
+    const { id } = useParams();
+    return <p>{label}{id ? ` ${id}` : ""}</p>;
+  }
+
+  beforeEach(() => {
+    vi.mocked(getUnreadCount).mockResolvedValue(1);
+  });
+
+  it("SCRUM177_AC3_AC5_a_waiting_attendee_reads_the_closure_and_opens_their_own_places", async () => {
+    const user = userEvent.setup();
+    vi.mocked(markNotificationRead).mockResolvedValue({});
+    vi.mocked(listNotifications).mockResolvedValue([
+      registrationNotice("registration_closed", { audience: "waitlisted", cause: "closing_time" }),
+    ]);
+    renderInbox({ routes: <Route path="/registered-events" element={<Probe label="My registrations" />} /> });
+
+    const link = await screen.findByRole("link", { name: "Registration for Tech Talk has closed" });
+    expect(link).toHaveAttribute("href", "/registered-events");
+    expect(screen.getByText(
+      "The closing time passed. No places are offered from the waiting list while it is closed; you keep your place in the queue.",
+    )).toBeInTheDocument();
+
+    await user.click(link);
+    expect(await screen.findByText("My registrations")).toBeInTheDocument();
+  });
+
+  it("SCRUM177_AC2_AC5_the_organiser_reads_that_the_event_is_full_and_opens_its_registration_page", async () => {
+    vi.mocked(listNotifications).mockResolvedValue([
+      registrationNotice("registration_capacity_reached", { audience: "organiser", capacity: 50, registeredCount: 50 }),
+    ]);
+    renderInbox({ user: ORGANISER });
+
+    const link = await screen.findByRole("link", { name: "Tech Talk is full" });
+    expect(link).toHaveAttribute("href", `/events/${EVENT}/registration`);
+    expect(screen.getByText("All 50 places are taken.")).toBeInTheDocument();
+  });
+
+  it("SCRUM177_AC4_AC5_the_coordinator_reads_a_freed_place_and_opens_the_event_review", async () => {
+    vi.mocked(listNotifications).mockResolvedValue([
+      registrationNotice("registration_place_released", { audience: "coordinator", cause: "withdrawal", capacity: 50, registeredCount: 49 }),
+    ]);
+    renderInbox({ user: COORDINATOR });
+
+    const link = await screen.findByRole("link", { name: "A place opened at Tech Talk" });
+    expect(link).toHaveAttribute("href", `/event-requests/${EVENT}`);
+    expect(screen.getByText("An attendee withdrew. 49 of 50 places are now taken.")).toBeInTheDocument();
+  });
+
+  it("SCRUM177_AC5_no_registration_notice_falls_back_to_the_unknown_type_text", async () => {
+    vi.mocked(listNotifications).mockResolvedValue([
+      registrationNotice("registration_opened", { audience: "organiser", cause: "opening_time", closesAt: null }),
+      registrationNotice("registration_promoted", { registrationId: "r1" }),
+    ].map((n, i) => ({ ...n, id: `00000000-0000-4000-8000-00000000000${i}` })));
+    renderInbox({ user: ATTENDEE });
+
+    expect(await screen.findByText("Registration for Tech Talk is open")).toBeInTheDocument();
+    expect(screen.getByText("You have a place at Tech Talk")).toBeInTheDocument();
+    expect(screen.queryByText("New notification")).not.toBeInTheDocument();
   });
 });

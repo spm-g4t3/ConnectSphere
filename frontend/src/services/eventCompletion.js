@@ -7,7 +7,7 @@
 // complete_event_request (034). These are the conveniences in front of it: which events to offer
 // the action on, the notes limit the box enforces, and the words for a refusal.
 
-import { SESSION_EXPIRED, codeOf } from "./apiErrors";
+import { codeOf } from "./apiErrors";
 
 /** The only status an event is completed from. */
 export const COMPLETABLE_STATUS = "confirmed";
@@ -73,7 +73,6 @@ export function completionErrorMessage(error) {
   if (!error?.response) {
     return "The request did not reach the server, so the event may not have been completed. Reopen the event to check where it stands before trying again.";
   }
-  if (status === 401) return SESSION_EXPIRED;
   if (status === 403) return "Only the coordinator assigned to this event can mark it as completed.";
   if (status === 404) return "This event request no longer exists.";
   if (status === 400) {

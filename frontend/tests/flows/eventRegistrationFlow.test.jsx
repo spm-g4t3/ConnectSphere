@@ -154,16 +154,6 @@ describe("SCRUM43 registration feedback", () => {
     expect(successNotice()).toBeNull();
   });
 
-  it("SCRUM43_AC4_shows_one_session_error_when_the_refresh_also_refuses_access", async () => {
-    vi.mocked(getOpenEvent).mockResolvedValueOnce(event()).mockRejectedValueOnce({ response: { status: 401 } });
-    vi.mocked(registerForEvent).mockRejectedValue({ response: { status: 401 } });
-    render(<App />);
-    await userEvent.click(await screen.findByRole("button", { name: "Register" }));
-    await screen.findByText("Your session has expired. Please sign in again.");
-    expect(screen.getAllByRole("alert")).toHaveLength(1);
-    expect(successNotice()).toBeNull();
-  });
-
   it("SCRUM43_AC2_keeps_registered_status_on_return_to_the_browse_list_and_details", async () => {
     const registered = event({ isRegistered: true, canRegister: false });
     vi.mocked(getOpenEvent).mockResolvedValueOnce(event()).mockResolvedValue(registered);
@@ -219,7 +209,6 @@ describe("SCRUM36 attendee registration through the real App route", () => {
   });
 
   it.each([
-    [401, undefined, "Your session has expired. Please sign in again."],
     [403, undefined, "Only Attendees can register for events."],
     [409, "Event is full", "Event is full"],
     [409, "Already registered", "Already registered"],

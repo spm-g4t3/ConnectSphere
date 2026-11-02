@@ -186,10 +186,11 @@ describe("SCRUM485_AC4 each new role sees only its own links", () => {
     expect(screen.getByRole("link", { name: "Assigned Events" })).toHaveAttribute("href", "/assigned-events");
   });
 
-  it("SCRUM490_a_safety_officer_has_the_safety_review_link", () => {
+  it("SCRUM591_AC1_safety_officer_nav_lists_dashboard_and_review_history", () => {
+    // The queue is the Safety Officer's dashboard, so a link of its own
+    // would only open the same page twice.
     expect(linksOf("safety_officer")).toEqual([
       ...DASHBOARD_ONLY,
-      ["Safety review", "/safety-review"],
       ["Review history", "/safety-review/history"],
     ]);
   });

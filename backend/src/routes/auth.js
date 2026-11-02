@@ -1,5 +1,6 @@
 /**
- * Auth routes: login (SCRUM-96) and logout (SCRUM-105).
+ * Auth routes: login (SCRUM-96), logout (SCRUM-105) and session renewal
+ * (SCRUM-583).
  *
  * Uses two Supabase clients (supabaseAuth, supabaseAdmin) instead of one.
  * signInWithPassword() overrides a client's API key with the user's session
@@ -74,4 +75,43 @@ router.post('/logout', async (req, res) => {
   res.status(200).json({ message: 'Logged out successfully' });
 });
  
+// Swaps a refresh token for a new session. The token is in the body because
+// the access token may already be dead. 401 means the session is over; 503
+// means Supabase could not be asked, so the client keeps the session and
+// retries. Merging the two would sign people out over a network blip.
+router.post('/refresh', async (req, res) => {
+  const refreshToken = req.body?.refresh_token;
+
+  if (typeof refreshToken !== 'string' || !refreshToken.trim()) {
+    return res.status(400).json({ error: 'A refresh token is required' });
+  }
+
+  let result;
+  try {
+    result = await supabaseAuth.auth.refreshSession({ refresh_token: refreshToken });
+  } catch (err) {
+    console.error('Session renewal failed:', err.message);
+    return res.status(503).json({ error: 'Unable to renew the session right now' });
+  }
+
+  const { data, error } = result;
+
+  if (error) {
+    // Only a 4xx (not 429) is a verdict on the token; a network failure, 5xx,
+    // 429 or statusless error says nothing about it.
+    const refused = error.status >= 400 && error.status < 500 && error.status !== 429;
+    if (error.name === 'AuthRetryableFetchError' || !refused) {
+      console.error('Session renewal failed:', error.message);
+      return res.status(503).json({ error: 'Unable to renew the session right now' });
+    }
+    return res.status(401).json({ error: 'Your session is no longer valid' });
+  }
+
+  if (!data?.session) {
+    return res.status(401).json({ error: 'Your session is no longer valid' });
+  }
+
+  res.status(200).json({ session: data.session });
+});
+
 export default router;

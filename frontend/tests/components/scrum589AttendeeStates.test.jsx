@@ -34,7 +34,6 @@ vi.mock("../../src/services/attendeeEventService", () => ({
 }));
 vi.mock("../../src/services/openEventService", () => ({ getOpenEvent: vi.fn(), getOpenEvents: vi.fn() }));
 
-const SESSION_EXPIRED_TEXT = "Your session has expired. Please sign in again.";
 
 const openEvent = (overrides = {}) => ({
   id: "e1", eventName: "Open Day", description: "Come along.",
@@ -128,14 +127,6 @@ describe("SCRUM589 AC4 errors", () => {
     expect(await findLoaded()).toBeInTheDocument();
     expect(read).toHaveBeenCalledTimes(2);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-  });
-
-  it.each(READS)("SCRUM589_AC4_an_expired_session_on_%s_offers_no_try_again", async (_, read, renderScreen) => {
-    vi.mocked(read).mockRejectedValue(httpError(401));
-    renderScreen();
-
-    expect(await screen.findByRole("alert")).toHaveTextContent(SESSION_EXPIRED_TEXT);
-    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
   });
 
   it.each(READS.slice(0, 4))("SCRUM589_AC4_a_failed_refresh_of_%s_is_a_warning_with_try_again", async (_, read, renderScreen, answer, findLoaded) => {

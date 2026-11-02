@@ -7,7 +7,6 @@ import { EVENT_TIME_NOTE, formatEventWhen } from "../services/openEventDisplay";
 import useOpenEventRead from "./useOpenEventRead";
 import WithdrawRegistration from "./WithdrawRegistration";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
-import { SESSION_EXPIRED } from "../services/apiErrors";
 import EmptyState from "./ui/EmptyState";
 import ErrorNotice from "./ui/ErrorNotice";
 import LoadingText from "./ui/LoadingText";
@@ -15,7 +14,6 @@ import StatusBadge from "./ui/StatusBadge";
 import useFocusAfterRetry from "./useFocusAfterRetry";
 
 const MESSAGES = {
-  401: SESSION_EXPIRED,
   403: "Only Attendees can view this event information.",
 };
 const FALLBACK = "Event information could not be loaded. Please try again.";
@@ -114,7 +112,7 @@ function EventInformation({ eventId }) {
         )}
         {/* A missing registration is the answer, not a failure, so there is nothing to try again. */}
         {!withdrawn && notFound && <ErrorNotice message="Event information is unavailable. An active registration is required." />}
-        {error && <ErrorNotice message={error} onRetry={error === SESSION_EXPIRED ? undefined : retry} />}
+        {error && <ErrorNotice message={error} onRetry={retry} />}
         {view && <EventBody state={view} current={current} />}
         {/* SCRUM-434 AC5: a cancelled event shows the cancellation and the message only, so no withdrawal is offered. */}
         {!loading && !error && current?.registrationId && view !== "cancelled" && (

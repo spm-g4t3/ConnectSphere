@@ -29,6 +29,7 @@ const READ_METHODS = new Set(['get', 'head', 'options']);
 const EXEMPT = {
   'auth POST /login': 'signs a user in',
   'auth POST /logout': 'signs a user out',
+  'auth POST /refresh': 'swaps a refresh token for a new session; it touches no event',
   'eventRequests POST /': 'creates a new event request; there is no event to be final yet',
   'eventRequests POST /:id/significant-change-impact': 'a preview of a significant change; it writes nothing',
   'equipment POST /': 'adds an equipment type to the catalogue',

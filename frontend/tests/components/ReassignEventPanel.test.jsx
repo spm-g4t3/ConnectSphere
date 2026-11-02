@@ -186,7 +186,6 @@ describe("SCRUM486_AC6 every message on the path, true for either caller", () =>
   });
 
   it.each([
-    [401, "Your session has expired. Please sign in again."],
     [403, "Only Event Coordinators and the Event Coordinator Lead can hand an event over."],
     [500, "The list of coordinators could not be loaded. Please try again."],
   ])("SCRUM486_AC6_loading_the_list_for_a_lead_fails_with_%s", async (status, message) => {
@@ -201,7 +200,6 @@ describe("SCRUM486_AC6 every message on the path, true for either caller", () =>
 
   it.each([
     [400, "That person cannot take this event. They may no longer be an Event Coordinator, or they may already hold it. Choose someone else."],
-    [401, "Your session has expired. Please sign in again."],
     [403, "You cannot hand this event over. Only the coordinator who holds it, or the Event Coordinator Lead, can do that, and it may have been handed to someone else. Go back and reopen it to see who holds it now."],
     [404, "This event no longer exists."],
     [409, "This event cannot be handed over right now. Its status may not allow a handover, or it changed while you were looking at it. Go back and reopen it to see where it stands."],

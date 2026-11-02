@@ -12,7 +12,7 @@
 // in front of a user. The only server text the UI shows is details[].message
 // from a 400, and that goes to the form, not through here.
 
-import { codeOf, makeErrorMapper, SESSION_EXPIRED } from "./apiErrors";
+import { codeOf, makeErrorMapper } from "./apiErrors";
 
 const CODE_MESSAGES = {
   VENUE_RETIRED: "This venue has been retired, so it can no longer be blocked.",
@@ -28,7 +28,6 @@ const CODE_MESSAGES = {
 
 const STATUS_MESSAGES = {
   400: "Some details were not accepted. Please check the form.",
-  401: SESSION_EXPIRED,
   403: "Only Venue Staff can manage venue blocks.",
 };
 

@@ -91,6 +91,11 @@ export default defineConfig({
         'src/jobs/venueHoldExpiryScheduler.js': FULL,
         // SCRUM-460: hands out places freed while registration was closed.
         'src/jobs/waitlistPromotionScheduler.js': FULL,
+        // SCRUM-237: announces registration opening and closing; and which jobs start.
+        'src/jobs/registrationWindowScheduler.js': FULL,
+        'src/jobs/backgroundJobs.js': FULL,
+        // The timer the minute jobs share.
+        'src/jobs/repeatingJob.js': FULL,
         // SCRUM-284 (SCRUM-285): the queue route, validation and service are new and owned outright.
         'src/routes/equipmentQueue.js': FULL,
         'src/validation/equipmentQueueValidation.js': FULL,
@@ -107,6 +112,9 @@ export default defineConfig({
         'src/routes/flaggedBookings.js': FULL,
         'src/services/flaggedBookingService.js': FULL,
         'src/validation/flaggedBookingValidation.js': FULL,
+        // SCRUM-583: login, logout and the new refresh route, all covered by
+        // auth.test.js and scrum583RefreshRoute.test.js.
+        'src/routes/auth.js': FULL,
         // SCRUM-478: the registration list service and its labels are new and owned outright.
         'src/services/registrationListService.js': FULL,
         'src/domain/registrationEntryStatus.js': FULL,

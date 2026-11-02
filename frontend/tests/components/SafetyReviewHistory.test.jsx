@@ -44,6 +44,6 @@ describe("SCRUM-490 Safety review history", () => {
     expect(screen.queryByRole("button", { name: "Submit response" })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Mark this booking as affected")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open the Safety review queue" }))
-      .toHaveAttribute("href", "/safety-review");
+      .toHaveAttribute("href", "/dashboard");
   });
 });

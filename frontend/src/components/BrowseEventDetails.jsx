@@ -14,14 +14,12 @@ import { BROWSE_OPEN_EVENTS_PATH } from "../services/openEventRoutes";
 import { REGISTERED_EVENTS_PATH } from "../services/attendeeEventRoutes";
 import { REGISTRATION_STATUS } from "../services/registrationStatus";
 import { EVENT_TIME_NOTE, formatEventWhen } from "../services/openEventDisplay";
-import { SESSION_EXPIRED } from "../services/apiErrors";
 import Button from "./ui/Button";
 import ErrorNotice from "./ui/ErrorNotice";
 import LoadingText from "./ui/LoadingText";
 import useFocusAfterRetry from "./useFocusAfterRetry";
 
 const LOAD_ERROR_MESSAGES = {
-  401: SESSION_EXPIRED,
   403: "Only Attendees can browse open events.",
   500: "This event could not be loaded. Please try again.",
   503: REGISTRATION_UNAVAILABLE_MESSAGE,
@@ -299,7 +297,7 @@ export default function BrowseEventDetails({ onRegister, onJoinWaitlist }) {
         {!loading && error && (
           <ErrorNotice
             message={error}
-            onRetry={error === SESSION_EXPIRED ? undefined : retry}
+            onRetry={retry}
           />
         )}
 

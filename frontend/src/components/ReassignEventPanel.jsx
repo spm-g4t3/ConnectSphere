@@ -26,13 +26,11 @@ import {
   listCoordinators,
   reassignEventRequest,
 } from "../services/eventRequestService";
-import { SESSION_EXPIRED } from "../services/apiErrors";
 import { coordinatorOptionLabel } from "../services/coordinatorDisplay";
 
 // 403 reworded in SCRUM-521. It said "Only Event Coordinators can hand an
 // event over", which has been false since 052 let the Lead hand over too.
 const LOAD_ERROR_MESSAGES = {
-  401: SESSION_EXPIRED,
   403: "Only Event Coordinators and the Event Coordinator Lead can hand an event over.",
   500: "The list of coordinators could not be loaded. Please try again.",
 };
@@ -69,7 +67,6 @@ const LOAD_ERROR_MESSAGES = {
 // The message says who may hand an event over, which is true for any caller.
 const REASSIGN_ERROR_MESSAGES = {
   400: "That person cannot take this event. They may no longer be an Event Coordinator, or they may already hold it. Choose someone else.",
-  401: SESSION_EXPIRED,
   403: "You cannot hand this event over. Only the coordinator who holds it, or the Event Coordinator Lead, can do that, and it may have been handed to someone else. Go back and reopen it to see who holds it now.",
   404: "This event no longer exists.",
   409: "This event cannot be handed over right now. Its status may not allow a handover, or it changed while you were looking at it. Go back and reopen it to see where it stands.",

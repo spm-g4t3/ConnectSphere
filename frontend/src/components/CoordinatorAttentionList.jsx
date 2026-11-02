@@ -17,12 +17,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { getNeedsAttention } from "../services/eventRequestService";
-import { SESSION_EXPIRED } from "../services/apiErrors";
 import { formatVenuePeriod } from "../services/datetimeFormat";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 
 const LOAD_ERROR_MESSAGES = {
-  401: SESSION_EXPIRED,
   403: "Only Event Coordinators have a Needs attention list.",
 };
 

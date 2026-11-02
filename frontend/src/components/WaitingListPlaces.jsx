@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { getWaitlist, leaveWaitlist } from "../services/attendeeEventService";
 import useOpenEventRead from "./useOpenEventRead";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
-import { SESSION_EXPIRED } from "../services/apiErrors";
 import { WaitlistedBadge } from "./OpenEventAvailability";
 import Button from "./ui/Button";
 import ConfirmDialog from "./ui/ConfirmDialog";
@@ -12,14 +11,12 @@ import LoadingText from "./ui/LoadingText";
 import useFocusAfterRetry from "./useFocusAfterRetry";
 
 const MESSAGES = {
-  401: SESSION_EXPIRED,
   403: "Only Attendees can view waiting lists.",
 };
 const FALLBACK = "Your waiting lists could not be loaded. Please try again.";
 
 function leaveFailureMessage(error) {
   const response = error?.response;
-  if (response?.status === 401) return SESSION_EXPIRED;
   if (response?.status === 404) return "This waiting-list place could not be found. It may already have been removed.";
   // Promoted while the request was on its way: the place is now a registration.
   if (response?.status === 409 && response.data?.code === "ALREADY_REGISTERED") {
@@ -143,7 +140,7 @@ export default function WaitingListPlaces({ onChanged }) {
         <p ref={noticeRef} tabIndex={-1} className="browse-event-details__success" role="status">{notice}</p>
       )}
       {loading && <LoadingText />}
-      {error && <ErrorNotice message={error} onRetry={error === SESSION_EXPIRED ? undefined : retry} />}
+      {error && <ErrorNotice message={error} onRetry={retry} />}
       {refreshFailed && (
         <div className="browse-open-events__notice" role="status">
           <p>Could not refresh your waiting lists. Showing them as last loaded.</p>

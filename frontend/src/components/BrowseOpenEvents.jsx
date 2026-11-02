@@ -8,7 +8,6 @@ import useOpenEventRead from "./useOpenEventRead";
 import OpenEventAvailability, { RegisteredBadge, WaitlistedBadge } from "./OpenEventAvailability";
 import { openEventDetailsPath } from "../services/openEventRoutes";
 import { EVENT_TIME_NOTE, formatEventWhen } from "../services/openEventDisplay";
-import { SESSION_EXPIRED } from "../services/apiErrors";
 import Button from "./ui/Button";
 import EmptyState from "./ui/EmptyState";
 import ErrorNotice from "./ui/ErrorNotice";
@@ -16,7 +15,6 @@ import LoadingText from "./ui/LoadingText";
 import useFocusAfterRetry from "./useFocusAfterRetry";
 
 const LIST_ERROR_MESSAGES = {
-  401: SESSION_EXPIRED,
   403: "Only Attendees can browse open events.",
   500: "Open events could not be loaded. Please try again.",
   503: REGISTRATION_UNAVAILABLE_MESSAGE,
@@ -65,7 +63,7 @@ export default function BrowseOpenEvents() {
         {error && (
           <ErrorNotice
             message={error}
-            onRetry={error === SESSION_EXPIRED ? undefined : retry}
+            onRetry={retry}
           />
         )}
 
