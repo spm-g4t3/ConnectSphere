@@ -57,28 +57,32 @@ export default function CoordinatorWorkloadTable({ coordinators, statuses, loadi
     );
   }
 
+  // Wider than a phone, so it scrolls inside its own box. Focusable and named,
+  // so keyboard users can scroll it with the arrow keys.
   return (
-    <table className="coordinator-workload">
-      <thead>
-        <tr>
-          <th scope="col">Coordinator</th>
-          <th scope="col">Active events</th>
-          {statuses.map(({ status, label }) => (
-            <th key={status} scope="col">{label}</th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {coordinators.map((coordinator) => (
-          <tr key={coordinator.id}>
-            <th scope="row">{coordinator.fullName ?? "No name on record"}</th>
-            <td>{coordinator.activeEvents}</td>
-            {statuses.map(({ status }) => (
-              <td key={status}>{coordinator.byStatus[status] ?? 0}</td>
+    <div className="coordinator-workload__scroll" tabIndex={0} role="region" aria-label="Coordinators' workload">
+      <table className="coordinator-workload">
+        <thead>
+          <tr>
+            <th scope="col">Coordinator</th>
+            <th scope="col">Active events</th>
+            {statuses.map(({ status, label }) => (
+              <th key={status} scope="col">{label}</th>
             ))}
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {coordinators.map((coordinator) => (
+            <tr key={coordinator.id}>
+              <th scope="row">{coordinator.fullName ?? "No name on record"}</th>
+              <td>{coordinator.activeEvents}</td>
+              {statuses.map(({ status }) => (
+                <td key={status}>{coordinator.byStatus[status] ?? 0}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }

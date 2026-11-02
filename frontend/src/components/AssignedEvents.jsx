@@ -63,6 +63,7 @@ import EmptyState from "./ui/EmptyState";
 import ErrorNotice from "./ui/ErrorNotice";
 import LoadingText from "./ui/LoadingText";
 import StatusBadge from "./ui/StatusBadge";
+import useFocusAfterRetry from "./useFocusAfterRetry";
 
 // 403 has its own words, as in UnassignedQueue: it means the account is not a
 // Lead, an administration problem, not a breakage.
@@ -110,11 +111,17 @@ export default function AssignedEvents() {
   }, [loadOverview]);
 
   // Loading starts true, so only a retry needs to raise it.
-  function retryOverview() {
+  function reloadOverview() {
     setOverviewLoading(true);
     setOverviewError(null);
-    loadOverview();
+    return loadOverview();
   }
+  // Each Try again goes away as its read starts, so focus moves to the heading
+  // of its section instead of falling to the page body.
+  const { headingRef: coordinatorsHeadingRef, retry: retryOverview } = useFocusAfterRetry(reloadOverview);
+  const { headingRef: eventsHeadingRef, retry: retryList } = useFocusAfterRetry(
+    useCallback(() => setListAttempt((attempt) => attempt + 1), []),
+  );
 
   // Read again on every change of filters. A change made while a read is in
   // flight starts another, and the two can answer in either order, so each
@@ -165,7 +172,7 @@ export default function AssignedEvents() {
       <UnassignedCount />
 
       {/* SCRUM-487 AC2 (SCRUM-544). */}
-      <h2>Coordinators</h2>
+      <h2 ref={coordinatorsHeadingRef} tabIndex={-1}>Coordinators</h2>
       <CoordinatorWorkloadTable
         coordinators={coordinators}
         statuses={activeStatuses}
@@ -175,7 +182,7 @@ export default function AssignedEvents() {
       />
 
       {/* SCRUM-487 AC3 (SCRUM-544). */}
-      <h2>Events</h2>
+      <h2 ref={eventsHeadingRef} tabIndex={-1}>Events</h2>
       <AssignedEventsFilters
         coordinators={coordinators}
         statuses={statuses}
@@ -187,7 +194,7 @@ export default function AssignedEvents() {
       {error && (
         <ErrorNotice
           message={error.message}
-          onRetry={error.retryable ? () => setListAttempt((attempt) => attempt + 1) : undefined}
+          onRetry={error.retryable ? retryList : undefined}
         />
       )}
       {/* Nothing held is said, never left as an empty card that could be

@@ -21,6 +21,7 @@ import { canRetryRead } from "../services/apiErrors";
 import { listUnassignedEventRequests } from "../services/eventRequestService";
 import Button from "./ui/Button";
 import LoadingText from "./ui/LoadingText";
+import useFocusAfterRetry from "./useFocusAfterRetry";
 
 function describeCount(count) {
   if (count === 0) return "No requests are waiting for a coordinator.";
@@ -46,13 +47,15 @@ export default function UnassignedCount() {
     load();
   }, [load]);
 
-  function retry() {
+  function reload() {
     setError(null);
-    load();
+    return load();
   }
+  // No heading of its own, so after Try again focus goes to this line's box.
+  const { headingRef, retry } = useFocusAfterRetry(reload);
 
   return (
-    <div className="assigned-events__unassigned">
+    <div className="assigned-events__unassigned" ref={headingRef} tabIndex={-1}>
       {error && (
         <>
           <p role="status">The number of waiting requests could not be loaded.</p>

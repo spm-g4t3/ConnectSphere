@@ -33,7 +33,9 @@ import EmptyState from "./ui/EmptyState";
 import ErrorNotice from "./ui/ErrorNotice";
 import LoadingText from "./ui/LoadingText";
 import UnassignedRequestCancelPanel from "./UnassignedRequestCancelPanel";
+import useFocusAfterRetry from "./useFocusAfterRetry";
 import useListRead from "./useListRead";
+import useReturnFocus from "./useReturnFocus";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 
 // 403 has its own words, as in ReviewQueue: it means the account is not a
@@ -42,6 +44,10 @@ const QUEUE_ERROR_MESSAGES = {
   403: "Only the Event Coordinator Lead can see the unassigned queue.",
   500: "The unassigned queue could not be loaded.",
 };
+
+function openerKey(panel) {
+  return `${panel.kind}:${panel.request.id}`;
+}
 
 /**
  * @param {object} props
@@ -72,10 +78,20 @@ export default function UnassignedQueue({ now = () => new Date(), asPage = false
   // requests arrive, and other Leads assign them, while nobody is looking.
   useRefetchOnReturn(fetchQueue);
 
+  // Keyed by "assign:id" or "cancel:id", so focus goes back to the button that
+  // opened the panel, or to the title once that row has left the list.
+  const { listHeadingRef, rowRef, returnFocusTo } = useReturnFocus(panel && openerKey(panel), loading);
+  const { headingRef: retryHeadingRef, retry } = useFocusAfterRetry(fetchQueue);
+  function titleRef(node) {
+    listHeadingRef.current = node;
+    retryHeadingRef.current = node;
+  }
+
   // Back to the list, re-read either way. After an assignment the row has
   // gone; after a cancel the list may still be stale, and after a lost race
   // (AC4) the row the Lead was looking at belongs to someone else now.
   function closePanel(message = null) {
+    returnFocusTo(openerKey(panel));
     setPanel(null);
     setConfirmation(message);
     fetchQueue();
@@ -115,7 +131,7 @@ export default function UnassignedQueue({ now = () => new Date(), asPage = false
   return (
     <section className="unassigned-queue">
       {/* Counted only after a read succeeds, so a loading or failed list is never counted. */}
-      <Title>
+      <Title ref={titleRef} tabIndex={-1}>
         Unassigned queue
         {!loading && !error && (
           <>
@@ -132,7 +148,7 @@ export default function UnassignedQueue({ now = () => new Date(), asPage = false
       )}
       {loading && <LoadingText />}
       {/* Hidden while a read is in flight, so Try again cannot start a second one. */}
-      {error && !loading && <ErrorNotice message={error} onRetry={retryable ? fetchQueue : undefined} />}
+      {error && !loading && <ErrorNotice message={error} onRetry={retryable ? retry : undefined} />}
       {/* AC2-08. Nothing waiting is the good state, and it is said, never
           left as an empty card that could be mistaken for a failed load. */}
       {!loading && !error && queue.length === 0 && (
@@ -155,6 +171,7 @@ export default function UnassignedQueue({ now = () => new Date(), asPage = false
             </div>
             <div className="unassigned-queue__actions">
               <Button
+                ref={rowRef(`assign:${request.id}`)}
                 aria-label={`Assign ${request.eventName}`}
                 onClick={() => {
                   setConfirmation(null);
@@ -164,6 +181,7 @@ export default function UnassignedQueue({ now = () => new Date(), asPage = false
                 Assign
               </Button>
               <Button
+                ref={rowRef(`cancel:${request.id}`)}
                 variant="danger"
                 aria-label={`Cancel ${request.eventName}`}
                 onClick={() => {

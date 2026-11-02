@@ -33,6 +33,7 @@ import Button from "./ui/Button";
 import EmptyState from "./ui/EmptyState";
 import ErrorNotice from "./ui/ErrorNotice";
 import LoadingText from "./ui/LoadingText";
+import useFocusAfterRetry from "./useFocusAfterRetry";
 
 const LOAD_ERROR_MESSAGES = {
   403: "Only the Event Coordinator Lead can assign event requests.",
@@ -114,11 +115,17 @@ export default function AssignCoordinatorPanel({ request, onCancel, onAssigned }
   }, [loadCoordinators]);
 
   // Loading starts true, so only a retry needs to raise it.
-  function retryLoad() {
+  function reloadCoordinators() {
     setLoading(true);
     setLoadError(null);
-    loadCoordinators();
+    return loadCoordinators();
   }
+  const { headingRef, retry: retryLoad } = useFocusAfterRetry(reloadCoordinators);
+
+  // The button that opened this panel has gone, so focus starts on its title.
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, [headingRef]);
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -144,7 +151,7 @@ export default function AssignCoordinatorPanel({ request, onCancel, onAssigned }
 
   return (
     <div className="assign-coordinator">
-      <h2>Assign {request.eventName}</h2>
+      <h2 ref={headingRef} tabIndex={-1}>Assign {request.eventName}</h2>
       <p>
         The coordinator you choose becomes responsible for this request and is
         told it is theirs. The Organiser is told who their coordinator is.

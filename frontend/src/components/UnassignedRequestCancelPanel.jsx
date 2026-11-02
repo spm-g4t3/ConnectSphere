@@ -6,7 +6,7 @@
 // has no attendees to tell. The server's cancel_event_request (013) decides
 // whether the Lead may cancel it, under the row lock.
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cancelEventRequest, getEventCancellationImpact } from "../services/eventRequestService";
 import { statusMessageOf } from "../services/apiErrors";
 import { CancellationImpact } from "./EventCancellationPanel";
@@ -38,6 +38,12 @@ export default function UnassignedRequestCancelPanel({ request, onCancelled }) {
   const [loadingImpact, setLoadingImpact] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState(null);
+  const headingRef = useRef(null);
+
+  // The button that opened this panel has gone, so focus starts on its title.
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, []);
 
   // A preview is of the inputs it was asked with, so a change discards it.
   function invalidatePreview(update) {
@@ -80,7 +86,7 @@ export default function UnassignedRequestCancelPanel({ request, onCancelled }) {
 
   return (
     <div className="assign-coordinator unassigned-cancel">
-      <h2>Cancel {request.eventName}</h2>
+      <h2 ref={headingRef} tabIndex={-1}>Cancel {request.eventName}</h2>
       <p>
         This request has no coordinator yet. The Organiser will be told it was
         cancelled, with your reason. Cancelling is final.

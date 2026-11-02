@@ -32,6 +32,7 @@ import Button from "./ui/Button";
 import EmptyState from "./ui/EmptyState";
 import ErrorNotice from "./ui/ErrorNotice";
 import LoadingText from "./ui/LoadingText";
+import useFocusAfterRetry from "./useFocusAfterRetry";
 
 // 403 reworded in SCRUM-521. It said "Only Event Coordinators can hand an
 // event over", which has been false since 052 let the Lead hand over too.
@@ -141,11 +142,12 @@ export default function ReassignEventPanel({
   }, [loadCoordinators]);
 
   // Loading starts true, so only a retry needs to raise it.
-  function retryLoad() {
+  function reloadCoordinators() {
     setLoading(true);
     setLoadError(null);
-    loadCoordinators();
+    return loadCoordinators();
   }
+  const { headingRef, retry: retryLoad } = useFocusAfterRetry(reloadCoordinators);
 
   // Whoever holds the event is left out: handing an event to its current
   // holder is refused by the server (23514, a confusing 400). Done here and
@@ -194,7 +196,7 @@ export default function ReassignEventPanel({
           this codebase, and two stacked back buttons read as a bug. Going
           back to the event, rather than out to the list, is the form's Cancel
           button, and the Cancel below the messages when there is no form. */}
-      <h2>Hand over {request.eventName}</h2>
+      <h2 ref={headingRef} tabIndex={-1}>Hand over {request.eventName}</h2>
       {/* SCRUM-327 AC7, said before the caller commits: after this the
           coordinator handing it over can still read the event, and can no
           longer change it. Said to the holder as "you"; a Lead never could

@@ -50,6 +50,7 @@ import { formatDateTime } from "../services/displayFormat";
 import EmptyState from "./ui/EmptyState";
 import ErrorNotice from "./ui/ErrorNotice";
 import LoadingText from "./ui/LoadingText";
+import useFocusAfterRetry from "./useFocusAfterRetry";
 
 const FETCH_BY_VIEW = {
   coordinator: getAssignmentHistoryForReview,
@@ -185,17 +186,20 @@ export default function AssignmentHistory({ eventRequestId, view, currentCoordin
   }, [loadHistory]);
 
   // Loading starts true, so only a retry needs to raise it.
-  function retryHistory() {
+  function reloadHistory() {
     setLoading(true);
     setError(null);
-    loadHistory();
+    return loadHistory();
   }
+  // No heading shows while loading or failed, so after Try again focus goes to
+  // the history's own box rather than the page body.
+  const { headingRef, retry: retryHistory } = useFocusAfterRetry(reloadHistory);
 
-  if (loading) return <div className="assignment-history"><LoadingText /></div>;
+  if (loading) return <div className="assignment-history" ref={headingRef} tabIndex={-1}><LoadingText /></div>;
 
   if (error) {
     return (
-      <div className="assignment-history">
+      <div className="assignment-history" ref={headingRef} tabIndex={-1}>
         <ErrorNotice message={error.message} onRetry={error.retryable ? retryHistory : undefined} />
       </div>
     );
@@ -212,7 +216,7 @@ export default function AssignmentHistory({ eventRequestId, view, currentCoordin
   const currentName = [...entries].reverse().find((entry) => entry.newCoordinatorId === currentId)?.newCoordinatorName ?? null;
 
   return (
-    <div className="assignment-history">
+    <div className="assignment-history" ref={headingRef} tabIndex={-1}>
       <p className="assignment-history__current">
         <span className="assignment-history__label">Current coordinator</span>{" "}
         {currentId
