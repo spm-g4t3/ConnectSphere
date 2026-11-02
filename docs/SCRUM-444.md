@@ -95,13 +95,14 @@ events, and after a handover the event is no longer his.
 | Gates | Every frontend gate at 100%, `SCRUM486_FILES` (`frontend/vite.config.js:121`, with `EventRequestReviewPage.jsx`) and `SCRUM487_FILES` (`:134`) among them; the backend's per-story thresholds met |
 | PGlite | `scrum444AccessMatrixDatabase.test.js`, 73 tests, on the full schema (`createSchemaDb()`: the baseline, then every migration to 056). Statuses are reached through the real workflow functions; only a Confirmed event that has ended is seeded. The renamed PGlite cases sit in five more files (section 5) |
 | Live database | Before 055, `reassign_event_request` had one overload and the holder-or-Lead message: `1 \| true` (checked 1 November 2026). Before 056, `request_event_clarification_with_fields` had one overload and no caller check: `1 \| true`. 055 and 056 applied by Calven; each check returned `true`. No live script was run by us |
-| Test-case document | 50 cases: **49 proved** and one recorded (AC2-09: no code to guard); 0 not yet implemented, 0 that cannot be written as specified. 12 are traps; 5 cases are on the screen |
+| Test-case document | 51 cases: **50 proved** and one recorded (AC2-09: no code to guard); 0 not yet implemented, 0 that cannot be written as specified. 12 are traps; 6 cases are on the screen |
 | Review on #107 (Rae, 2 November 2026) | One scoped reader for every coordinator read (D7), `/:id/cancellation-impact` among them; the Lead's 404 wording; the headers and stale comments trimmed. Backend 10,320 passing, 17 skipped and 2 todo across 249 files, 2 skipped. Frontend 5,012 passing of 5,013 across 213 files, twice, the one failure a different known flake each time (`ClarificationHistoryDialog`'s dialog test, then `SCRUM583_AC1_no_screen_adds_its_own_expiry_wording`), each passing 3 of 3 alone. Every gate met; `npm run lint` 0 errors and 25 warnings; `npm run build` passes. Three teeth checks, below |
+| Review on #107 (Suan Loong, 2 November 2026) | D6 states the rule once and lists the three reads that still answer 403 (venue suitability corrected: its refusal is in the service, not SQL); D11, the Lead's access, with `SCRUM444_AC1_the_lead_sees_the_event_but_not_its_working_lists`; the closing-notes comment; `check-coordinator-assignment.js` brought to the new rule; the twelve stale `listCoordinators` mocks removed; the queue's docstring trimmed. Backend 10,320 passing, 17 skipped and 2 todo across 249 files (no new backend test). Frontend 5,013 passing of 5,014 across 213 files, the one failure the known `SCRUM583_AC1_no_screen_adds_its_own_expiry_wording` flake ("Target cannot be null or undefined"), passing 3 of 3 alone. Every gate met; `npm run lint` 0 errors and 25 warnings; `npm run build` passes. `node --check` passes on the script; it was not run against live. One teeth check, below |
 | Click-through | Passed in full, as reported by Calven on 2 November 2026, with two coordinators and the Lead: the other coordinator gets "isn't available"; only the Lead hands over; the previous holder loses access; the new holder asks for clarification; the Organiser and the Lead are unaffected |
 
 **Teeth checks**: each guard was broken in memory, the tests run, and the file
 restored from the in-memory copy and compared byte for byte (never `git checkout`).
-15 in all: 6 in brief 1, 2 in its fix-up, 4 in brief 2, 3 in review on #107. The counts are the
+16 in all: 6 in brief 1, 2 in its fix-up, 4 in brief 2, 3 in Rae's review on #107, 1 in Suan Loong's. The counts are the
 `SCRUM444_` tests that failed, as each round's report gave them.
 
 | AC | What was broken | What failed | Round |
@@ -121,6 +122,7 @@ restored from the in-memory copy and compared byte for byte (never `git checkout
 | AC1 | The reader skipping `assertCoordinatorMayRead` (`eventRequestService.js:1928`) | 14: every non-holder and previous-holder read, the id as typed, cancellation-impact, the closing notes, and the guard | Review on #107 |
 | AC1 | `/:id/cancellation-impact` back on the unscoped read (`eventRequests.js:663`) | 2: `SCRUM444_AC1_cancellation_impact_is_a_missing_ids_404_for_a_non_holder` and the guard, each reaching the function | Review on #107 |
 | AC1 | The Lead's 404 back to the coordinator's words (`EventRequestReviewPage.jsx:63`) | 1: `SCRUM444_AC1_the_leads_404_does_not_mention_a_handover` | Review on #107 |
+| AC1 (D11) | Venue suitability shown to the Lead (`isAssignedCoordinator \|\| isLead`, `CoordinatorRequestDetail.jsx:1055`) | 3: `SCRUM444_AC1_the_lead_sees_the_event_but_not_its_working_lists`, `SCRUM444_AC1_the_lead_does_not_see_venue_suitability`, `SCRUM444_AC3_after_the_lead_hands_over_no_hint_points_at_the_hidden_venue_suitability` | Suan Loong's review |
 
 The line numbers are today's; brief 1's checks ran before the fix-up moved some
 lines by a few.
@@ -131,7 +133,7 @@ lines by a few.
 
 | AC | Criterion (in substance) | Status |
 |---|---|---|
-| AC1 | A coordinator views only the events assigned to them, including their clarification history. The Lead views every event. | **Done** |
+| AC1 | A coordinator views only the events assigned to them, including their clarification history. The Lead views every event (D11: the event page; the working lists stay the holder's). | **Done** |
 | AC2 | Only the assigned coordinator starts review, requests clarification, approves or rejects, rejects an approved event, edits, applies a significant change, processes change requests, submits for the safety check, confirms, cancels, marks completed, releases a booking, and manages equipment lines, venue booking requests and on-site support assignments. | **Done**; on-site support has no code yet (AC2-09) |
 | AC3 | Only the Lead assigns and reassigns; a coordinator cannot reassign their own events. | **Done** |
 | AC4 | After a reassignment the previous coordinator can no longer view or act on the event. | **Done** |
@@ -198,7 +200,7 @@ they do not hold.
 
 ## 3. Design decisions
 
-D1 to D6 were decided with Calven on 1 November 2026; D7 to D10 are the briefs' (D7 revised on review of #107).
+D1 to D6 were decided with Calven on 1 November 2026; D7 to D10 are the briefs' (D7 revised on review of #107); D11 is from Suan Loong's review of #107.
 
 ### D1. A read by a non-holder is a 404 — **decided with Calven, 1 November 2026**
 
@@ -227,10 +229,28 @@ the holder's handover, which rows 16 and 18 reverse.
 Its only caller was the holder's picker; the Lead's reads `GET /coordinator-workload`
 (SCRUM-519). *Rejected: keeping a staff list* no screen reads.
 
-### D6. A non-holder's write keeps its 403 or 42501 — **decided with Calven, 1 November 2026**
+### D6. A read is a 404; a write or preview is a 403 — **decided with Calven, 1 November 2026**
 
-Only reads are 404. This is the split SCRUM-434 also chose. *Rejected: mapping 42501
-to 404 on writes*, which would rewrite other stories' answers and tests.
+A non-holder's read answers a missing id's 404, so it can't learn the event exists.
+A non-holder's write or preview answers 403, as it did before SCRUM-444, because the
+caller asked to change something, and every write's SQL already refuses with 42501.
+This is the split SCRUM-434 also chose. *Rejected: mapping 42501 to 404 on writes*,
+which would rewrite other stories' answers and tests.
+
+Three reads still answer a non-holder 403. Each was holder-only before SCRUM-444, in
+its own story, whose tests pin the 403; they are left as they are:
+
+| Read | Gate | Refused by | Pinned by |
+|---|---|---|---|
+| `GET /api/flagged-bookings/events/:eventRequestId` (`flaggedBookings.js:75`) | `coordinatorOnly` (`:52`) | `list_event_flagged_bookings`, 42501 (`baseline/04_venue_bookings.sql:2423–2426`) | SCRUM-266 (`SCRUM266_AC3_a_coordinator_not_assigned_to_the_event_is_403_from_the_function`) |
+| `GET /api/registration/events/:id/registrations` and `/counts` (`eventRegistration.js:45`, `:56`) | `organiserOrCoordinator` (`:30`) | `list_event_registrations`'s `forbidden` outcome (`040:37–39`), mapped to 403 (`registrationListService.js:25`); `event_registration_counts`, 42501 (`037:903–906`) | SCRUM-478 (`SCRUM478_AC1_maps_the_database_refusals_to_403_and_404`) |
+| `GET /api/event-requests/:id/venue-suitability` and `/bookings` (`venueSuitability.js:152`, `:158`) | `coordinatorOnly` (`:148`) | `assertCheckable`, a `ForbiddenError` in the service, not SQL (`venueSuitabilityService.js:405–410`, called at `:380` and `:661`) | SCRUM-188 (`SCRUM188_AC1_the_assigned_coordinator_rule_is_403`, `SCRUM188_AC6_the_assigned_coordinator_rule_is_403`) |
+
+The first two refuse inside their own SQL functions, so a 404 would mean restating
+them, and 055 and 056 are the only functions SCRUM-444 restates. Venue suitability
+refuses in JavaScript, so its 404 needs no SQL; it is left for the same reason as the
+others: SCRUM-188 decided its 403. The Lead reaches none of the three: each gate
+refuses the Lead first (D11).
 
 ### D7. One scoped reader for every coordinator read; the unscoped read is for writes
 
@@ -266,13 +286,26 @@ id's does; the stored lowercase id would give the event away.
 where Postgres's 22P02 used to arrive as a 500. `GET /coordinators`, removed, now
 falls through to `GET /:id` and is this 400.
 
+### D11. The Lead's access: the event page, not its working lists
+
+The Lead opens every event page, with its details, status, decisions, changes,
+clarifications and handovers: everything needed to allocate (row 16: "access to all
+the unassigned/assigned event for allocation"). The event's working lists
+(registrations, flagged bookings, venue bookings, venue suitability) stay the
+holder's, as they were before SCRUM-444. *Rejected: opening those lists to the Lead*,
+which restates `list_event_registrations` and `list_event_flagged_bookings` for
+access that row 16 doesn't ask for. SCRUM-539 D3 reads row 16 the same way: the Lead's access is for allocation, so the Lead stays out of a held event's work. Raised in review on
+#107 (Suan Loong, 2 November 2026). Proved by
+`SCRUM444_AC1_the_lead_sees_the_event_but_not_its_working_lists`.
+
 ---
 
 ## 4. Known gaps and accepted answers
 
 | Gap | Detail | Owner |
 |---|---|---|
-| 403 on a write, 404 on a read | D6: a write by a non-holder confirms the id exists. The reads that already allowed only the holder (registrations, flagged bookings, venue suitability) answer 403 or 42501 too | Accepted (D6) |
+| 403 on a write, 404 on a read | D6: a write by a non-holder confirms the id exists. The reads that already allowed only the holder (registrations, flagged bookings, venue suitability; listed in D6) answer 403 or 42501 too | Accepted (D6) |
+| A stale comment in live SQL | 040's comment inside `list_event_registrations` (`040:31–32`, "coordinators already see every event") is stale since SCRUM-444. It is stored on live, so it stays until a restate | Whoever next restates it |
 | Answers that changed | `GET /:id/change-requests/review` reads the event first, so a missing id is a 404 where it was `200 []`; the equipment read's missing-id message is now `Event request <id> not found`, where it was `Event request not found`; a draft's equipment is a 404 where any coordinator could read it; `GET /:id` and the other reads answer a malformed id 400 where it was a 500; since review on #107, `GET /:id/cancellation-impact` answers a non-holder coordinator 404 where it was the function's 403, and `/change-requests/review` and the equipment read answer a malformed id with the shared message and field | Accepted |
 | A flaky frontend test | `SCRUM583_AC1_no_screen_adds_its_own_expiry_wording` failed once in a full run ("Target cannot be null or undefined") and passed alone; 3 of 3 passed in brief 2. It touches no 444 code | SCRUM-583 |
 | The handover panel's words | Brief 2 changed `ReassignEventPanel.jsx`'s intro and 403 messages, which SCRUM-586 is aligning to the UI standard. Tell Terence | SCRUM-586 |
@@ -326,6 +359,10 @@ falls through to `GET /:id` and is this 400.
   the clarification request, is 056. Evidence:
   `SCRUM444_AC2_another_coordinator_cannot_%s_and_nothing_changes` and
   `SCRUM444_AC2_the_holder_can_%s_from_the_same_state`.
+- **Be ready for "can the Lead see the registrations?"** No: D11. The Lead opens
+  every event page, everything needed to allocate (row 16), but the registrations,
+  flagged bookings, venue bookings and venue suitability stay the holder's, as before
+  SCRUM-444. Evidence: `SCRUM444_AC1_the_lead_sees_the_event_but_not_its_working_lists`.
 - **Be ready for "why did you change other people's tests?"** Scenario 2: the
   customer changed the rule, so the old tests were tests of the old rule. Each was
   renamed `SCRUM444_…` and flipped, never loosened, and listed old → new.

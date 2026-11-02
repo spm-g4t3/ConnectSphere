@@ -54,13 +54,12 @@ import {
   getEventClarificationHistory,
   getEventDecisionHistory,
   listCoordinatorWorkload,
-  listCoordinators,
   reassignEventRequest,
   requestEventClarification,
   startEventReview,
 } from "../../src/services/eventRequestService";
 import { findVenuesForEvent } from "../../src/services/venueService";
-import { createBookingRequest } from "../../src/services/bookingRequestService";
+import { createBookingRequest, getMyBookingRequests } from "../../src/services/bookingRequestService";
 import { getEventVenueSuitability } from "../../src/services/venueSuitabilityService";
 import { cancelFlaggedBooking, getEventFlaggedBookings } from "../../src/services/flaggedBookingService";
 import { httpError } from "../helpers/async.js";
@@ -81,7 +80,6 @@ vi.mock("../../src/services/eventRequestService", () => ({
   getCoordinatorChangeRequests: vi.fn(),
   getEventCancellationImpact: vi.fn(),
   getEventClarificationHistory: vi.fn(),
-  listCoordinators: vi.fn(),
   // SCRUM-521: the handover panel reads this one when the caller is a Lead.
   listCoordinatorWorkload: vi.fn(),
   processCoordinatorChangeRequest: vi.fn(),
@@ -98,6 +96,9 @@ vi.mock("../../src/services/venueService", () => ({
 
 vi.mock("../../src/services/bookingRequestService", () => ({
   createBookingRequest: vi.fn(),
+  // SCRUM-492: "Venue bookings" reads the holder's requests on an Approved event.
+  getMyBookingRequests: vi.fn(() => Promise.resolve([])),
+  releaseVenueBooking: vi.fn(),
 }));
 
 // SCRUM-192: "Venue suitability" rechecks the event's venues when it mounts,
@@ -946,7 +947,6 @@ describe("SCRUM486_AC6 the hand-over action on the event screen", () => {
   }
 
   beforeEach(() => {
-    vi.mocked(listCoordinators).mockReset();
     vi.mocked(listCoordinatorWorkload).mockReset();
     vi.mocked(reassignEventRequest).mockReset();
   });
@@ -1015,7 +1015,7 @@ describe("SCRUM486_AC6 the hand-over action on the event screen", () => {
     const notice = await screen.findByRole("status");
     expect(notice).toHaveTextContent("Handed over to Omar Okafor.");
     expect(notice).not.toHaveTextContent(/not change it/);
-    expect(listCoordinators).not.toHaveBeenCalled();
+    expect(listCoordinatorWorkload).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("button", { name: HAND_OVER })).toBeInTheDocument();
   });
 
@@ -1638,5 +1638,53 @@ describe("SCRUM-478 link to the registration list", () => {
   it("SCRUM478_AC6_offers_no_link_while_the_event_is_under_review", () => {
     renderAs(ASSIGNED, eventRequest({ status: "under_review" }));
     expect(screen.queryByRole("link", { name: "View registrations" })).not.toBeInTheDocument();
+  });
+});
+
+describe("SCRUM-444 D11: the Lead's view of an event", () => {
+  const approved = () => eventRequest({
+    status: "approved",
+    decision: "approved",
+    decidedBy: ASSIGNED,
+    decidedAt: past(),
+    statusDisplay: { status: "approved", label: "Planning", group: "PLANNING", description: "" },
+  });
+  const workingLists = () => ({
+    registrations: screen.queryByRole("link", { name: "View registrations" }),
+    flaggedBookings: screen.queryByRole("heading", { name: "Flagged bookings" }),
+    venueBookings: screen.queryByRole("heading", { name: "Venue bookings" }),
+    venueSuitability: screen.queryByRole("heading", { name: "Venue suitability" }),
+  });
+
+  it("SCRUM444_AC1_the_lead_sees_the_event_but_not_its_working_lists", async () => {
+    // D11: the event page is the Lead's for allocating (row 16); the working
+    // lists stay the holder's. The holder sees all four on the same event first,
+    // so their absence for the Lead is the role, not the state.
+    vi.mocked(getEventFlaggedBookings).mockResolvedValue([{
+      id: "f1", eventRequestId: REQUEST_ID, venueId: "v5", venueName: "Old Hall", venueLocation: "Level 5",
+      startsAt: START_ISO, endsAt: END_ISO, flaggedAt: "2026-11-01T10:00:00+08:00",
+      reviewReason: "safety_review", block: null, replacementRequests: [],
+    }]);
+    vi.mocked(getMyBookingRequests).mockResolvedValue([{
+      id: "b1", eventRequestId: REQUEST_ID, status: "approved", venueName: "Hall A",
+      startsAt: START_ISO, endsAt: END_ISO,
+    }]);
+    const holder = renderAs(ASSIGNED, approved());
+    await screen.findByRole("heading", { name: "Flagged bookings" });
+    await screen.findByRole("heading", { name: "Venue bookings" });
+    expect(Object.values(workingLists()).every(Boolean)).toBe(true);
+    holder.unmount();
+    vi.mocked(getEventFlaggedBookings).mockClear();
+    vi.mocked(getMyBookingRequests).mockClear();
+    vi.mocked(getEventVenueSuitability).mockClear();
+
+    renderAsLead(approved());
+
+    expect(screen.getByRole("heading", { level: 2, name: /IS212 Industry Night/ })).toBeInTheDocument();
+    await waitFor(() => expect(getCoordinatorChangeRequests).toHaveBeenCalled());
+    expect(workingLists()).toEqual({ registrations: null, flaggedBookings: null, venueBookings: null, venueSuitability: null });
+    expect(getEventFlaggedBookings).not.toHaveBeenCalled();
+    expect(getMyBookingRequests).not.toHaveBeenCalled();
+    expect(getEventVenueSuitability).not.toHaveBeenCalled();
   });
 });

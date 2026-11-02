@@ -1979,44 +1979,9 @@ export async function getEventDecisionHistory(id, userId, role, { client } = {})
 }
 
 /**
- * The caller's event requests awaiting a decision, oldest waiting first.
- *
- * Only the events the caller holds, across Organisers: a coordinator reads
- * their own events, and one nobody holds is the Lead's. Which statuses count is
- * COORDINATOR_QUEUE_STATUSES's to decide.
- *
- * Four choices worth defending:
- *
- *  - The same COLUMNS every other read uses, so a queue row is byte-identical
- *    in shape to the row GET /:id returns. That is what lets the Coordinator UI
- *    render a full detail panel from a row it already holds instead of paying
- *    for a second route.
- *
- *  - submitted_at ASC -- oldest waiting first. updated_at DESC, which the
- *    organiser list uses above, would be actively wrong here: it is maintained
- *    by a trigger, so a Coordinator merely touching a request would bounce it
- *    back to the top of their own queue and bury whatever has actually been
- *    waiting longest.
- *
- *  - nullsFirst: false is mandatory, not a default spelled out. 005's check
- *    constrains submitted_at on drafts only, so a non-draft row may legitimately
- *    carry a null one, and Postgres sorts nulls first on ASC. "No recorded
- *    submission time" must go to the back rather than jump a queue ordered by
- *    how long people have waited.
- *
- *  - The id tiebreak is the same one listEventRequestsForOrganiser gives its
- *    own reason for: a bulk update writes a single now() across many rows, and
- *    an undefined tiebreak lets two refetches of identical data come back in
- *    different orders.
- *
- * No join to profiles, so organiser_id comes back as a bare uuid with no name
- * attached, the established answer on this codebase (venueService's changedBy
- * and eventRequestId do the same). Render it as an identifier. "My events"
- * (listEventRequestsForCoordinator, below) reads the names.
- *
- * Unpaginated, like every other list in this API. Bounded in practice by the
- * status filter -- a decided request drops out -- but say it rather than
- * discover it.
+ * The caller's events awaiting a decision, oldest waiting first: a coordinator
+ * reads only the events they hold. submitted_at, nulls last, then id, so that
+ * touching a row never reorders the queue.
  *
  * @param {string} coordinatorId  the caller, from the JWT -- never the query string
  * @param {object} [options]

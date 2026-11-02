@@ -6,6 +6,7 @@
 **Written:** 2 November 2026, before the tests and the code.
 **Marked:** 2 November 2026, brief 2: the screens (AC3-07, AC4-06, AC4-07, AC1-16), the id check on the remaining reads (AC1-15), and 056 (AC2-10, AC2-11), which makes AC2-01's clarification request 42501. All proved.
 **Marked:** 2 November 2026, round 2: AC1-13 (GET /:id refuses a malformed id with 400) and AC1-14 (a non-holder's 404 echoes the id as typed); AC3-06 now a 400. Both proved.
+**Marked:** 2 November 2026, review on #107 (Suan Loong): AC1-21 (the Lead's view, D11). Proved.
 **Marked:** 2 November 2026, review on #107 (Rae): AC1-17 to AC1-20 (the scoped reader's guard, cancellation-impact, confirmed-arrangements, the Lead's 404 wording); AC1-15 widened to thirteen reads. All proved.
 **Marked:** 2 November 2026: every case proved, and AC2-09 recorded (no code to guard). AC2-01's clarification request is 40001 in SQL, not 42501 (see the row); the Changed by design table lists every test of the old rule.
 
@@ -117,6 +118,7 @@ notification, compared before and after (AC6).
 | AC1-18 | Through the API | The Organiser reads `GET /:id/confirmed-arrangements` with a malformed id | 400, `[{ field: 'id', message: 'must be a valid id' }]`, no query: its service refuses it, so the route needs no check | (route) `SCRUM444_AC1_confirmed_arrangements_refuses_a_malformed_id_with_400` |
 | AC1-19 **(trap)** | An event held by someone else | Every GET route on the event-request and equipment routers gated `coordinatorOnly` or `coordinatorOrLead` with `:id` in its path, found by walking the router stacks, as another coordinator | 404, a missing id's body, with only the event read queried. Covers `/:id/equipment/`, `/:id/change-requests/review`, `/:id/review`, `/:id/cancellation-impact`, `/:id/assignments/review`, `/:id/readiness`; a route added later is checked without being listed. Excluded: `/queue`, `/mine`, `/needs-attention` (no `:id`; the caller's own events) and `/change-requests/:changeRequestId/preview` (a change request's id; 036 refuses a non-holder as the decision does) | (route) `SCRUM444_AC1_every_coordinator_read_route_uses_the_scoped_reader` |
 | AC1-20 **(UI)** | `/event-requests/:id` | The Lead's load answers 404; then 500 | "This event request doesn't exist or hasn't been submitted yet.", with no mention of a handover: the Lead reads every event, so their 404 is a draft or a missing id. Keyed on the role from the auth context and the status, never the server's text. Other statuses read as before; the coordinator's 404 is unchanged (AC4-06) | (UI) `SCRUM444_AC1_the_leads_404_does_not_mention_a_handover`, `SCRUM444_AC1_the_leads_other_load_errors_read_as_before` |
+| AC1-21 **(UI)** | An Approved event held by someone else, with a flagged booking and an approved venue booking | The holder opens the event screen, then the Lead does | The holder sees all four working lists: the "View registrations" link, Flagged bookings, Venue bookings and Venue suitability. The Lead sees the event, and none of the four, and none of their reads is made (D11) | (UI) `SCRUM444_AC1_the_lead_sees_the_event_but_not_its_working_lists` |
 
 ### AC2 — only the assigned coordinator acts
 
@@ -280,16 +282,16 @@ service tests of `listCoordinators` (`eventRequestService.test.js`), five
 
 ## Tally
 
-50 cases, counted from the tables: **49 proved** and one recorded (AC2-09: there
+51 cases, counted from the tables: **50 proved** and one recorded (AC2-09: there
 is nothing to guard); 0 not yet implemented; 0 that cannot be written as
-specified. Twelve are traps; five cases are on the screen.
+specified. Twelve are traps; six cases are on the screen.
 
 | Section | Cases |
 |---|---|
-| AC1 | 20 |
+| AC1 | 21 |
 | AC2 | 11 |
 | AC3 | 7 |
 | AC4 | 7 |
 | AC5 | 3 |
 | AC6 | 2 |
-| **Total** | **50** |
+| **Total** | **51** |

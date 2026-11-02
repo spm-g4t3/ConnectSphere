@@ -16,25 +16,26 @@
  *      Now: submission assigns nobody. The
  *      request is submitted with no coordinator and no assignment-history row,
  *      every Lead is told it is waiting, it is in the Lead's queue, and it is
- *      not in the coordinators' shared queue.
+ *      in no coordinator's queue.
  *   2. Was: assign on submission (016) -- one coordinator, one history row,
  *      assigned_by null for "the system". Now: the Lead assigns
  *      (assign_event_request, 052) -- one coordinator, one history row whose
  *      assigned_by is the Lead, the coordinator and the Organiser told; every
  *      refusal by its code, a second assignment told who won, and the request
- *      out of the Lead's queue and into the shared one. And the real AC4 race:
+ *      out of the Lead's queue and into its coordinator's. And the real AC4 race:
  *      two Leads assigning at once, on separate connections, which no test
  *      suite here can do.
  *   3. Was: 017's constraint refused a submitted event with no coordinator.
  *      Now: 052's relaxed constraint allows exactly that and still refuses any
  *      later status without one.
- *   4. Reassignment: a holder's handover, unchanged, and beside it the Lead's
- *      (AC6): a Lead who does not hold the event moves it, the history names
- *      the Lead, and the coordinator it was taken from is refused after. An
- *      unassigned request is refused as "assign, not reassign".
- *   5. Permissions: only the holder acts; any coordinator reads. Unchanged.
+ *   4. Reassignment is the Lead's alone (055, SCRUM-444): the holder is
+ *      refused, the Lead hands the event over twice, the history names the
+ *      Lead each time, and the coordinator it was taken from is refused after.
+ *      An unassigned request is refused as "assign, not reassign".
+ *   5. Permissions: only the holder acts; only the holder and the Lead read;
+ *      a non-holder coordinator's read is a missing id's 404.
  *   6. The reads: "My events", the history (old automatic rows and new Lead
- *      rows side by side, AC9-03), and both coordinator lists.
+ *      rows side by side, AC9-03), and the Lead's coordinator list.
  *
  * It creates its own users: an Organiser, an Event Coordinator Lead, three
  * coordinators, and a Venue Staff member used as someone who may not be
@@ -93,12 +94,11 @@ import {
   reassignEventRequest,
   startEventReview,
   requestEventClarification,
-  getEventRequestForCoordinator,
+  getEventRequestForCoordinatorReader,
   listEventRequestsForCoordinator,
   listEventRequestsForReview,
   listUnassignedEventRequests,
   listAssignmentHistory,
-  listCoordinators,
   listCoordinatorWorkload,
 } from '../src/services/eventRequestService.js';
 import {
@@ -111,6 +111,7 @@ import {
   ConflictError,
   ForbiddenError,
 } from '../src/errors.js';
+import { ROLE } from '../src/domain/userRole.js';
 import { createHarness, failureOf as failureFrom, countUsersLeft } from './lib/harness.js';
 
 const STAMP = Date.now();
@@ -470,8 +471,8 @@ async function main() {
   const queue = await listUnassignedEventRequests();
   check('it is in the Lead\'s queue', queue.some((event) => event.id === s1.id));
   check(
-    'and not in the coordinators\' shared queue (AC2-06)',
-    !(await listEventRequestsForReview()).some((event) => event.id === s1.id),
+    'and in no coordinator\'s queue (AC2-06)',
+    !(await listEventRequestsForReview(users.A)).some((event) => event.id === s1.id),
   );
 
   // -- 2. The Lead assigns (SCRUM-486 AC3, AC4, AC9, AC10) --------------------
@@ -539,7 +540,11 @@ async function main() {
   );
 
   check('it has left the Lead\'s queue', !(await listUnassignedEventRequests()).some((event) => event.id === s1.id));
-  check('and is in the shared queue now that someone holds it', (await listEventRequestsForReview()).some((event) => event.id === s1.id));
+  check(
+    'and is in A\'s queue now that A holds it, and not in B\'s (SCRUM-444 D3)',
+    (await listEventRequestsForReview(users.A)).some((event) => event.id === s1.id)
+      && !(await listEventRequestsForReview(users.B)).some((event) => event.id === s1.id),
+  );
 
   // AC4-05, the real race. Two Leads assign the same request at once, each
   // through its own HTTP request and so its own Postgres connection, which is
@@ -624,21 +629,27 @@ async function main() {
     orphanError?.message ?? '(no error)',
   );
 
-  // -- 4. Reassignment (SCRUM-327 AC6, and SCRUM-486 AC5, AC6) ----------------
-  section('4. reassignment by the holder, and by the Lead (052)');
+  // -- 4. Reassignment (SCRUM-486 AC5, AC6; SCRUM-444 AC3) -------------------
+  section('4. reassignment is the Lead\'s alone (055)');
 
-  // The holder's handover, as SCRUM-327 has it. Before it, s1 is given a
-  // reviewer, as if A had started the review; no decision has been made, so
-  // the reviewer moves with the event.
+  // Before the handover, s1 is given a reviewer, as if A had started the
+  // review; no decision has been made, so the reviewer moves with the event.
   const { error: reviewerError } = await supabase
     .from('event_requests')
     .update({ reviewing_coordinator_id: users.A })
     .eq('id', s1.id);
   if (reviewerError) throw new Error(`could not set the reviewer: ${reviewerError.message}`);
 
-  const NOTE = 'On leave from Monday. The venue shortlist is in my notes.';
-  const handedOver = await reassignEventRequest(s1.id, { newCoordinatorId: users.C, handoverNote: NOTE }, users.A);
-  check('the holder hands it over', handedOver.assignedCoordinatorId === users.C, labelOf(handedOver.assignedCoordinatorId));
+  checkRefusal(
+    'the holder cannot hand it over (055, 42501)',
+    await failureFrom(reassignEventRequest(s1.id, { newCoordinatorId: users.C }, users.A)),
+    ForbiddenError,
+    403,
+  );
+
+  const NOTE = 'A is on leave from Monday. The venue shortlist is in their notes.';
+  const handedOver = await reassignEventRequest(s1.id, { newCoordinatorId: users.C, handoverNote: NOTE }, users.L);
+  check('the Lead hands it from A to C', handedOver.assignedCoordinatorId === users.C, labelOf(handedOver.assignedCoordinatorId));
   check(
     'and the reviewer moves with it, because no decision has been made',
     handedOver.reviewingCoordinatorId === users.C,
@@ -649,8 +660,8 @@ async function main() {
   const handoverRow = afterHandover[afterHandover.length - 1];
   check('the handover added one history row', afterHandover.length === 2, `${afterHandover.length} row(s)`);
   check(
-    'naming A as previous and A as the one who made it',
-    handoverRow?.previous_coordinator_id === users.A && handoverRow?.assigned_by === users.A,
+    'naming A as previous and the Lead as the one who made it',
+    handoverRow?.previous_coordinator_id === users.A && handoverRow?.assigned_by === users.L,
     `${labelOf(handoverRow?.previous_coordinator_id)}, by ${labelOf(handoverRow?.assigned_by)}`,
   );
   check('with the note', handoverRow?.handover_note === NOTE, handoverRow?.handover_note);
@@ -663,11 +674,11 @@ async function main() {
   );
   checkRefusal(
     'a new coordinator without the role is refused (22023)',
-    await failureFrom(reassignEventRequest(s1.id, { newCoordinatorId: users.V }, users.C)),
+    await failureFrom(reassignEventRequest(s1.id, { newCoordinatorId: users.V }, users.L)),
     ValidationError,
     400,
   );
-  const toSelf = await failureFrom(reassignEventRequest(s1.id, { newCoordinatorId: users.C }, users.C));
+  const toSelf = await failureFrom(reassignEventRequest(s1.id, { newCoordinatorId: users.C }, users.L));
   checkRefusal('handing it to the current holder is refused (23514)', toSelf, ValidationError, 400);
   check(
     'and the message is the function\'s own, not the history constraint\'s',
@@ -675,12 +686,12 @@ async function main() {
     toSelf?.message,
   );
 
-  // A cancelled event cannot be handed over. Held by B, so B's caller check
-  // passes and only the status is in question.
+  // A cancelled event cannot be handed over. Asked by the Lead, so the caller
+  // check passes and only the status is in question.
   const cancelled = await insertEvent('cancelled_held', { status: 'cancelled', coordinator: users.B });
   checkRefusal(
     'a status outside the ones AC5 allows is refused (55000)',
-    await failureFrom(reassignEventRequest(cancelled, { newCoordinatorId: users.A }, users.B)),
+    await failureFrom(reassignEventRequest(cancelled, { newCoordinatorId: users.A }, users.L)),
     ConflictError,
     409,
   );
@@ -738,8 +749,8 @@ async function main() {
     `${afterRefusals.length} history row(s), held by ${labelOf(s1Row?.assigned_coordinator_id)}`,
   );
 
-  // -- 5. Permissions (SCRUM-332, SCRUM-486 AC7) ------------------------------
-  section('5. only the holder changes an event; any coordinator reads it');
+  // -- 5. Permissions (SCRUM-332, SCRUM-486 AC7, SCRUM-444 AC1, AC2) ----------
+  section('5. only the holder acts; only the holder and the Lead read; a non-holder coordinator\'s read is a missing id\'s 404');
 
   checkRefusal(
     'clarification by a coordinator who no longer holds it is refused',
@@ -788,27 +799,45 @@ async function main() {
   // SCRUM486_AC7_an_open_clarification_follows_the_event_to_its_new_coordinator
   // (AC7-04), both in eventClarificationDatabase.test.js.
 
-  const readCancelled = await getEventRequestForCoordinator(cancelled);
+  // The reads go through the scoped reader, as every coordinator read route does.
+  const asCoordinator = (userId) => ({ userId, role: ROLE.EVENT_COORDINATOR });
+  const asLead = { userId: users.L, role: ROLE.EVENT_COORDINATOR_LEAD };
+  const MISSING_ID = '00000000-0000-4000-8000-000000000000';
+  const missingRead = await failureFrom(getEventRequestForCoordinatorReader(MISSING_ID, asCoordinator(users.B)));
+  const asMissing = (err, id) => err?.message.replace(id, '<id>');
+
+  const readCancelled = await getEventRequestForCoordinatorReader(cancelled, asCoordinator(users.B));
   check(
-    'any coordinator can read an event the queue does not carry (cancelled)',
+    'the holder reads an event the queue does not carry (cancelled)',
     readCancelled.id === cancelled && readCancelled.status === 'cancelled',
     readCancelled.status,
+  );
+  const leadRead = await getEventRequestForCoordinatorReader(cancelled, asLead);
+  check('the Lead reads it too', leadRead.id === cancelled, leadRead.status);
+  const otherRead = await failureFrom(getEventRequestForCoordinatorReader(cancelled, asCoordinator(users.C)));
+  check(
+    'a coordinator who does not hold it gets a missing id\'s 404',
+    otherRead instanceof NotFoundError && asMissing(otherRead, cancelled) === asMissing(missingRead, MISSING_ID),
+    `${otherRead?.name}: ${otherRead?.message}`,
+  );
+  const previousRead = await failureFrom(getEventRequestForCoordinatorReader(s1.id, asCoordinator(users.C)));
+  check(
+    'and so does C, the coordinator the Lead moved s1 from',
+    previousRead instanceof NotFoundError && asMissing(previousRead, s1.id) === asMissing(missingRead, MISSING_ID),
+    `${previousRead?.name}: ${previousRead?.message}`,
   );
 
   const draft = await createEventRequest({ eventName: `${NAME}_draft` }, users.organiser);
   createdEventIds.push(draft.id);
-  const draftRead = await failureFrom(getEventRequestForCoordinator(draft.id));
-  const missingRead = await failureFrom(getEventRequestForCoordinator('00000000-0000-4000-8000-000000000000'));
+  const draftRead = await failureFrom(getEventRequestForCoordinatorReader(draft.id, asLead));
   check(
     'a draft is hidden from coordinators, answered exactly like a missing id',
-    draftRead instanceof NotFoundError
-      && draftRead.message.replace(draft.id, '<id>')
-        === missingRead?.message.replace('00000000-0000-4000-8000-000000000000', '<id>'),
+    draftRead instanceof NotFoundError && asMissing(draftRead, draft.id) === asMissing(missingRead, MISSING_ID),
     `${draftRead?.name}: ${draftRead?.message}`,
   );
 
   // -- 6. The reads (SCRUM-333, SCRUM-334, SCRUM-486 AC3, AC9) -----------------
-  section('6. "My events", the history, and both coordinator lists');
+  section('6. "My events", the history, and the Lead\'s coordinator list');
 
   const mine = await listEventRequestsForCoordinator(users.B);
   check(
@@ -825,9 +854,9 @@ async function main() {
 
   const forCoordinators = await listAssignmentHistory(s1.id, { includeNotes: true });
   check(
-    'the history is oldest first: the Lead\'s assignment, A\'s handover, the Lead\'s handover',
+    'the history is oldest first: the Lead\'s assignment and the Lead\'s two handovers',
     forCoordinators.map((entry) => entry.assignedByName).join(' | ')
-      === 'Check Assign L | Check Assign A | Check Assign L',
+      === 'Check Assign L | Check Assign L | Check Assign L',
     forCoordinators.map((entry) => entry.assignedByName).join(' | '),
   );
   check(
@@ -862,13 +891,6 @@ async function main() {
     'a pre-SCRUM-486 row still reads as automatic, with no one named (AC9-03)',
     legacyHistory.length === 1 && legacyHistory[0].automatic === true && legacyHistory[0].assignedByName === null,
     JSON.stringify(legacyHistory[0]),
-  );
-
-  const pickerIds = (await listCoordinators()).map((coordinator) => coordinator.id);
-  check(
-    'the coordinators\' handover list holds coordinators and nobody else',
-    [users.A, users.B, users.C].every((id) => pickerIds.includes(id))
-      && ![users.V, users.organiser, users.L].some((id) => pickerIds.includes(id)),
   );
 
   const workload = await listCoordinatorWorkload();

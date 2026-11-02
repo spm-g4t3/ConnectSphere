@@ -20,14 +20,12 @@ import ReassignEventPanel from "../../src/components/ReassignEventPanel.jsx";
 import { useAuth } from "../../src/auth/AuthContext";
 import {
   listCoordinatorWorkload,
-  listCoordinators,
   reassignEventRequest,
 } from "../../src/services/eventRequestService";
 import { httpError } from "../helpers/async.js";
 
 vi.mock("../../src/auth/AuthContext", () => ({ useAuth: vi.fn() }));
 vi.mock("../../src/services/eventRequestService", () => ({
-  listCoordinators: vi.fn(),
   listCoordinatorWorkload: vi.fn(),
   reassignEventRequest: vi.fn(),
 }));
@@ -43,11 +41,6 @@ const REQUEST = {
   assignedCoordinatorId: HOLDER,
 };
 
-const COORDINATORS = [
-  { id: HOLDER, fullName: "Priya Nair" },
-  { id: OTHER, fullName: "Omar Okafor" },
-  { id: THIRD, fullName: "Mei Tan" },
-];
 const WORKLOAD = [
   { id: HOLDER, fullName: "Priya Nair", activeEvents: 2 },
   { id: OTHER, fullName: "Omar Okafor", activeEvents: 1 },
@@ -66,8 +59,6 @@ const optionNames = async () =>
     .filter((name) => name !== "Choose a coordinator");
 
 beforeEach(() => {
-  vi.mocked(listCoordinators).mockReset();
-  vi.mocked(listCoordinators).mockResolvedValue(COORDINATORS);
   vi.mocked(listCoordinatorWorkload).mockReset();
   vi.mocked(listCoordinatorWorkload).mockResolvedValue(WORKLOAD);
   vi.mocked(reassignEventRequest).mockReset();
@@ -83,7 +74,6 @@ describe("SCRUM486_AC6 who the picker offers", () => {
 
     expect(await optionNames()).toEqual(["Omar Okafor, 1 active event", "Mei Tan, 0 active events"]);
     expect(listCoordinatorWorkload).toHaveBeenCalledTimes(1);
-    expect(listCoordinators).not.toHaveBeenCalled();
   });
 
   it("SCRUM486_AC6_for_a_lead_the_holder_is_left_out_not_the_caller", async () => {
@@ -100,9 +90,8 @@ describe("SCRUM486_AC6 who the picker offers", () => {
     // GET /coordinators refuses a Lead (SCRUM-485 AC5, kept in SCRUM-519).
     renderAs(LEAD, "Event Coordinator Lead");
 
-    await optionNames();
+    expect(await optionNames()).toEqual(["Omar Okafor, 1 active event", "Mei Tan, 0 active events"]);
     expect(listCoordinatorWorkload).toHaveBeenCalledTimes(1);
-    expect(listCoordinators).not.toHaveBeenCalled();
   });
 
   it("SCRUM444_AC3_a_coordinator_who_reaches_the_panel_is_told_only_the_lead_hands_over", async () => {

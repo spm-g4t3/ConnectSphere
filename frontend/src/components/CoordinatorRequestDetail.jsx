@@ -274,7 +274,7 @@ export default function CoordinatorRequestDetail({
   const canComplete = isCoordinatorRole && canMarkCompleted(current, { isAssignedCoordinator });
   const awaitingEnd = isCoordinatorRole && isAssignedCoordinator
     && current.status === "confirmed" && !eventHasEnded(current.proposedEnd);
-  // SCRUM-384 AC2: closing notes are for coordinators (and the Lead); never an Organiser.
+  // SCRUM-384 AC2, SCRUM-444 AC5: only the holder writes closing notes (on completion, 034); the holder and the Lead read them; never an Organiser.
   const closingNotes = (isCoordinatorRole || isLead) && current.status === "completed"
     ? closingNotesOf(current)
     : null;
