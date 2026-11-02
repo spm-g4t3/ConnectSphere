@@ -42,8 +42,7 @@ import {
   amendEquipmentLine,
   removeEquipmentLine,
 } from '../services/equipmentLineService.js';
-import { getEventRequestForCoordinator, assertCoordinatorMayRead } from '../services/eventRequestService.js';
-import { validateEventRequestId } from '../validation/equipmentLineValidation.js';
+import { getEventRequestForCoordinatorReader } from '../services/eventRequestService.js';
 import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
 import { noopFinalEventGuard, createFinalEventGuard, eventIdFromParam } from '../middleware/finalEventGuard.js';
 import { createRequireRole } from '../middleware/requireRole.js';
@@ -94,9 +93,9 @@ export function createEventEquipmentRouter({
    * anyone else, and a draft, gets the coordinator read's missing-id 404.
    */
   router.get('/', coordinatorOrLead, async (req, res) => {
-    validateEventRequestId(req.params.id);
-    const event = await getEventRequestForCoordinator(req.params.id, { client });
-    assertCoordinatorMayRead(event, req.user.id, req.user.role, req.params.id);
+    await getEventRequestForCoordinatorReader(req.params.id, {
+      userId: req.user.id, role: req.user.role, client, columns: 'check',
+    });
     res.status(200).json(await listEventEquipment(req.params.id, { client }));
   });
 

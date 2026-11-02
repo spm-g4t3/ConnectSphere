@@ -13,7 +13,10 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 import EventRequestReviewPage from "../../src/components/EventRequestReviewPage.jsx";
 import { getEventRequestForReview } from "../../src/services/eventRequestService";
+import { useAuth } from "../../src/auth/AuthContext";
 import { httpError } from "../helpers/async.js";
+
+vi.mock("../../src/auth/AuthContext", () => ({ useAuth: vi.fn() }));
 
 vi.mock("../../src/services/eventRequestService", () => ({
   getEventRequestForReview: vi.fn(),
@@ -46,6 +49,7 @@ function renderAt(path) {
 }
 
 beforeEach(() => {
+  vi.mocked(useAuth).mockReturnValue({ user: { id: "A", role: "event_coordinator" } });
   vi.mocked(getEventRequestForReview).mockReset();
   vi.mocked(getEventRequestForReview).mockResolvedValue(EVENT);
 });
@@ -86,6 +90,26 @@ describe("SCRUM486_AC6 an event's screen by its address", () => {
     );
     expect(alert).not.toHaveTextContent(/not found/);
     expect(screen.queryByTestId("detail-stub")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM444_AC1_the_leads_404_does_not_mention_a_handover", async () => {
+    // The Lead reads every event, so a 404 is a draft or a missing id. The
+    // server's text is the coordinator's; the wording is chosen from the role.
+    vi.mocked(useAuth).mockReturnValue({ user: { id: "L", role: "event_coordinator_lead" } });
+    vi.mocked(getEventRequestForReview).mockRejectedValue(httpError(404, { error: `Event request ${ID} not found` }));
+    renderAt(`/event-requests/${ID}`);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("This event request doesn't exist or hasn't been submitted yet.");
+    expect(alert).not.toHaveTextContent(/handed over|available to you|not found/);
+  });
+
+  it("SCRUM444_AC1_the_leads_other_load_errors_read_as_before", async () => {
+    vi.mocked(useAuth).mockReturnValue({ user: { id: "L", role: "event_coordinator_lead" } });
+    vi.mocked(getEventRequestForReview).mockRejectedValue(httpError(500));
+    renderAt(`/event-requests/${ID}`);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("This event request could not be loaded. Please try again.");
   });
 
   it("SCRUM444_AC1_a_coordinator_it_is_not_assigned_to_never_reaches_the_decisions", async () => {

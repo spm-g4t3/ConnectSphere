@@ -29,9 +29,7 @@
 // from the newest row, the screen would name them as current while the
 // Organiser's row above says it is waiting for the Lead (SCRUM-486 TR-03).
 // The newest row is used only when no id is passed. The name still comes
-// from the history, the one source that carries one for both audiences;
-// listCoordinators would too, but it is coordinator-only and an Organiser
-// would get a 403.
+// from the history, the one source that carries one for both audiences.
 //
 // The root is a <div>, so each parent decides what wraps it: a <section> in
 // the coordinator's event panel, a <details> on the Organiser's list.

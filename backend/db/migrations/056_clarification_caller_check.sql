@@ -1,12 +1,6 @@
--- Migration 056: SCRUM-444 AC2, the clarification request checks its caller
--- (AGENTS.md:16: caller and role checks belong inside the function too). Until
--- now request_event_clarification_with_fields had no caller check of its own: a
--- coordinator who did not hold the event met only change_event_request_status's
--- expected-coordinator guard, 40001 "no longer assigned to this coordinator".
---
--- Restated whole from 011, the later of its two definitions, with the same
--- signature, so no drop. The only addition is the read under the row lock and
--- the caller check at the top; 42501 as the other coordinator actions answer.
+-- Migration 056: the clarification request checks its own caller (42501), so a
+-- non-holder is refused here and not only by a later guard. Restated whole from
+-- 011 with the same signature; only the read and the check at the top are new.
 
 create or replace function request_event_clarification_with_fields(
   p_event_request_id     uuid,

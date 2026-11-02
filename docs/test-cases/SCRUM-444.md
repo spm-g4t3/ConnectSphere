@@ -6,6 +6,7 @@
 **Written:** 2 November 2026, before the tests and the code.
 **Marked:** 2 November 2026, brief 2: the screens (AC3-07, AC4-06, AC4-07, AC1-16), the id check on the remaining reads (AC1-15), and 056 (AC2-10, AC2-11), which makes AC2-01's clarification request 42501. All proved.
 **Marked:** 2 November 2026, round 2: AC1-13 (GET /:id refuses a malformed id with 400) and AC1-14 (a non-holder's 404 echoes the id as typed); AC3-06 now a 400. Both proved.
+**Marked:** 2 November 2026, review on #107 (Rae): AC1-17 to AC1-20 (the scoped reader's guard, cancellation-impact, confirmed-arrangements, the Lead's 404 wording); AC1-15 widened to thirteen reads. All proved.
 **Marked:** 2 November 2026: every case proved, and AC2-09 recorded (no code to guard). AC2-01's clarification request is 40001 in SQL, not 42501 (see the row); the Changed by design table lists every test of the old rule.
 
 This document is the written layer between SCRUM-444's acceptance criteria and the
@@ -84,6 +85,8 @@ brackets.
 The six reads are `GET /:id/review`, `GET /:id/assignments/review`,
 `GET /:id/readiness`, `GET /:id/change-requests/review`,
 `GET /api/event-requests/:id/equipment` and `GET /:id/clarification-history`.
+The first five, and `GET /:id/cancellation-impact`, read the event through
+`getEventRequestForCoordinatorReader` (AC1-17, AC1-19).
 
 Every refusal in the pglite file goes through a snapshot of the event row, its
 status, clarification, decision and assignment histories, its change requests and
@@ -107,9 +110,13 @@ notification, compared before and after (AC6).
 | AC1-11 | Past draft | The decision and change histories, which share `requireHistoryReader` with the new rule | Unchanged: the Organiser, the holder and the Lead read them; anyone else 404 | The existing `SCRUM434_AC6_%s_history_is_answered_as_not_found` and `SCRUM434_AC6_a_draft_is_not_readable_by_any_coordinator_or_the_lead`, unmodified |
 | AC1-13 | Through the API | `GET /:id`, the Organiser's read, with a malformed id | 400, `[{ field: 'id', message: 'must be a valid id' }]`, before any read (as `GET /:id/readiness`); before 444 Postgres's 22P02 made it a 500 | (route) `SCRUM444_AC1_get_by_id_refuses_a_malformed_id_with_400_before_the_read` |
 | AC1-14 **(trap)** | An existing event's id typed in capitals; a missing id in capitals | A coordinator who does not hold it makes each of the six reads | 404 with the id exactly as typed, the same body as the missing id's apart from the id: Postgres finds the event in any case, and the stored lowercase id in the message would give it away | (route) `SCRUM444_AC1_a_non_holder_gets_the_id_back_as_typed_like_a_missing_event` |
-| AC1-15 | Through the API | Every other read under `/:id` that handed the id to Postgres (`/status`, `/status-history`, `/clarification-history`, `/decision-history`, `/change-history`, `/change-requests`, `/review`, `/cancellation-impact`, `/assignments`, `/assignments/review`), with a malformed id | 400, `[{ field: 'id', message: 'must be a valid id' }]`, before any read; it was a 22P02 and a 500 | (route) `SCRUM444_AC1_%s_refuses_a_malformed_id_with_400_before_any_read` (ten) |
+| AC1-15 | Through the API | Every other read under `/:id` that handed the id to Postgres (`/status`, `/status-history`, `/clarification-history`, `/decision-history`, `/change-history`, `/change-requests`, `/review`, `/cancellation-impact`, `/assignments`, `/assignments/review`), and since review on #107 `/change-requests/review`, `/readiness` and `/equipment`, with a malformed id | 400, `"Invalid event request id"`, `[{ field: 'id', message: 'must be a valid id' }]`, before any read; it was a 22P02 and a 500 (`/change-requests/review` said `eventRequestId must be a valid id`, field `eventRequestId`; `/equipment` `Invalid event request id -- id: must be a UUID`) | (route) `SCRUM444_AC1_%s_refuses_a_malformed_id_with_400_before_any_read` (thirteen) |
 | AC1-16 **(UI)** | The event screen | The Lead, the one non-holder who opens it, on events in each state the old non-holder tests covered | The event, and none of the holder's actions or holder-only sections: no Cancel or Reject event, nothing to press in review, no venue request, no Venue suitability or flagged bookings, no change preview, no registrations link, no equipment actions, no change-request buttons; an unassigned request says it waits for the Lead | (UI, renamed) `SCRUM444_AC1_the_lead_does_not_see_Cancel_event_for_%s` (two), `SCRUM444_AC1_the_lead_does_not_see_Reject_event`, `SCRUM444_AC1_a_%s_request_offers_the_lead_nothing_to_press` (two), `SCRUM444_AC1_an_unassigned_request_opened_by_the_lead_says_it_is_waiting_for_the_lead`, `SCRUM444_AC1_the_lead_cannot_request_a_venue`, `SCRUM444_AC1_the_lead_does_not_see_venue_suitability`, `SCRUM444_AC1_the_lead_sees_no_flagged_bookings_and_none_are_loaded`, `SCRUM444_AC1_the_change_preview_opens_for_the_holder_not_the_lead`, `SCRUM444_AC1_offers_no_registrations_link_to_the_lead`, `SCRUM444_AC1_the_lead_is_shown_the_reason_and_no_add`, `SCRUM444_AC1_the_lead_sees_the_lines_and_the_reason_but_no_actions`, `SCRUM444_AC2_the_lead_reads_it_with_no_buttons` |
-| AC1-12 | — | The reads that already allowed only the holder | Cited, not changed: `GET /:id/cancellation-impact` (`event_cancellation_impact_preview`, `013:256`: the holder, or the Lead on an unassigned Submitted event); the decision and change histories (`requireHistoryReader`); the status history (`getEventRequestStatusHistory`: the Organiser or the holder); registrations and counts (`list_event_registrations`, `040:38`; `event_registration_counts`, `037:903`); flagged bookings (`list_event_flagged_bookings`, `04_venue_bookings.sql:2424`); Needs attention and `/mine` (filtered to `req.user.id`); venue suitability (`assertCheckable`, `venueSuitabilityService.js:405`). These answer a non-holder 403 or 42501, not D1's 404 | Existing, unchanged |
+| AC1-12 | — | The reads that already allowed only the holder | Cited, not changed: the decision and change histories (`requireHistoryReader`); the status history (`getEventRequestStatusHistory`: the Organiser or the holder); registrations and counts (`list_event_registrations`, `040:38`; `event_registration_counts`, `037:903`); flagged bookings (`list_event_flagged_bookings`, `04_venue_bookings.sql:2424`); Needs attention and `/mine` (filtered to `req.user.id`); venue suitability (`assertCheckable`, `venueSuitabilityService.js:405`). These answer a non-holder 403 or 42501, not D1's 404 | Existing, unchanged |
+| AC1-17 **(trap)** | An Approved event held by someone else | Another Event Coordinator reads `GET /:id/cancellation-impact` | 404, the body exactly a missing id's; `event_cancellation_impact_preview` is never called (it answered 403 before). The Lead still reaches the function, which decides which event they may preview | (route) `SCRUM444_AC1_cancellation_impact_is_a_missing_ids_404_for_a_non_holder`; the existing `SCRUM539_AC2_…` Lead tests and `SCRUM370_AC1_…`, unmodified |
+| AC1-18 | Through the API | The Organiser reads `GET /:id/confirmed-arrangements` with a malformed id | 400, `[{ field: 'id', message: 'must be a valid id' }]`, no query: its service refuses it, so the route needs no check | (route) `SCRUM444_AC1_confirmed_arrangements_refuses_a_malformed_id_with_400` |
+| AC1-19 **(trap)** | An event held by someone else | Every GET route on the event-request and equipment routers gated `coordinatorOnly` or `coordinatorOrLead` with `:id` in its path, found by walking the router stacks, as another coordinator | 404, a missing id's body, with only the event read queried. Covers `/:id/equipment/`, `/:id/change-requests/review`, `/:id/review`, `/:id/cancellation-impact`, `/:id/assignments/review`, `/:id/readiness`; a route added later is checked without being listed. Excluded: `/queue`, `/mine`, `/needs-attention` (no `:id`; the caller's own events) and `/change-requests/:changeRequestId/preview` (a change request's id; 036 refuses a non-holder as the decision does) | (route) `SCRUM444_AC1_every_coordinator_read_route_uses_the_scoped_reader` |
+| AC1-20 **(UI)** | `/event-requests/:id` | The Lead's load answers 404; then 500 | "This event request doesn't exist or hasn't been submitted yet.", with no mention of a handover: the Lead reads every event, so their 404 is a draft or a missing id. Keyed on the role from the auth context and the status, never the server's text. Other statuses read as before; the coordinator's 404 is unchanged (AC4-06) | (UI) `SCRUM444_AC1_the_leads_404_does_not_mention_a_handover`, `SCRUM444_AC1_the_leads_other_load_errors_read_as_before` |
 
 ### AC2 — only the assigned coordinator acts
 
@@ -188,7 +195,10 @@ The two `it.each` above have 19 rows each (AC2-01 to AC2-08 together).
   missing-id message is now the coordinator read's, `Event request <id> not
   found`, where it was `Event request not found`. And the equipment of a draft
   is a 404 where any coordinator could read it.
-  (Round 2 added a fourth: `GET /:id` answers a malformed id 400, where it was a 500.)
+  (Round 2 added a fourth: `GET /:id` answers a malformed id 400, where it was a 500.
+  Review on #107 added three: `GET /:id/cancellation-impact` answers a non-holder
+  coordinator 404 where it was the function's 403; and `/change-requests/review`
+  and `/equipment` answer a malformed id with the shared message and field.)
 - **A flaky frontend test.** `SCRUM583_AC1_no_screen_adds_its_own_expiry_wording`
   (`frontend/tests/flows/scrum583ExpiredSessionFlow.test.jsx`) failed once in
   the full frontend run with "Target cannot be null or undefined" and passed alone
@@ -270,16 +280,16 @@ service tests of `listCoordinators` (`eventRequestService.test.js`), five
 
 ## Tally
 
-46 cases, counted from the tables: **45 proved** and one recorded (AC2-09: there
+50 cases, counted from the tables: **49 proved** and one recorded (AC2-09: there
 is nothing to guard); 0 not yet implemented; 0 that cannot be written as
-specified. Ten are traps; four cases are on the screen.
+specified. Twelve are traps; five cases are on the screen.
 
 | Section | Cases |
 |---|---|
-| AC1 | 16 |
+| AC1 | 20 |
 | AC2 | 11 |
 | AC3 | 7 |
 | AC4 | 7 |
 | AC5 | 3 |
 | AC6 | 2 |
-| **Total** | **46** |
+| **Total** | **50** |

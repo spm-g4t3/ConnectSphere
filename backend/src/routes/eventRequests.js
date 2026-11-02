@@ -50,7 +50,7 @@
  *    coordinator (SCRUM-332), by the service for clarification and by the
  *    database functions for the rest. Reading follows the same rule since
  *    SCRUM-444: each coordinator read answers only the holder and the Lead
- *    (assertCoordinatorMayRead), and anyone else as a missing id.
+ *    (getEventRequestForCoordinatorReader), and anyone else as a missing id.
  *  - The Event Coordinator Lead's routes (SCRUM-486) are gated per route too,
  *    by leadOnly: the unassigned queue, the picker's coordinator workload, the
  *    list of assigned events (AC6) and the first assignment; since SCRUM-487,
@@ -71,8 +71,8 @@ import express from 'express';
 import {
   listEventRequestsForOrganiser,
   getEventRequestForOrganiser,
-  getEventRequestForCoordinator,
-  assertCoordinatorMayRead,
+  getEventRequestForCoordinatorReader,
+  requirePlausibleEventId,
   getEventRequestStatusHistory,
   getEventClarificationHistory,
   getEventDecisionHistory,
@@ -133,8 +133,6 @@ import { ROLE } from '../domain/userRole.js';
 // Credential-free too: http/handleError.js imports only errors.js.
 import { createErrorMiddleware } from '../http/handleError.js';
 import { ValidationError } from '../errors.js';
-// Pure, like the two above: the repository's one uuid check (SCRUM-489's readiness read).
-import { isPlausibleId } from '../validation/ids.js';
 
 
 /** Answers whatever a handler throws or rejects with; see src/http/handleError.js (SCRUM-127). */
@@ -149,16 +147,6 @@ function parseBooleanQuery(raw, field, message) {
     throw new ValidationError(message, [{ field, message: 'must be true or false' }]);
   }
   return raw === 'true';
-}
-
-/**
- * SCRUM-444: a malformed event id is a 400 before any read, not Postgres's
- * 22P02 from the uuid cast, which arrives as a 500.
- */
-function requirePlausibleEventId(id) {
-  if (!isPlausibleId(id)) {
-    throw new ValidationError('Invalid event request id', [{ field: 'id', message: 'must be a valid id' }]);
-  }
 }
 
 
@@ -604,14 +592,12 @@ export function createEventRequestRouter({
   // SCRUM-486 (SCRUM-521): coordinatorOrLead, for the reason GET /:id/review
   // gives. The event screen reads this on mount; deciding a change request
   // (POST /change-requests/:id/decision) stays coordinatorOnly, and 019 still
-  // checks the caller holds the event. SCRUM-444: the event is read first, so a
-  // non-holder and a missing id are the same 404; a malformed id stays a 400.
+  // checks the caller holds the event. SCRUM-444: read through the scoped
+  // reader, so a non-holder and a missing id are the same 404.
   router.get('/:id/change-requests/review', coordinatorOrLead, async (req, res) => {
-    if (!isPlausibleId(req.params.id)) {
-      throw new ValidationError('eventRequestId must be a valid id', [{ field: 'eventRequestId', message: 'must be a valid id' }]);
-    }
-    const event = await getEventRequestForCoordinator(req.params.id, { client });
-    assertCoordinatorMayRead(event, req.user.id, req.user.role, req.params.id);
+    await getEventRequestForCoordinatorReader(req.params.id, {
+      userId: req.user.id, role: req.user.role, client, columns: 'check',
+    });
 
     const changeRequests = await getChangeRequestsForCoordinator(req.params.id, { client });
     res.status(200).json(changeRequests);
@@ -622,7 +608,7 @@ export function createEventRequestRouter({
    *
    * SCRUM-444 AC1, AC4: the holder and the Lead only. Another coordinator, and
    * the previous holder after a handover, get a missing id's 404
-   * (assertCoordinatorMayRead), as does anyone for a draft, because no
+   * (getEventRequestForCoordinatorReader), as does anyone for a draft, because no
    * coordinator is meant to know a draft exists. Until SCRUM-444 any
    * coordinator could read any event here.
    *
@@ -664,18 +650,19 @@ export function createEventRequestRouter({
    * Both roles that pass the gate are coordinator-side; an Organiser never reaches this route.
    */
   router.get('/:id/review', coordinatorOrLead, async (req, res) => {
-    requirePlausibleEventId(req.params.id);
-    const request = await getEventRequestForCoordinator(req.params.id, { client, withClosingNotes: true });
-    assertCoordinatorMayRead(request, req.user.id, req.user.role, req.params.id);
+    const request = await getEventRequestForCoordinatorReader(req.params.id, {
+      userId: req.user.id, role: req.user.role, client, withClosingNotes: true,
+    });
     res.status(200).json(withStatusDisplay(request));
   });
 
-  // SCRUM-539: the Lead previews a submitted request nobody holds. Who may
-  // preview which event is the function's to decide (011 gave it p_caller); the
-  // read first still answers 404 for a draft or a missing id, as /:id/review does.
+  // SCRUM-539: the Lead previews a submitted request nobody holds. SCRUM-444:
+  // the scoped reader answers a non-holder coordinator as a missing id; the
+  // function still decides which event the Lead may preview (011's p_caller).
   router.get('/:id/cancellation-impact', coordinatorOrLead, async (req, res) => {
-    requirePlausibleEventId(req.params.id);
-    await getEventRequestForCoordinator(req.params.id, { client });
+    await getEventRequestForCoordinatorReader(req.params.id, {
+      userId: req.user.id, role: req.user.role, client, columns: 'check',
+    });
     const impact = await getEventCancellationImpact(req.params.id, req.user.id, { client });
     res.status(200).json(impact);
   });
@@ -735,8 +722,8 @@ export function createEventRequestRouter({
    * handed it over is a non-holder (D2), and the Organiser is still refused by
    * the role gate.
    *
-   * Reads the event through getEventRequestForCoordinator first, so a draft or
-   * a missing id is a 404 here as it is on GET /:id/review.
+   * Reads the event through getEventRequestForCoordinatorReader first, so a
+   * draft or a missing id is a 404 here as it is on GET /:id/review.
    *
    * SCRUM-486 (SCRUM-521): behind coordinatorOrLead, not coordinatorOnly. The
    * Lead may hand over any event (052, AC6), and the event screen they do it
@@ -750,9 +737,9 @@ export function createEventRequestRouter({
    * Organiser, whom this gate still refuses.
    */
   router.get('/:id/assignments/review', coordinatorOrLead, async (req, res) => {
-    requirePlausibleEventId(req.params.id);
-    const event = await getEventRequestForCoordinator(req.params.id, { client });
-    assertCoordinatorMayRead(event, req.user.id, req.user.role, req.params.id);
+    await getEventRequestForCoordinatorReader(req.params.id, {
+      userId: req.user.id, role: req.user.role, client, columns: 'check',
+    });
 
     const history = await listAssignmentHistory(req.params.id, { includeNotes: true }, { client });
     res.status(200).json(history);
@@ -764,14 +751,16 @@ export function createEventRequestRouter({
    * 404 like a missing id. ?noEquipmentConfirmed= is 'true', 'false' or absent.
    */
   router.get('/:id/readiness', coordinatorOrLead, async (req, res) => {
+    // The id first, so a malformed one is answered before the query string.
     requirePlausibleEventId(req.params.id);
     const noEquipmentConfirmed = parseBooleanQuery(
       req.query.noEquipmentConfirmed,
       'noEquipmentConfirmed',
       'Invalid noEquipmentConfirmed -- must be true or false',
     );
-    const event = await getEventRequestForCoordinator(req.params.id, { client });
-    assertCoordinatorMayRead(event, req.user.id, req.user.role, req.params.id);
+    await getEventRequestForCoordinatorReader(req.params.id, {
+      userId: req.user.id, role: req.user.role, client, columns: 'check',
+    });
 
     res.status(200).json(await getEventReadiness({
       client, eventRequestId: req.params.id, noEquipmentConfirmed,
@@ -925,27 +914,9 @@ export function createEventRequestRouter({
   });
 
   /**
-   * SCRUM-331 (SCRUM-327 AC9): an event handed to another coordinator, with an
-   * optional note.
-   *
-   * SCRUM-444 AC3 (Week 9 Q&A, sheet G3-5, row 18): behind leadOnly. Only the Lead hands an event
-   * over; the holder may not, which reverses SCRUM-486 AC6. Anyone else is
-   * refused before the handler runs and the database is never touched, and
-   * 055's reassign_event_request refuses a non-Lead with 42501 under the row
-   * lock as well.
-   *
-   * No ownership pre-check: the Lead holds no event, and the function checks
-   * the event's state under the lock, the only point where the answer cannot
-   * change before the write.
-   *
-   * The body is passed whole. The service reads only newCoordinatorId and
-   * handoverNote from it, so a body naming someone else as assignedBy matches
-   * nothing. The caller is always req.user.id, from the token.
-   *
-   * 200 and the whole request, so the screen can redraw from the response.
-   * The function's refusals arrive through translateError: 403 (not the
-   * Lead), 400 (no such coordinator, or already theirs), 409 (status does not
-   * allow a handover), 404 (no such event).
+   * The Lead hands an event to another coordinator, with an optional note.
+   * leadOnly refuses anyone else before any query, and 055 refuses a non-Lead
+   * under the row lock too. Only newCoordinatorId and handoverNote are read.
    */
   router.post('/:id/reassign', leadOnly, guardEvent, async (req, res) => {
     const updated = await reassignEventRequest(
@@ -993,10 +964,10 @@ export function createEventRequestRouter({
    * would read as one resource and mislead whoever adds the next route.
    * /start-review says what it does.
    *
-   * Behind coordinatorOnly, with no ownership pre-check, for the reason
-   * POST /:id/reassign gives above: whether the caller is this event's
-   * assigned coordinator is what start_event_review (029) checks under the
-   * row lock. Nothing is read from the body. The caller is always
+   * Behind coordinatorOnly, with no ownership pre-check: whether the caller
+   * is this event's assigned coordinator is what start_event_review (029)
+   * checks under the row lock, where the answer cannot change before the
+   * write. Nothing is read from the body. The caller is always
    * req.user.id, from the token.
    *
    * 200 and the whole request. Refusals through translateError: 403 (not the

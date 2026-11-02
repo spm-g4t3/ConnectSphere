@@ -32,7 +32,7 @@
  *    none, so a route calling any of those must prove the caller's right to
  *    read or write itself first. For the first two that proof is ownership;
  *    for the coordinator read it is the role gate and then
- *    assertCoordinatorMayRead (SCRUM-444): a coordinator reads only the events
+ *    getEventRequestForCoordinatorReader (SCRUM-444): a coordinator reads only the events
  *    they hold, and the Lead reads all. The same rule covers coordinators
  *    acting on an event (SCRUM-332): requestEventClarification takes the
  *    coordinator and enforces the assigned one itself, and since SCRUM-444
@@ -1687,9 +1687,10 @@ export async function getConfirmedArrangementsForOrganiser(id, organiserId, { cl
 /**
  * One event request, for any Event Coordinator.
  *
- * SCRUM-332, for SCRUM-327 AC7: after a handover the previous coordinator can
- * still view the event, and only stops being able to change it. Before this,
- * no coordinator could read a single event at all. getEventRequestForOrganiser
+ * Unscoped: for write paths, whose SQL checks the holder. Reads use getEventRequestForCoordinatorReader.
+ *
+ * SCRUM-332 (SCRUM-327 AC7): before this, no coordinator could read a single
+ * event at all. getEventRequestForOrganiser
  * answers 404 to anyone but its Organiser, and the queue covers only
  * submitted, under_review and pending_clarification. So once an event was
  * approved or confirmed, nobody on ConnectSphere's side could open it, while
@@ -1697,9 +1698,9 @@ export async function getConfirmedArrangementsForOrganiser(id, organiserId, { cl
  *
  * No organiser id and no coordinator id, and neither is compared: a function
  * that takes no owner checks none, and the caller proves the right to read.
- * Since SCRUM-444 the read routes do that with assertCoordinatorMayRead after
- * this read, so only the holder and the Lead read an event. Its other callers
- * are writes, which their own checks refuse (see assertCoordinatorMayRead).
+ * Since SCRUM-444 the read routes do that through
+ * getEventRequestForCoordinatorReader, so only the holder and the Lead read an
+ * event. Its other callers are writes, which their own checks refuse.
  *
  * The one thing refused is a draft, answered with exactly the NotFoundError a
  * missing id gets, message included. A draft is the Organiser's private
@@ -1860,9 +1861,10 @@ export async function getEventClarificationHistory(id, userId, role, { client } 
  * message carries the id as the caller typed it, as a missing id's does; the
  * stored one would differ in case and give the event away.
  *
- * Called after getEventRequestForCoordinator, never inside it. Its other callers
- * are writes already holder-checked in SQL or by assertCheckable; narrowed, their
- * 42501 and 403 would become 404s.
+ * Called by getEventRequestForCoordinatorReader, never inside
+ * getEventRequestForCoordinator. That read's other callers are writes already
+ * holder-checked in SQL or by assertCheckable; narrowed, their 42501 and 403
+ * would become 404s.
  *
  * @param {{id: string, assignedCoordinatorId: string|null}} event
  * @param {string} userId  the caller, from the JWT
@@ -1874,6 +1876,57 @@ export function assertCoordinatorMayRead(event, userId, role, requestedId = even
   if (role === ROLE.EVENT_COORDINATOR_LEAD) return;
   if (role === ROLE.EVENT_COORDINATOR && userId && event.assignedCoordinatorId === userId) return;
   throw new NotFoundError(`Event request ${requestedId} not found`);
+}
+
+/**
+ * SCRUM-444: a malformed event id is a 400 before any read, not Postgres's
+ * 22P02 from the uuid cast, which arrives as a 500.
+ *
+ * @param {*} id
+ * @throws {ValidationError}
+ */
+export function requirePlausibleEventId(id) {
+  if (!isPlausibleId(id)) {
+    throw new ValidationError('Invalid event request id', [{ field: 'id', message: 'must be a valid id' }]);
+  }
+}
+
+/** What assertCoordinatorMayRead needs, for the routes that use nothing else of the event. */
+const CHECK_COLUMNS = 'id, status, assigned_coordinator_id';
+
+/**
+ * SCRUM-444 AC1, AC4: the one way a coordinator read route reads its event, so
+ * the holder check cannot be left out of a route again: a malformed id is a
+ * 400, and a missing id, a draft and a non-holder the same 404.
+ *
+ * @param {string} id  the id as requested
+ * @param {object} options
+ * @param {string} options.userId  the caller, from the JWT
+ * @param {string} options.role    the caller's role, from the JWT
+ * @param {object} [options.client]
+ * @param {boolean} [options.withClosingNotes]  as getEventRequestForCoordinator's
+ * @param {'check'} [options.columns]  'check' reads only id, status and
+ *   assigned_coordinator_id, and returns { id, status, assignedCoordinatorId }
+ * @returns {Promise<object>} the stored request, in camelCase
+ * @throws {ValidationError} a malformed id
+ * @throws {NotFoundError}   no such request, a draft, or a caller who may not read it
+ */
+export async function getEventRequestForCoordinatorReader(id, {
+  userId, role, client, withClosingNotes = false, columns,
+} = {}) {
+  requirePlausibleEventId(id);
+
+  let event;
+  if (columns === 'check') {
+    const row = await readEventRequestRow(id, CHECK_COLUMNS, client);
+    if (row.status === STATUS.DRAFT) throw new NotFoundError(`Event request ${id} not found`);
+    event = { id: row.id, status: row.status, assignedCoordinatorId: row.assigned_coordinator_id };
+  } else {
+    event = await getEventRequestForCoordinator(id, { client, withClosingNotes });
+  }
+
+  assertCoordinatorMayRead(event, userId, role, id);
+  return event;
 }
 
 /**
@@ -1928,23 +1981,9 @@ export async function getEventDecisionHistory(id, userId, role, { client } = {})
 /**
  * The caller's event requests awaiting a decision, oldest waiting first.
  *
- * SCRUM-45. The Event Coordinator's review queue, and the fix for the reported
- * bug that a submitted request never appears on the Coordinator side: until
- * now every read in this module was scoped to one organiser_id, so a second
- * person could not see the row at all.
- *
- * No organiserId, and assertOrganiser is deliberately NOT called: the queue
- * crosses Organisers, so the coordinator is its scope. SCRUM-444 (D3) narrowed
- * it to the events the caller holds. It used to list every held request, on
- * the reading that any coordinator may view any event; the Week 9 Q&A, sheet G3-5, row 16,
- * settled the opposite: "The co-ordinator will have access to his own assigned events."
- *
- * Which statuses count is not decided here. COORDINATOR_QUEUE_STATUSES owns
- * that, and its docstring carries the argument, including why `draft` is
- * left out.
- *
- * SCRUM-486 (SCRUM-520), AC2-06: a submitted request nobody holds is the
- * Lead's, in listUnassignedEventRequests, and the holder filter leaves it out.
+ * Only the events the caller holds, across Organisers: a coordinator reads
+ * their own events, and one nobody holds is the Lead's. Which statuses count is
+ * COORDINATOR_QUEUE_STATUSES's to decide.
  *
  * Four choices worth defending:
  *

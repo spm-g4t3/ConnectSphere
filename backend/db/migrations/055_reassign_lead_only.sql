@@ -1,11 +1,6 @@
--- Migration 055: SCRUM-444 AC3, only the Event Coordinator Lead hands an event
--- over. Week 9 Q&A: a coordinator cannot reassign their own events. This
--- reverses SCRUM-486 AC6, which let the holder hand over too; SCRUM-486 stays
--- Done and SCRUM-444 carries the change.
---
--- reassign_event_request restated whole from baseline/02_event_requests.sql, with
--- the same signature, so no drop. Only the caller check changes; the status
--- list, the new-holder checks, the history and the notices are the baseline's.
+-- Migration 055: only the Event Coordinator Lead hands an event over, so the
+-- holder can no longer pass their own event on. Restated whole from the baseline
+-- with the same signature; only the caller check changes.
 
 create or replace function reassign_event_request(
   p_event_request_id   uuid,

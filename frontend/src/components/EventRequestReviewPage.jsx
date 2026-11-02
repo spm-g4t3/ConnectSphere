@@ -26,6 +26,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
+import { useAuth } from "../auth/AuthContext";
+import { normaliseRole } from "../auth/normaliseRole";
 import { getEventRequestForReview } from "../services/eventRequestService";
 import CoordinatorRequestDetail from "./CoordinatorRequestDetail";
 
@@ -39,8 +41,14 @@ const LOAD_ERROR_MESSAGES = {
   500: "This event request could not be loaded. Please try again.",
 };
 
+// The Lead reads every event, so their 404 is only ever a draft or a missing id:
+// no handover to mention. Keyed on the role from the auth context, not the text.
+const LEAD_NOT_FOUND = "This event request doesn't exist or hasn't been submitted yet.";
+
 export default function EventRequestReviewPage() {
   const { eventRequestId } = useParams();
+  const { user } = useAuth();
+  const isLead = normaliseRole(user?.role) === "EVENT_COORDINATOR_LEAD";
   const [request, setRequest] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -50,14 +58,15 @@ export default function EventRequestReviewPage() {
       setRequest(await getEventRequestForReview(eventRequestId));
       setError(null);
     } catch (err) {
+      const status = err.response?.status;
       setError(
-        LOAD_ERROR_MESSAGES[err.response?.status] ||
+        (isLead && status === 404 ? LEAD_NOT_FOUND : LOAD_ERROR_MESSAGES[status]) ||
           "This event request could not be loaded. Please try again.",
       );
     } finally {
       setLoading(false);
     }
-  }, [eventRequestId]);
+  }, [eventRequestId, isLead]);
 
   useEffect(() => {
     load();

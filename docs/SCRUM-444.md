@@ -95,28 +95,32 @@ events, and after a handover the event is no longer his.
 | Gates | Every frontend gate at 100%, `SCRUM486_FILES` (`frontend/vite.config.js:121`, with `EventRequestReviewPage.jsx`) and `SCRUM487_FILES` (`:134`) among them; the backend's per-story thresholds met |
 | PGlite | `scrum444AccessMatrixDatabase.test.js`, 73 tests, on the full schema (`createSchemaDb()`: the baseline, then every migration to 056). Statuses are reached through the real workflow functions; only a Confirmed event that has ended is seeded. The renamed PGlite cases sit in five more files (section 5) |
 | Live database | Before 055, `reassign_event_request` had one overload and the holder-or-Lead message: `1 \| true` (checked 1 November 2026). Before 056, `request_event_clarification_with_fields` had one overload and no caller check: `1 \| true`. 055 and 056 applied by Calven; each check returned `true`. No live script was run by us |
-| Test-case document | 46 cases: **45 proved** and one recorded (AC2-09: no code to guard); 0 not yet implemented, 0 that cannot be written as specified. 10 are traps; 4 cases are on the screen |
+| Test-case document | 50 cases: **49 proved** and one recorded (AC2-09: no code to guard); 0 not yet implemented, 0 that cannot be written as specified. 12 are traps; 5 cases are on the screen |
+| Review on #107 (Rae, 2 November 2026) | One scoped reader for every coordinator read (D7), `/:id/cancellation-impact` among them; the Lead's 404 wording; the headers and stale comments trimmed. Backend 10,320 passing, 17 skipped and 2 todo across 249 files, 2 skipped. Frontend 5,012 passing of 5,013 across 213 files, twice, the one failure a different known flake each time (`ClarificationHistoryDialog`'s dialog test, then `SCRUM583_AC1_no_screen_adds_its_own_expiry_wording`), each passing 3 of 3 alone. Every gate met; `npm run lint` 0 errors and 25 warnings; `npm run build` passes. Three teeth checks, below |
 | Click-through | Passed in full, as reported by Calven on 2 November 2026, with two coordinators and the Lead: the other coordinator gets "isn't available"; only the Lead hands over; the previous holder loses access; the new holder asks for clarification; the Organiser and the Lead are unaffected |
 
 **Teeth checks**: each guard was broken in memory, the tests run, and the file
 restored from the in-memory copy and compared byte for byte (never `git checkout`).
-12 in all: 6 in brief 1, 2 in its fix-up, 4 in brief 2. The counts are the
+15 in all: 6 in brief 1, 2 in its fix-up, 4 in brief 2, 3 in review on #107. The counts are the
 `SCRUM444_` tests that failed, as each round's report gave them.
 
 | AC | What was broken | What failed | Round |
 |---|---|---|---|
-| AC1 | The helper's holder condition, so any coordinator passes (`eventRequestService.js:1875`) | 28 `SCRUM444_` tests: every non-holder and previous-holder read, the clarification refusals, the closing notes | Brief 1 |
-| AC1 | The helper's Lead branch removed (`:1874`) | 8: every Lead read, and the walkthrough | Brief 1 |
-| AC1 | `/queue`'s filter back to "anyone holds it" (`:2000`) | 5: the queue's route, service, PGlite and handover tests | Brief 1 |
-| AC1 | The clarification history back to "any coordinator past draft" (`:1833`) | 7 | Brief 1 |
-| AC1 | `GET /:id`'s id check removed (`eventRequests.js:793`) | 2: the malformed id, and `GET /coordinators` (500, not 400) | Fix-up |
-| AC1 | The helper ignoring the id as typed (`eventRequestService.js:1876`) | 1: `SCRUM444_AC1_a_non_holder_gets_the_id_back_as_typed_like_a_missing_event` | Fix-up |
+| AC1 | The helper's holder condition, so any coordinator passes (`eventRequestService.js:1877`) | 28 `SCRUM444_` tests: every non-holder and previous-holder read, the clarification refusals, the closing notes | Brief 1 |
+| AC1 | The helper's Lead branch removed (`:1876`) | 8: every Lead read, and the walkthrough | Brief 1 |
+| AC1 | `/queue`'s filter back to "anyone holds it" (`:2039`) | 5: the queue's route, service, PGlite and handover tests | Brief 1 |
+| AC1 | The clarification history back to "any coordinator past draft" (`:1834`) | 7 | Brief 1 |
+| AC1 | `GET /:id`'s id check removed (`eventRequests.js:782`) | 2: the malformed id, and `GET /coordinators` (500, not 400) | Fix-up |
+| AC1 | The helper ignoring the id as typed (`eventRequestService.js:1878`) | 1: `SCRUM444_AC1_a_non_holder_gets_the_id_back_as_typed_like_a_missing_event` | Fix-up |
 | AC1 | The id check removed from `/:id/status-history` | 1: its row of `SCRUM444_AC1_%s_refuses_a_malformed_id_with_400_before_any_read` (500, not 400) | Brief 2 |
-| AC2 | 056's caller check removed (`056:37–46`) | 3: both access-matrix rows for the clarification request and `SCRUM444_AC2_the_clarification_request_refuses_a_non_holder_with_42501_in_sql` (40001, not 42501) | Brief 2 |
-| AC3 | 055's Lead condition back to "the holder or a Lead" (`055:46`) | 3: `SCRUM444_AC3_the_holder_cannot_reassign`, `…_the_holder_is_refused_reassign_with_42501_and_nothing_changes`, `…_055_changes_only_the_callers_check` | Brief 1 |
-| AC3 | `leadOnly` on `POST /:id/reassign` back to `coordinatorOrLead` (`eventRequests.js:950`) | 3: the holder and any coordinator refused by the gate | Brief 1 |
+| AC2 | 056's caller check removed (`056:31–40`) | 3: both access-matrix rows for the clarification request and `SCRUM444_AC2_the_clarification_request_refuses_a_non_holder_with_42501_in_sql` (40001, not 42501) | Brief 2 |
+| AC3 | 055's Lead condition back to "the holder or a Lead" (`055:41`) | 3: `SCRUM444_AC3_the_holder_cannot_reassign`, `…_the_holder_is_refused_reassign_with_42501_and_nothing_changes`, `…_055_changes_only_the_callers_check` | Brief 1 |
+| AC3 | `leadOnly` on `POST /:id/reassign` back to `coordinatorOrLead` (`eventRequests.js:921`) | 3: the holder and any coordinator refused by the gate | Brief 1 |
 | AC3 | `canReassign` back to "the holder or a Lead" (`CoordinatorRequestDetail.jsx:270`) | 1: `SCRUM444_AC3_only_the_lead_is_offered_the_handover` | Brief 2 |
-| AC4 | The 404 message back to the old words (`EventRequestReviewPage.jsx:38`) | 1: `SCRUM444_AC4_a_404_says_the_event_isnt_available_to_you` | Brief 2 |
+| AC4 | The 404 message back to the old words (`EventRequestReviewPage.jsx:40`) | 1: `SCRUM444_AC4_a_404_says_the_event_isnt_available_to_you` | Brief 2 |
+| AC1 | The reader skipping `assertCoordinatorMayRead` (`eventRequestService.js:1928`) | 14: every non-holder and previous-holder read, the id as typed, cancellation-impact, the closing notes, and the guard | Review on #107 |
+| AC1 | `/:id/cancellation-impact` back on the unscoped read (`eventRequests.js:663`) | 2: `SCRUM444_AC1_cancellation_impact_is_a_missing_ids_404_for_a_non_holder` and the guard, each reaching the function | Review on #107 |
+| AC1 | The Lead's 404 back to the coordinator's words (`EventRequestReviewPage.jsx:63`) | 1: `SCRUM444_AC1_the_leads_404_does_not_mention_a_handover` | Review on #107 |
 
 The line numbers are today's; brief 1's checks ran before the fix-up moved some
 lines by a few.
@@ -155,7 +159,7 @@ lines by a few.
 
 ### AC1, end to end
 
-**User story** → **AC1** → **test cases** AC1-01 to AC1-16
+**User story** → **AC1** → **test cases** AC1-01 to AC1-20
 (`docs/test-cases/SCRUM-444.md`) → **test classes**
 `scrum444CoordinatorReadsRoutes.test.js`, `scrum444CoordinatorReadRule.test.js`,
 `scrum444AccessMatrixDatabase.test.js`, `EventRequestReviewPage.test.jsx`, and the
@@ -164,28 +168,28 @@ they do not hold.
 
 | Layer | Where | What happens | Proved by |
 |---|---|---|---|
-| Screen | `EventRequestReviewPage.jsx:38` | A 404 reads "This event isn't available to you. It may have been handed over to another coordinator, or it may no longer exist.", keyed on the status, never the server's text | `SCRUM444_AC4_a_404_says_the_event_isnt_available_to_you` |
-| Route: the id | `requirePlausibleEventId` (`backend/src/routes/eventRequests.js:158`), first in every read under `/:id` | A malformed id is a 400 before any read (D10) | `SCRUM444_AC1_%s_refuses_a_malformed_id_with_400_before_any_read` |
-| Route: the gate | `coordinatorOrLead` (`:232`) on `/:id/review` (`:666`) | Anyone but a coordinator or the Lead is 403 before the read | `SCRUM444_AC1_other_roles_are_answered_on_%s_as_before` |
-| The read | `getEventRequestForCoordinator` (`eventRequestService.js:1725`), unchanged | One row by id; a draft is a missing id's 404 | `SCRUM444_AC1_a_draft_is_404_on_%s` |
-| The rule | `assertCoordinatorMayRead` (`eventRequestService.js:1873`): the Lead passes (`:1874`), the holder passes (`:1875`), anyone else a missing id's `NotFoundError`, with the id as typed (`:1876`) | 404, the same body as a missing id's | `SCRUM444_AC1_another_coordinator_gets_the_missing_ids_404_on_%s`, `SCRUM444_AC1_a_non_holder_gets_the_id_back_as_typed_like_a_missing_event` |
-| Every caller | `/:id/change-requests/review` (`eventRequests.js:614`), `/:id/review` (`:669`), `/:id/assignments/review` (`:755`), `/:id/readiness` (`:774`), the equipment read (`eventEquipment.js:99`) | The same rule on every coordinator read | `SCRUM444_AC1_the_holder_reads_%s`, `SCRUM444_AC1_the_lead_reads_%s` |
-| The histories | `requireHistoryReader` (`eventRequestService.js:1884`): the Organiser, then a draft refused, then the rule (`:1890`); used by the clarification (`:1833`), decision (`:1905`) and change (`:3064`) histories | The clarification history is the holder's and the Lead's now, as the other two already were | `SCRUM444_AC1_an_unassigned_coordinator_is_refused_the_clarification_history` |
-| The queue | `listEventRequestsForReview(coordinatorId)` (`eventRequestService.js:1988`): the caller required (`:1991`), filtered to them (`:2000`); the route passes `req.user.id` (`eventRequests.js:286`) | Only the caller's events in the queue's statuses, oldest first | `SCRUM444_AC1_the_queue_lists_only_the_callers_events`, `SCRUM444_AC1_the_queue_is_filtered_to_the_caller_with_the_same_statuses_and_order` |
+| Screen | `EventRequestReviewPage.jsx:40` | A coordinator's 404 reads "This event isn't available to you. It may have been handed over to another coordinator, or it may no longer exist."; the Lead's (`:46`, chosen at `:63`) "This event request doesn't exist or hasn't been submitted yet." Keyed on the status and the role from the auth context, never the server's text | `SCRUM444_AC4_a_404_says_the_event_isnt_available_to_you`, `SCRUM444_AC1_the_leads_404_does_not_mention_a_handover` |
+| The id | `requirePlausibleEventId` (`backend/src/services/eventRequestService.js:1888`), first in every read under `/:id`, inside the reader on the coordinator reads | A malformed id is a 400 before any read (D10) | `SCRUM444_AC1_%s_refuses_a_malformed_id_with_400_before_any_read` |
+| Route: the gate | `coordinatorOrLead` (`eventRequests.js:220`) on `/:id/review` (`:652`) | Anyone but a coordinator or the Lead is 403 before the read | `SCRUM444_AC1_other_roles_are_answered_on_%s_as_before` |
+| The read | `getEventRequestForCoordinatorReader` (`eventRequestService.js:1914`): the id, then the event (`getEventRequestForCoordinator`, `:1726`, or with `columns: 'check'` only `id, status, assigned_coordinator_id`, `:1920`), then the rule (`:1928`) | One row by id; a draft is a missing id's 404 | `SCRUM444_AC1_a_draft_is_404_on_%s` |
+| The rule | `assertCoordinatorMayRead` (`eventRequestService.js:1875`): the Lead passes (`:1876`), the holder passes (`:1877`), anyone else a missing id's `NotFoundError`, with the id as typed (`:1878`) | 404, the same body as a missing id's | `SCRUM444_AC1_another_coordinator_gets_the_missing_ids_404_on_%s`, `SCRUM444_AC1_a_non_holder_gets_the_id_back_as_typed_like_a_missing_event` |
+| Every caller | `/:id/change-requests/review` (`eventRequests.js:598`), `/:id/review` (`:653`), `/:id/cancellation-impact` (`:663`), `/:id/assignments/review` (`:740`), `/:id/readiness` (`:761`), the equipment read (`eventEquipment.js:96`) | The same reader on every coordinator read; the walk over both routers proves none is left out | `SCRUM444_AC1_the_holder_reads_%s`, `SCRUM444_AC1_the_lead_reads_%s`, `SCRUM444_AC1_every_coordinator_read_route_uses_the_scoped_reader` |
+| The histories | `requireHistoryReader` (`eventRequestService.js:1937`): the Organiser, then a draft refused, then the rule (`:1943`); used by the clarification (`:1834`), decision (`:1958`) and change (`:3103`) histories | The clarification history is the holder's and the Lead's now, as the other two already were | `SCRUM444_AC1_an_unassigned_coordinator_is_refused_the_clarification_history` |
+| The queue | `listEventRequestsForReview(coordinatorId)` (`eventRequestService.js:2027`): the caller required (`:2030`), filtered to them (`:2039`); the route passes `req.user.id` (`eventRequests.js:274`) | Only the caller's events in the queue's statuses, oldest first | `SCRUM444_AC1_the_queue_lists_only_the_callers_events`, `SCRUM444_AC1_the_queue_is_filtered_to_the_caller_with_the_same_statuses_and_order` |
 
 ### AC3, end to end
 
 | Layer | Where | What happens | Proved by |
 |---|---|---|---|
 | Screen | `canReassign` (`CoordinatorRequestDetail.jsx:268–270`): someone holds it, not cancelled, and `isLead` | The button is the Lead's alone | `SCRUM444_AC3_only_the_lead_is_offered_the_handover` |
-| Route | `POST /:id/reassign` behind `leadOnly` (`eventRequests.js:950`, the gate at `:228`) | A coordinator, the holder included, is 403 before the function | `SCRUM444_AC3_a_coordinator_is_refused_reassign_with_403_and_queries_nothing` |
-| SQL | `reassign_event_request` (`055:10`): the Lead looked up under `for share` (`055:39–44`), anyone else refused (`055:46–47`), before the status list (`055:61`) | 42501, "only the Event Coordinator Lead can hand over event request …"; nothing changes | `SCRUM444_AC3_the_holder_is_refused_reassign_with_42501_and_nothing_changes`, `SCRUM444_AC3_%s_is_refused_reassign_with_42501` |
+| Route | `POST /:id/reassign` behind `leadOnly` (`eventRequests.js:921`, the gate at `:216`) | A coordinator, the holder included, is 403 before the function | `SCRUM444_AC3_a_coordinator_is_refused_reassign_with_403_and_queries_nothing` |
+| SQL | `reassign_event_request` (`055:5`): the Lead looked up under `for share` (`055:34–39`), anyone else refused (`055:41–42`), before the status list (`055:56`) | 42501, "only the Event Coordinator Lead can hand over event request …"; nothing changes | `SCRUM444_AC3_the_holder_is_refused_reassign_with_42501_and_nothing_changes`, `SCRUM444_AC3_%s_is_refused_reassign_with_42501` |
 
 ### What each refusal becomes
 
 | Refusal | Answer | Screen |
 |---|---|---|
-| A read by a non-holder, or of a draft or a missing id | 404, "Event request <id as typed> not found" | "This event isn't available to you. …" (`EventRequestReviewPage.jsx:38`) |
+| A read by a non-holder, or of a draft or a missing id | 404, "Event request <id as typed> not found" | "This event isn't available to you. …" (`EventRequestReviewPage.jsx:40`); to the Lead, "This event request doesn't exist or hasn't been submitted yet." (`:46`) |
 | A write by a non-holder | 403 from 42501, the function's refusal (D6); the clarification request is refused first by its service, also 403 | Each screen's own 403 words; the handover panel's is "You cannot hand this event over. Only the Event Coordinator Lead can do that." (`ReassignEventPanel.jsx:56`) |
 | A handover by anyone but the Lead | 403 from `leadOnly`, before the function | The button is not offered (AC3) |
 | A malformed id on a read | 400, `[{ field: 'id', message: 'must be a valid id' }]` | — |
@@ -194,11 +198,11 @@ they do not hold.
 
 ## 3. Design decisions
 
-D1 to D6 were decided with Calven on 1 November 2026; D7 to D10 are the briefs'.
+D1 to D6 were decided with Calven on 1 November 2026; D7 to D10 are the briefs' (D7 revised on review of #107).
 
 ### D1. A read by a non-holder is a 404 — **decided with Calven, 1 November 2026**
 
-The same `NotFoundError` a missing id gets (`eventRequestService.js:1876`), as
+The same `NotFoundError` a missing id gets (`eventRequestService.js:1878`), as
 SCRUM-434 answers foreign events. *Rejected: 403*, which confirms the event exists.
 
 ### D2. The previous holder gets no access — **decided with Calven, 1 November 2026**
@@ -209,7 +213,7 @@ own assigned events, and the event is no longer his.
 
 ### D3. The queue is narrowed — **decided with Calven, 1 November 2026**
 
-`GET /queue` lists only the caller's events (`eventRequestService.js:2000`).
+`GET /queue` lists only the caller's events (`eventRequestService.js:2039`).
 *Rejected: removing it*: it is still the coordinator's worklist of events awaiting
 a decision, beside "My events".
 
@@ -228,18 +232,24 @@ Its only caller was the holder's picker; the Lead's reads `GET /coordinator-work
 Only reads are 404. This is the split SCRUM-434 also chose. *Rejected: mapping 42501
 to 404 on writes*, which would rewrite other stories' answers and tests.
 
-### D7. One route-level helper; the coordinator read is unchanged
+### D7. One scoped reader for every coordinator read; the unscoped read is for writes
 
-`assertCoordinatorMayRead` is called after `getEventRequestForCoordinator` by each
-read route (section 2), never inside it. The read's other callers are writes
-(`eventRequestService.js`, `bookingRequestService.js`, `venueSuitabilityService.js`),
-already refused by their SQL function or `assertCheckable`; narrowing the read
-would turn their 42501 and 403 into 404s.
+Every coordinator read route reads its event through
+`getEventRequestForCoordinatorReader` (section 2): the id check, the read and
+`assertCoordinatorMayRead` in one call, so a route cannot read the event and leave
+the check out. `getEventRequestForCoordinator` stays unscoped for its other
+callers (`eventRequestService.js`, `bookingRequestService.js`,
+`venueSuitabilityService.js`), which are refused by their SQL function or
+`assertCheckable`; scoping it would turn their 42501 and 403 into 404s.
+`SCRUM444_AC1_every_coordinator_read_route_uses_the_scoped_reader` walks both
+routers and fails for any coordinator read that lets a non-holder through.
+*Rejected: each route calling the check*, which is what review found missed once:
+`GET /:id/cancellation-impact` read the event and left the refusal to its function.
 
 ### D8. 056 checks the caller inside the function (AGENTS.md:16)
 
 `request_event_clarification_with_fields` reads and locks the event, then refuses a
-null caller, a non-holder or a holder without the coordinator role (`056:29–46`),
+null caller, a non-holder or a holder without the coordinator role (`056:23–40`),
 before its inputs and status. Before 056 a non-holder met only
 `change_event_request_status`'s guard, 40001. *Rejected: relying on the route
 alone*; the service's 403 still answers first over HTTP.
@@ -247,12 +257,12 @@ alone*; the service's 403 still answers first over HTTP.
 ### D9. The 404 echoes the id as typed
 
 Postgres matches a uuid in any case, so an existing event typed in capitals is
-found. The refusal names the id as requested (`requestedId`, `:1873`), as a missing
+found. The refusal names the id as requested (`requestedId`, `:1875`), as a missing
 id's does; the stored lowercase id would give the event away.
 
 ### D10. A malformed id is a 400 on every read
 
-`requirePlausibleEventId` (`eventRequests.js:158`) before any read under `/:id`,
+`requirePlausibleEventId` (`eventRequestService.js:1888`) before any read under `/:id`,
 where Postgres's 22P02 used to arrive as a 500. `GET /coordinators`, removed, now
 falls through to `GET /:id` and is this 400.
 
@@ -262,13 +272,12 @@ falls through to `GET /:id` and is this 400.
 
 | Gap | Detail | Owner |
 |---|---|---|
-| 403 on a write, 404 on a read | D6: a write by a non-holder confirms the id exists. The reads that already allowed only the holder (registrations, flagged bookings, the cancellation preview, venue suitability) answer 403 or 42501 too | Accepted (D6) |
-| Answers that changed | `GET /:id/change-requests/review` reads the event first, so a missing id is a 404 where it was `200 []`; the equipment read's missing-id message is now `Event request <id> not found`, where it was `Event request not found`; a draft's equipment is a 404 where any coordinator could read it; `GET /:id` and the other reads answer a malformed id 400 where it was a 500 | Accepted |
+| 403 on a write, 404 on a read | D6: a write by a non-holder confirms the id exists. The reads that already allowed only the holder (registrations, flagged bookings, venue suitability) answer 403 or 42501 too | Accepted (D6) |
+| Answers that changed | `GET /:id/change-requests/review` reads the event first, so a missing id is a 404 where it was `200 []`; the equipment read's missing-id message is now `Event request <id> not found`, where it was `Event request not found`; a draft's equipment is a 404 where any coordinator could read it; `GET /:id` and the other reads answer a malformed id 400 where it was a 500; since review on #107, `GET /:id/cancellation-impact` answers a non-holder coordinator 404 where it was the function's 403, and `/change-requests/review` and the equipment read answer a malformed id with the shared message and field | Accepted |
 | A flaky frontend test | `SCRUM583_AC1_no_screen_adds_its_own_expiry_wording` failed once in a full run ("Target cannot be null or undefined") and passed alone; 3 of 3 passed in brief 2. It touches no 444 code | SCRUM-583 |
-| One 400 message differs | `/:id/change-requests/review` keeps 402's "eventRequestId must be a valid id"; every other read says "Invalid event request id". Both are 400 | Accepted; 402's tests pin it |
 | The handover panel's words | Brief 2 changed `ReassignEventPanel.jsx`'s intro and 403 messages, which SCRUM-586 is aligning to the UI standard. Tell Terence | SCRUM-586 |
 | On-site support assignments | AC2 names them; dev has no route, function or table, so nothing guards them yet (AC2-09) | Its story |
-| 055's header | Cites "Week 9 Q&A" without the sheet and row. 055 is live, so it was not edited | Accepted |
+| 055's and 056's headers | Trimmed to their why on review (comment lines above `create or replace function` only). Both are live; no SQL in a function body changed, so the applied functions are what the files define | Accepted |
 
 ---
 
@@ -277,8 +286,8 @@ falls through to `GET /:id` and is this 400.
 - **`reassign_event_request`.** Any later restate starts from 055, not the baseline.
 - **`request_event_clarification_with_fields`.** Any later restate starts from 056,
   not 011, and keeps its caller check at the top.
-- **A new coordinator read** must call `assertCoordinatorMayRead` after its read,
-  with `req.params.id`, and `requirePlausibleEventId` before it.
+- **A new coordinator read** reads its event through
+  `getEventRequestForCoordinatorReader`; the guard test fails if it does not.
 - **Tests renamed from other stories,** each `SCRUM444_…` and flipped, never
   loosened; the full old → new list is the "Changed by design" section of
   `docs/test-cases/SCRUM-444.md`. 42 rows: 16 backend, 2 more backend for 056

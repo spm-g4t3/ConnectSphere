@@ -326,8 +326,7 @@ export async function getConfirmedArrangements(id) {
  *
  * Each row is the shape getMyEventRequests returns, statusDisplay included,
  * plus organiserName: the Organiser's name, or null when they have none on
- * record. This is the one list that carries a name. The shared queue
- * deliberately does not, because it is everyone's queue; these are events the
+ * record. This is the one list that carries a name: these are the events the
  * coordinator is responsible for, where contacting the Organiser is the job.
  *
  * Gated on the event_coordinator role, so a 403 means "not a coordinator",
@@ -341,12 +340,10 @@ export async function getMyAssignedEvents() {
 }
 
 /**
- * One event, for any Event Coordinator (SCRUM-332).
+ * One event, for the coordinator who holds it or the Lead (SCRUM-332).
  *
- * Not only the assigned coordinator: every coordinator can read every event
- * past draft. Which coordinator holds an event decides who may change it,
- * never who may read it, and SCRUM-327 AC7 says the previous coordinator can
- * still view an event they handed over.
+ * Anyone else, a previous holder included, gets a missing id's 404, so a
+ * coordinator learns nothing of an event they do not hold.
  *
  * This is how a coordinator opens an event the queue no longer carries. The
  * queue holds only submitted, under_review and pending_clarification, so an
@@ -426,13 +423,12 @@ export async function getAssignmentHistory(id) {
  * carries handoverNote: the note's text, or null when none was written, which
  * is always so on an automatic assignment.
  *
- * Any coordinator gets the notes, not only the one now assigned. The note is
- * written for the coordinator team, and the Organiser is the reader it is
- * kept from. Limiting it to the current coordinator would hide every note from
- * the person who wrote it, since writing one means handing the event away.
+ * The holder and the Lead get the notes: a note is for whoever takes the event
+ * next, who now holds it, and the Organiser is the reader it is kept from.
  *
- * Gated on the event_coordinator role, so a 403 means "not a coordinator". A
- * draft or a missing id answers 404, as getEventRequestForReview does.
+ * Gated on the coordinator and Lead roles, so a 403 means neither. A draft, a
+ * missing id or an event the caller does not hold answers 404, as
+ * getEventRequestForReview does.
  *
  * @param {string} id
  * @returns {Promise<Array>} possibly empty

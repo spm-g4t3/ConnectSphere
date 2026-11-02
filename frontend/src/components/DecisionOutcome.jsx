@@ -26,9 +26,8 @@
 // asks for the first. The newest history entry would give the second.
 //
 // The status history (GET /:id/status-history) also names who made each
-// change, but it refuses any coordinator the event is not currently assigned
-// to, and a decided event may since have been handed over. The assignment
-// history is readable by the Organiser and by every coordinator.
+// change, but answers only the Organiser and the event's coordinator; the
+// assignment history answers the Lead too.
 
 import { useEffect, useState } from "react";
 import { useAuth } from "../auth/AuthContext";

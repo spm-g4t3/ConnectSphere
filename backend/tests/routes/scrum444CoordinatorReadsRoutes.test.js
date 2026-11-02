@@ -11,6 +11,7 @@ import request from 'supertest';
 
 import { createEventRequestRouter } from '../../src/routes/eventRequests.js';
 import { createEventEquipmentRouter } from '../../src/routes/eventEquipment.js';
+import { createRequireRole } from '../../src/middleware/requireRole.js';
 import { ROLE } from '../../src/domain/userRole.js';
 import { STATUS } from '../../src/domain/eventRequestStatus.js';
 import { ok, createEventRequestClient } from '../fixtures/supabaseStubs.js';
@@ -181,14 +182,42 @@ describe('SCRUM-444 AC1: a coordinator reads only the events they hold; the Lead
     ['cancellation_impact', '/cancellation-impact', ROLE.EVENT_COORDINATOR_LEAD],
     ['assignments', '/assignments', ROLE.EVENT_ORGANISER],
     ['assignments_review', '/assignments/review', ROLE.EVENT_COORDINATOR],
+    ['change_requests_review', '/change-requests/review', ROLE.EVENT_COORDINATOR],
+    ['readiness', '/readiness', ROLE.EVENT_COORDINATOR],
+    ['equipment', '/equipment', ROLE.EVENT_COORDINATOR],
   ])('SCRUM444_AC1_%s_refuses_a_malformed_id_with_400_before_any_read', async (_name, suffix, role) => {
     const client = createEventRequestClient([]);
 
     const res = await request(appWith(client, as(role, HOLDER_ID))).get(`/api/event-requests/not-a-uuid${suffix}`);
 
     expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Invalid event request id');
     expect(res.body.details).toEqual([{ field: 'id', message: 'must be a valid id' }]);
     expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM444_AC1_confirmed_arrangements_refuses_a_malformed_id_with_400', async () => {
+    // No route check: getConfirmedArrangementsForOrganiser refuses it before its read.
+    const client = createEventRequestClient([]);
+
+    const res = await request(appWith(client, as(ROLE.EVENT_ORGANISER, ORGANISER_ID)))
+      .get('/api/event-requests/not-a-uuid/confirmed-arrangements');
+
+    expect(res.status).toBe(400);
+    expect(res.body.details).toEqual([{ field: 'id', message: 'must be a valid id' }]);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM444_AC1_cancellation_impact_is_a_missing_ids_404_for_a_non_holder', async () => {
+    const path = (id) => `/api/event-requests/${id}/cancellation-impact`;
+
+    const { res, client } = await read(path(EVENT_ID), { role: ROLE.EVENT_COORDINATOR, userId: OTHER_COORDINATOR_ID });
+
+    expect(res.status).toBe(404);
+    expect(asMissing(res.body)).toEqual((await missingIdAnswer(path)).body);
+    // The event read only: event_cancellation_impact_preview is never called.
+    expect(client.calls).toHaveLength(1);
+    expect(client.calls[0]).toMatchObject({ table: 'event_requests', operation: 'select' });
   });
 
   it('SCRUM444_AC1_get_by_id_refuses_a_malformed_id_with_400_before_the_read', async () => {
@@ -304,5 +333,68 @@ describe('SCRUM-444 AC3: only the Lead hands an event over', () => {
     expect(res.status).toBe(400);
     expect(res.body.details).toEqual([{ field: 'id', message: 'must be a valid id' }]);
     expect(client.calls).toHaveLength(0);
+  });
+});
+
+describe('SCRUM-444 AC1: no coordinator read route can skip the holder check', () => {
+  // Tags each gate with its roles, so the walk can tell which routes are coordinator reads.
+  const taggingRequireRole = (...roles) => Object.assign(createRequireRole(...roles), { roles });
+  const COORDINATOR_GATES = [
+    [ROLE.EVENT_COORDINATOR].join(),
+    [ROLE.EVENT_COORDINATOR, ROLE.EVENT_COORDINATOR_LEAD].join(),
+  ];
+  const MOUNTS = [
+    ['/api/event-requests/:id/equipment', createEventEquipmentRouter],
+    ['/api/event-requests', createEventRequestRouter],
+  ];
+  const taggedApp = (client, requireAuth) => MOUNTS.reduce(
+    (app, [prefix, create]) => app.use(prefix, create({ client, requireAuth, requireRole: taggingRequireRole })),
+    express().use(express.json()),
+  );
+
+  // Excluded by the walk, and why: GET /queue, /mine and /needs-attention have
+  // no :id and list only the caller's events; GET /change-requests/:changeRequestId/preview
+  // takes a change request's id, and preview_change_request (036) refuses a
+  // non-holder as the decision does. Ungated reads (the histories) are scoped
+  // in their services, and covered by READS above.
+  const COVERED = [
+    '/api/event-requests/:id/equipment/',
+    '/api/event-requests/:id/change-requests/review',
+    '/api/event-requests/:id/review',
+    '/api/event-requests/:id/cancellation-impact',
+    '/api/event-requests/:id/assignments/review',
+    '/api/event-requests/:id/readiness',
+  ];
+
+  function coordinatorReadRoutes() {
+    const auth = as(ROLE.EVENT_COORDINATOR, HOLDER_ID);
+    return MOUNTS.flatMap(([prefix, create]) => create({ client: createEventRequestClient([]), requireAuth: auth, requireRole: taggingRequireRole })
+      .stack
+      .filter((layer) => layer.route?.methods.get)
+      .filter((layer) => layer.route.stack.some((step) => COORDINATOR_GATES.includes(step.handle.roles?.join())))
+      .map((layer) => `${prefix}${layer.route.path}`)
+      .filter((path) => /(^|\/):id(\/|$)/.test(path)));
+  }
+
+  it('SCRUM444_AC1_every_coordinator_read_route_uses_the_scoped_reader', async () => {
+    const routes = coordinatorReadRoutes();
+    // The walk finds today's routes; one added later is checked without being listed.
+    expect(routes).toEqual(expect.arrayContaining(COVERED));
+
+    for (const route of routes) {
+      const at = (id) => route.replace(':id', id);
+
+      const missingClient = createEventRequestClient([ok(null)]);
+      const missing = await request(taggedApp(missingClient, as(ROLE.EVENT_COORDINATOR, HOLDER_ID))).get(at(MISSING_ID));
+      const client = createEventRequestClient([ok(row())]);
+      const res = await request(taggedApp(client, as(ROLE.EVENT_COORDINATOR, OTHER_COORDINATOR_ID))).get(at(EVENT_ID));
+
+      expect(missing.status, route).toBe(404);
+      expect(res.status, route).toBe(404);
+      expect(asMissing(res.body), route).toEqual(missing.body);
+      // Refused on the event read: nothing past it is queried.
+      expect(client.calls, route).toHaveLength(1);
+      expect(client.calls[0], route).toMatchObject({ table: 'event_requests', operation: 'select' });
+    }
   });
 });
