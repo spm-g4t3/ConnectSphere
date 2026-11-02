@@ -45,21 +45,17 @@
  *    Residual, named rather than hidden: any authenticated user can POST /
  *    and own the draft they create. Low harm; if the team wants it closed the
  *    gate belongs on POST / alone, using the same requireRole option.
- *  - Coordinator routes are role-gated per route. Clarification and, since
- *    SCRUM-331, handing an event to a colleague (POST /:id/reassign) are the
- *    Coordinator actions in this router, alongside deciding change requests.
- *    The role says who may reach them; which coordinator may act is checked
- *    against the event's assigned coordinator (SCRUM-332), by the service for
- *    clarification and by the database functions for the other two. Reading
- *    is the opposite: since SCRUM-332, any coordinator can read any event
- *    past draft through GET /:id/review. Moving requests through later
- *    planning statuses remains a separate workflow.
+ *  - Coordinator routes are role-gated per route. The role says who may reach
+ *    them; which coordinator may act is checked against the event's assigned
+ *    coordinator (SCRUM-332), by the service for clarification and by the
+ *    database functions for the rest. Reading follows the same rule since
+ *    SCRUM-444: each coordinator read answers only the holder and the Lead
+ *    (getEventRequestForCoordinatorReader), and anyone else as a missing id.
  *  - The Event Coordinator Lead's routes (SCRUM-486) are gated per route too,
  *    by leadOnly: the unassigned queue, the picker's coordinator workload, the
  *    list of assigned events (AC6) and the first assignment; since SCRUM-487,
- *    the coordinator overview's counts too. POST
- *    /:id/reassign admits a Lead as well as a coordinator; which of them may
- *    hand over this event is the database's question, as before.
+ *    the coordinator overview's counts too, and since SCRUM-444 (055) POST
+ *    /:id/reassign: the holder may no longer hand an event over.
  *
  * Ownership is proved by this router, not assumed from the service. Three of
  * the routes below open with an explicit getEventRequestForOrganiser call and
@@ -75,7 +71,8 @@ import express from 'express';
 import {
   listEventRequestsForOrganiser,
   getEventRequestForOrganiser,
-  getEventRequestForCoordinator,
+  getEventRequestForCoordinatorReader,
+  requirePlausibleEventId,
   getEventRequestStatusHistory,
   getEventClarificationHistory,
   getEventDecisionHistory,
@@ -84,7 +81,6 @@ import {
   listEventRequestsForReview,
   listEventRequestsForCoordinator,
   listNeedsAttention,
-  listCoordinators,
   listUnassignedEventRequests,
   listCoordinatorWorkload,
   listCoordinatorOverview,
@@ -137,8 +133,6 @@ import { ROLE } from '../domain/userRole.js';
 // Credential-free too: http/handleError.js imports only errors.js.
 import { createErrorMiddleware } from '../http/handleError.js';
 import { ValidationError } from '../errors.js';
-// Pure, like the two above: the repository's one uuid check (SCRUM-489's readiness read).
-import { isPlausibleId } from '../validation/ids.js';
 
 
 /** Answers whatever a handler throws or rejects with; see src/http/handleError.js (SCRUM-127). */
@@ -220,13 +214,9 @@ export function createEventRequestRouter({
   // SCRUM-486 (SCRUM-519): the unassigned queue, the picker's workload and the
   // first assignment are the Event Coordinator Lead's alone (AC1, AC2, AC3).
   const leadOnly = requireRole(ROLE.EVENT_COORDINATOR_LEAD);
-  // SCRUM-486 AC6: a handover may be made by the coordinator who holds the
-  // event or by a Lead. requireRole is an exact match on one role per
-  // account, so the Lead has to be named; coordinatorOnly refused them before
-  // reassign_event_request (052) could say yes. Since SCRUM-521 it also gates
-  // the three reads the event screen makes on mount (/:id/review,
-  // /:id/assignments/review, /:id/change-requests/review), so the Lead can
-  // open the screen they hand an event over from.
+  // The coordinator reads the event screen makes on mount, which the Lead opens
+  // to hand an event over (SCRUM-521). requireRole matches one role per account,
+  // so the Lead is named. Reassign itself is leadOnly since SCRUM-444.
   const coordinatorOrLead = requireRole(ROLE.EVENT_COORDINATOR, ROLE.EVENT_COORDINATOR_LEAD);
 
   // Authentication is applied to the whole router rather than per route.
@@ -249,25 +239,23 @@ export function createEventRequestRouter({
   });
 
   /**
-   * SCRUM-45: everything awaiting a decision, for an Event Coordinator.
+   * SCRUM-45: the caller's events awaiting a decision, for an Event Coordinator.
    *
-   * The first route in this file that was not scoped to req.user.id (GET
-   * /:id/review, since SCRUM-332, is the other), and the fix
-   * for the reported bug that a submitted request never reached the
-   * Coordinator side. Which rows qualify is decided by
-   * COORDINATOR_QUEUE_STATUSES in the domain -- notably, a draft never appears
-   * here, which is what keeps a shared queue from exposing an Organiser's
-   * private working copy.
+   * The fix for the reported bug that a submitted request never reached the
+   * Coordinator side. Since SCRUM-444 (D3) it is scoped to req.user.id as the
+   * assigned coordinator, like GET /mine: it used to list every coordinator's
+   * events. Which statuses qualify is decided by COORDINATOR_QUEUE_STATUSES in
+   * the domain; a draft never appears here.
    *
    * DECLARATION ORDER HERE IS LOAD-BEARING, and this, GET /mine (SCRUM-333)
-   * and GET /coordinators (SCRUM-334) below are the only places in this
+   * and the other one-segment reads below are the only places in this
    * router where that is literally true. Every other ordering note in this
    * file -- on /:id/status below, and above the writes -- carefully explains
    * that the paths cannot actually collide because /:id is one segment and
    * /:id/... is two. This one can and does: '/queue' is also one segment, so
-   * declared after GET /:id Express would match it with id === 'queue', hand
-   * Postgres a uuid comparison against a word, and return a 500 built out of
-   * an unrecognised 22P02. Do not move it below /:id.
+   * declared after GET /:id Express would match it with id === 'queue' and
+   * answer GET /:id's 400 for a malformed id (before SCRUM-444, a 500 out of
+   * an unrecognised 22P02). Do not move it below /:id.
    *
    * coordinatorOnly is passed as a per-route argument and must stay one. See
    * the factory above.
@@ -283,7 +271,7 @@ export function createEventRequestRouter({
    * to validate, the same stance routes/venues.js takes on GET /.
    */
   router.get('/queue', coordinatorOnly, async (req, res) => {
-    const requests = await listEventRequestsForReview({ client });
+    const requests = await listEventRequestsForReview(req.user.id, { client });
     res.status(200).json(requests.map(withStatusDisplay));
   });
 
@@ -291,10 +279,9 @@ export function createEventRequestRouter({
    * SCRUM-333 (SCRUM-327 AC11): "My events", every event assigned to the
    * signed-in coordinator, soonest first, each with its organiser's name.
    *
-   * Beside GET /queue, not replacing it. The queue is every coordinator's view
-   * of work awaiting a decision, whoever holds it; this is the work the caller
-   * does hold. (Until SCRUM-486 the queue was described as work nobody holds
-   * yet; that work is now the Lead's, at GET /unassigned.) Which one the
+   * Beside GET /queue, not replacing it. Since SCRUM-444 both are the caller's
+   * events: the queue those awaiting a decision, this one all of them. (Work
+   * nobody holds yet is the Lead's, at GET /unassigned.) Which one the
    * dashboard opens on is the frontend's choice.
    *
    * DECLARATION ORDER IS LOAD-BEARING, exactly as for /queue above. '/mine' is
@@ -339,27 +326,6 @@ export function createEventRequestRouter({
   });
 
   /**
-   * SCRUM-334 (SCRUM-327 AC9): every Event Coordinator, as { id, fullName },
-   * for the reassign picker.
-   *
-   * Behind coordinatorOnly. This is the first endpoint in the API that lists
-   * users, so the first that could be used to enumerate staff, and no
-   * Organiser or attendee feature needs it: only the reassign picker does. The
-   * gate fails closed, and a future story that needs the list elsewhere can
-   * widen it and give its reason.
-   *
-   * DECLARATION ORDER IS LOAD-BEARING, as for /queue and /mine above:
-   * '/coordinators' is one segment, so declared after GET /:id it would be
-   * read as id === 'coordinators'. Do not move it below /:id.
-   *
-   * A bare array. It includes the caller; leaving them out of the picker is
-   * presentation.
-   */
-  router.get('/coordinators', coordinatorOnly, async (req, res) => {
-    res.status(200).json(await listCoordinators({ client }));
-  });
-
-  /**
    * SCRUM-491 (AC2): the Approved events a tentative hold can be placed for,
    * as { id, eventName, proposedStart, proposedEnd, expectedAttendance,
    * assignedCoordinatorId, assignedCoordinatorName }, soonest first. The hold
@@ -369,8 +335,8 @@ export function createEventRequestRouter({
    * every Approved event and its coordinator, which no other role's screen
    * needs.
    *
-   * DECLARATION ORDER IS LOAD-BEARING, as for /queue, /mine and /coordinators
-   * above: '/hold-candidates' is one segment, so declared after GET /:id it
+   * DECLARATION ORDER IS LOAD-BEARING, as for /queue and /mine above:
+   * '/hold-candidates' is one segment, so declared after GET /:id it
    * would be read as an id. Do not move it below /:id.
    *
    * A bare array; none is 200 []. Statuses: 200, 401, 403 unless Venue
@@ -385,11 +351,11 @@ export function createEventRequestRouter({
    * every submitted request nobody has been assigned, oldest submission first,
    * each with its organiser's name and statusDisplay.
    *
-   * Lead only. The coordinators' shared queue (GET /queue) is theirs; this one
-   * is the Lead's worklist, and a coordinator has nothing to do with a row in
+   * Lead only. GET /queue is each coordinator's own; this one is the Lead's
+   * worklist, and a coordinator has nothing to do with a row in
    * it: only a Lead can assign (052).
    *
-   * DECLARATION ORDER IS LOAD-BEARING, as for /queue, /mine, /coordinators and
+   * DECLARATION ORDER IS LOAD-BEARING, as for /queue, /mine and
    * /hold-candidates above: '/unassigned' is one segment, so declared after
    * GET /:id it would be read as an id. Do not move it below /:id.
    *
@@ -405,12 +371,9 @@ export function createEventRequestRouter({
    * SCRUM-486 AC3 (SCRUM-519): every Event Coordinator, as
    * { id, fullName, activeEvents }, for the Lead's assignment picker.
    *
-   * A route of its own rather than GET /coordinators widened to the Lead.
-   * /coordinators is SCRUM-334's handover picker: it is read by every
-   * coordinator, so adding workload to it would show each of them everyone's
-   * caseload, which no story asked for; and SCRUM-485 pins that a Lead is
-   * refused it (SCRUM485_AC5_GET /coordinators_refuses_...), a refusal this
-   * leaves standing. Here the gate says exactly who reads workload: the Lead.
+   * The gate says exactly who reads workload: the Lead. Since SCRUM-444 (D5)
+   * this is the only list of coordinators: GET /coordinators, the holder's
+   * handover picker, went with the holder's right to hand over.
    *
    * DECLARATION ORDER IS LOAD-BEARING, as above. A bare array, ordered by name,
    * never by workload. Statuses: 200, 401, 403 unless a Lead, 500.
@@ -505,6 +468,7 @@ export function createEventRequestRouter({
    * two -- but the ordering is what someone adding a route later will copy.
    */
   router.get('/:id/status', async (req, res) => {
+    requirePlausibleEventId(req.params.id);
     const request = await getEventRequestForOrganiser(req.params.id, req.user.id, { client });
     const display = getStatusDisplay(request.status);
 
@@ -541,11 +505,13 @@ export function createEventRequestRouter({
    * Organiser-facing label for each (SCRUM-323), and no more.
    */
   router.get('/:id/status-history', async (req, res) => {
+    requirePlausibleEventId(req.params.id);
     const history = await getEventRequestStatusHistory(req.params.id, req.user.id, { client });
     res.status(200).json(history);
   });
 
   router.get('/:id/clarification-history', async (req, res) => {
+    requirePlausibleEventId(req.params.id);
     const history = await getEventClarificationHistory(
       req.params.id,
       req.user.id,
@@ -557,6 +523,7 @@ export function createEventRequestRouter({
 
   // SCRUM-355: past decisions, gated as the clarification history is.
   router.get('/:id/decision-history', async (req, res) => {
+    requirePlausibleEventId(req.params.id);
     const history = await getEventDecisionHistory(
       req.params.id,
       req.user.id,
@@ -573,6 +540,7 @@ export function createEventRequestRouter({
    * coordinator and a Lead read it, and answers anyone else 404.
    */
   router.get('/:id/change-history', async (req, res) => {
+    requirePlausibleEventId(req.params.id);
     const history = await getEventChangeHistory(
       req.params.id,
       req.user.id,
@@ -609,6 +577,7 @@ export function createEventRequestRouter({
    * two, but the ordering is what someone adding a route later will copy.
    */
   router.get('/:id/change-requests', async (req, res) => {
+    requirePlausibleEventId(req.params.id);
     await getEventRequestForOrganiser(req.params.id, req.user.id, { client });
 
     const changeRequests = await getChangeRequestsForEvent(
@@ -623,21 +592,25 @@ export function createEventRequestRouter({
   // SCRUM-486 (SCRUM-521): coordinatorOrLead, for the reason GET /:id/review
   // gives. The event screen reads this on mount; deciding a change request
   // (POST /change-requests/:id/decision) stays coordinatorOnly, and 019 still
-  // checks the caller holds the event.
+  // checks the caller holds the event. SCRUM-444: read through the scoped
+  // reader, so a non-holder and a missing id are the same 404.
   router.get('/:id/change-requests/review', coordinatorOrLead, async (req, res) => {
+    await getEventRequestForCoordinatorReader(req.params.id, {
+      userId: req.user.id, role: req.user.role, client, columns: 'check',
+    });
+
     const changeRequests = await getChangeRequestsForCoordinator(req.params.id, { client });
     res.status(200).json(changeRequests);
   });
 
   /**
-   * SCRUM-332 (SCRUM-327 AC7): one event, for any Event Coordinator.
+   * SCRUM-332 (SCRUM-327 AC7): one event, for its coordinator.
    *
-   * The previous coordinator can still view an event they handed over, and
-   * every coordinator can open an event the queue no longer lists, such as an
-   * approved or confirmed one. The service reads with no organiser or
-   * coordinator comparison, so coordinatorOnly is the whole of the check, as on
-   * GET /queue. A draft is a 404, worded exactly like a missing event, because
-   * no coordinator is meant to know a draft exists.
+   * SCRUM-444 AC1, AC4: the holder and the Lead only. Another coordinator, and
+   * the previous holder after a handover, get a missing id's 404
+   * (getEventRequestForCoordinatorReader), as does anyone for a draft, because no
+   * coordinator is meant to know a draft exists. Until SCRUM-444 any
+   * coordinator could read any event here.
    *
    * A separate route, not a role branch inside GET /:id, for four reasons:
    *
@@ -677,15 +650,19 @@ export function createEventRequestRouter({
    * Both roles that pass the gate are coordinator-side; an Organiser never reaches this route.
    */
   router.get('/:id/review', coordinatorOrLead, async (req, res) => {
-    const request = await getEventRequestForCoordinator(req.params.id, { client, withClosingNotes: true });
+    const request = await getEventRequestForCoordinatorReader(req.params.id, {
+      userId: req.user.id, role: req.user.role, client, withClosingNotes: true,
+    });
     res.status(200).json(withStatusDisplay(request));
   });
 
-  // SCRUM-539: the Lead previews a submitted request nobody holds. Who may
-  // preview which event is the function's to decide (011 gave it p_caller); the
-  // read first still answers 404 for a draft or a missing id, as /:id/review does.
+  // SCRUM-539: the Lead previews a submitted request nobody holds. SCRUM-444:
+  // the scoped reader answers a non-holder coordinator as a missing id; the
+  // function still decides which event the Lead may preview (011's p_caller).
   router.get('/:id/cancellation-impact', coordinatorOrLead, async (req, res) => {
-    await getEventRequestForCoordinator(req.params.id, { client });
+    await getEventRequestForCoordinatorReader(req.params.id, {
+      userId: req.user.id, role: req.user.role, client, columns: 'check',
+    });
     const impact = await getEventCancellationImpact(req.params.id, req.user.id, { client });
     res.status(200).json(impact);
   });
@@ -729,6 +706,7 @@ export function createEventRequestRouter({
    * /mine and /queue included, do not carry a growing array nothing displays.
    */
   router.get('/:id/assignments', async (req, res) => {
+    requirePlausibleEventId(req.params.id);
     await getEventRequestForOrganiser(req.params.id, req.user.id, { client });
 
     const history = await listAssignmentHistory(req.params.id, { includeNotes: false }, { client });
@@ -739,16 +717,13 @@ export function createEventRequestRouter({
    * SCRUM-334 (SCRUM-327 AC9): the coordinators' view of an event's
    * assignment history, with the handover notes.
    *
-   * Behind coordinatorOnly. Every coordinator gets the notes, not only the one
-   * now assigned. They can already read the event (GET /:id/review), and the
-   * note is written for the coordinator team; the Organiser is the reader it is
-   * kept from, and the role gate does that. Limiting it to the current
-   * assignee would also hide every note from the coordinator who wrote it,
-   * since writing one means handing the event away, and from whoever takes the
-   * event next.
+   * SCRUM-444 AC1, AC4: the holder and the Lead, as GET /:id/review. The note
+   * is for whoever takes the event next, who now holds it; the coordinator who
+   * handed it over is a non-holder (D2), and the Organiser is still refused by
+   * the role gate.
    *
-   * Reads the event through getEventRequestForCoordinator first, so a draft or
-   * a missing id is a 404 here as it is on GET /:id/review.
+   * Reads the event through getEventRequestForCoordinatorReader first, so a
+   * draft or a missing id is a 404 here as it is on GET /:id/review.
    *
    * SCRUM-486 (SCRUM-521): behind coordinatorOrLead, not coordinatorOnly. The
    * Lead may hand over any event (052, AC6), and the event screen they do it
@@ -762,7 +737,9 @@ export function createEventRequestRouter({
    * Organiser, whom this gate still refuses.
    */
   router.get('/:id/assignments/review', coordinatorOrLead, async (req, res) => {
-    await getEventRequestForCoordinator(req.params.id, { client });
+    await getEventRequestForCoordinatorReader(req.params.id, {
+      userId: req.user.id, role: req.user.role, client, columns: 'check',
+    });
 
     const history = await listAssignmentHistory(req.params.id, { includeNotes: true }, { client });
     res.status(200).json(history);
@@ -774,15 +751,16 @@ export function createEventRequestRouter({
    * 404 like a missing id. ?noEquipmentConfirmed= is 'true', 'false' or absent.
    */
   router.get('/:id/readiness', coordinatorOrLead, async (req, res) => {
-    if (!isPlausibleId(req.params.id)) {
-      throw new ValidationError('Invalid event request id', [{ field: 'id', message: 'must be a valid id' }]);
-    }
+    // The id first, so a malformed one is answered before the query string.
+    requirePlausibleEventId(req.params.id);
     const noEquipmentConfirmed = parseBooleanQuery(
       req.query.noEquipmentConfirmed,
       'noEquipmentConfirmed',
       'Invalid noEquipmentConfirmed -- must be true or false',
     );
-    await getEventRequestForCoordinator(req.params.id, { client });
+    await getEventRequestForCoordinatorReader(req.params.id, {
+      userId: req.user.id, role: req.user.role, client, columns: 'check',
+    });
 
     res.status(200).json(await getEventReadiness({
       client, eventRequestId: req.params.id, noEquipmentConfirmed,
@@ -795,8 +773,13 @@ export function createEventRequestRouter({
     res.status(200).json(withStatusDisplay(arrangements));
   });
 
-  /** AC1: one request in full, with its status. */
+  /**
+   * AC1: one request in full, with its status. SCRUM-444: a malformed id is a
+   * 400 before the read, as on GET /:id/readiness, not Postgres's 22P02 (a 500);
+   * a removed one-segment path such as /coordinators lands here.
+   */
   router.get('/:id', async (req, res) => {
+    requirePlausibleEventId(req.params.id);
     const request = await getEventRequestForOrganiser(req.params.id, req.user.id, { client });
     res.status(200).json(withStatusDisplay(request));
   });
@@ -931,44 +914,11 @@ export function createEventRequestRouter({
   });
 
   /**
-   * SCRUM-331 (SCRUM-327 AC6, AC7, AC9): the assigned coordinator hands the
-   * event to a colleague, with an optional note.
-   *
-   * Behind coordinatorOnly, as a per-route argument like every other gate in
-   * this file. An Organiser is refused before the handler runs and the
-   * database is never touched.
-   *
-   * No ownership pre-check, and that is deliberate, not an omission next to
-   * POST /:id/submit. The submit route's pre-check is the only thing proving
-   * an Organiser owns the draft, because submitEventRequest checks no owner;
-   * the route tests call that pre-check "the single most important test in
-   * this file". Here the caller is a coordinator, not the Organiser, so
-   * organiser_id says nothing about whether they may act. The question that
-   * matters is whether the caller is this event's assigned coordinator, and
-   * reassign_event_request (018) answers it while holding the row lock, which
-   * is the only point where the answer cannot change before the write. A
-   * pre-check here would ask the same thing in a separate request and could
-   * already be out of date. A coordinator who does not hold the event gets the
-   * function's 403, not a 404: they can already see the event in the shared
-   * queue (errors.js gives the full argument).
-   *
-   * The body is passed whole. The service reads only newCoordinatorId and
-   * handoverNote from it, so a body naming someone else as assignedBy matches
-   * nothing. The caller is always req.user.id, from the token.
-   *
-   * 200 and the whole request, so the screen can redraw from the response.
-   * The function's refusals arrive through translateError: 403 (not the
-   * assigned coordinator), 400 (no such coordinator, or already theirs), 409
-   * (status does not allow a handover), 404 (no such event).
-   *
-   * SCRUM-486 AC6 (SCRUM-519): behind coordinatorOrLead, not coordinatorOnly.
-   * 052 widened reassign_event_request to let a Lead hand over any event, but
-   * this gate refused the Lead first, so the widening was unreachable over
-   * HTTP. Nothing else changes: the function still decides, under the lock,
-   * whether this caller may hand over this event, and a coordinator who does
-   * not hold it is still its 403.
+   * The Lead hands an event to another coordinator, with an optional note.
+   * leadOnly refuses anyone else before any query, and 055 refuses a non-Lead
+   * under the row lock too. Only newCoordinatorId and handoverNote are read.
    */
-  router.post('/:id/reassign', coordinatorOrLead, guardEvent, async (req, res) => {
+  router.post('/:id/reassign', leadOnly, guardEvent, async (req, res) => {
     const updated = await reassignEventRequest(
       req.params.id,
       req.body,
@@ -1014,10 +964,10 @@ export function createEventRequestRouter({
    * would read as one resource and mislead whoever adds the next route.
    * /start-review says what it does.
    *
-   * Behind coordinatorOnly, with no ownership pre-check, for the reason
-   * POST /:id/reassign gives above: whether the caller is this event's
-   * assigned coordinator is what start_event_review (029) checks under the
-   * row lock. Nothing is read from the body. The caller is always
+   * Behind coordinatorOnly, with no ownership pre-check: whether the caller
+   * is this event's assigned coordinator is what start_event_review (029)
+   * checks under the row lock, where the answer cannot change before the
+   * write. Nothing is read from the body. The caller is always
    * req.user.id, from the token.
    *
    * 200 and the whole request. Refusals through translateError: 403 (not the

@@ -67,8 +67,8 @@ function eventRequest(overrides = {}) {
   };
 }
 
-function renderAs(userId, request) {
-  vi.mocked(useAuth).mockReturnValue({ user: { id: userId, role: "event_coordinator" } });
+function renderAs(userId, request, role = "event_coordinator") {
+  vi.mocked(useAuth).mockReturnValue({ user: { id: userId, role } });
   return render(
     <MemoryRouter>
       <CoordinatorRequestDetail request={request} onChangeRequestProcessed={vi.fn()} onReviewDecisionProcessed={vi.fn()} />
@@ -99,8 +99,10 @@ describe("SCRUM21 the equipment section in the coordinator panel", () => {
     expect(await screen.findByRole("button", { name: "Add equipment" })).toBeInTheDocument();
   });
 
-  it("SCRUM21_AC1_another_coordinator_is_shown_the_reason_and_no_add", async () => {
-    renderAs(OTHER, eventRequest());
+  it("SCRUM444_AC1_the_lead_is_shown_the_reason_and_no_add", async () => {
+    // Was SCRUM21_AC1_another_coordinator_is_shown_the_reason_and_no_add: since
+    // SCRUM-444 the non-holder who opens the screen is the Lead.
+    renderAs(OTHER, eventRequest(), "event_coordinator_lead");
 
     expect(await screen.findByText("Only the assigned coordinator can change this event's equipment.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add equipment" })).not.toBeInTheDocument();

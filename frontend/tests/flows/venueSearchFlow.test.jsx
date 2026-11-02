@@ -51,7 +51,6 @@ vi.mock("../../src/services/eventRequestService", () => ({
   getMyAssignedEvents: vi.fn(),
   getNeedsAttention: vi.fn(() => Promise.resolve([])),
   getEventRequestForReview: vi.fn(),
-  listCoordinators: vi.fn(),
   getAssignmentHistory: vi.fn(),
   getAssignmentHistoryForReview: vi.fn(),
   reassignEventRequest: vi.fn(),
