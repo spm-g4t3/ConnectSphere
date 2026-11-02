@@ -90,12 +90,12 @@ describe("loading and failing", () => {
     let finish;
     vi.mocked(getEquipmentQueue).mockReturnValue(new Promise((resolve) => (finish = resolve)));
     renderQueue();
-    expect(screen.getByRole("status")).toHaveTextContent("Loading equipment requests");
+    expect(screen.getByRole("status")).toHaveTextContent("Loading...");
     expect(screen.queryByRole("region")).not.toBeInTheDocument();
 
     finish(answer());
     expect(await screen.findByRole("region", { name: /Needs action/ })).toBeInTheDocument();
-    expect(screen.queryByText(/Loading equipment requests/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
   });
 
   it.each([
@@ -135,8 +135,7 @@ describe("AC3: what a row shows", () => {
     expect(within(item).getByText("Pending review")).toBeInTheDocument();
     expect(item).toHaveTextContent(/Jan/);
     expect(item).toHaveTextContent(/2030/);
-    // Either clock style, whatever the reader's locale writes: "6:00 PM", "6:00 pm" or "18:00".
-    expect(item).toHaveTextContent(/\d{1,2}:\d{2}(\s?[ap]m)? to \d{1,2}:\d{2}(\s?[ap]m)?/i);
+    expect(item).toHaveTextContent(/\d{1,2}:\d{2}\s?[ap]m – \d{1,2}:\d{2}\s?[ap]m/i);
     expect(item).toHaveTextContent("Venue: Hall A");
     expect(item).toHaveTextContent("Coordinator: Rae Tan");
     expect(item).toHaveTextContent("3 items");
@@ -430,7 +429,7 @@ describe("AC2: the filters", () => {
     // neither is the empty-state text that belongs to an answer.
     expect(screen.queryByText("Old Row")).not.toBeInTheDocument();
     expect(screen.queryByText("No equipment requests match these filters.")).not.toBeInTheDocument();
-    expect(within(allSection()).getByRole("status")).toHaveTextContent("Loading equipment requests...");
+    expect(within(allSection()).getByRole("status")).toHaveTextContent("Loading...");
     expect(within(needsActionSection()).getByText("Old Needs", { selector: "strong" })).toBeInTheDocument();
 
     finishSlow(answer([row({ eventName: "Old Needs" })], [row({ eventName: "New Row" })]));
