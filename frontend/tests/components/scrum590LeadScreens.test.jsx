@@ -539,3 +539,89 @@ async function renderAssignedEventsList() {
   );
   await screen.findByText("Planning Night");
 }
+
+describe("SCRUM590_AC1 the assign panel shows the request it is assigning", () => {
+  function queueWith(fields) {
+    vi.mocked(listUnassignedEventRequests).mockResolvedValue([{ ...WAITING[0], ...fields }, WAITING[1]]);
+  }
+
+  it("SCRUM590_AC1_the_assign_panel_shows_the_request_it_is_assigning", async () => {
+    queueWith({ expectedAttendance: 120 });
+    const { user } = await renderQueuePage();
+
+    await openPanel(user, "assign");
+
+    // The queue row has gone, so these can only be the panel's.
+    expect(screen.queryByRole("listitem")).not.toBeInTheDocument();
+    expect(screen.getByText("Aisha Rahman")).toBeInTheDocument();
+    expect(screen.getByText("15 Jan 2026, 9:00 am – 11:00 am")).toBeInTheDocument();
+    expect(screen.getByText("120")).toBeInTheDocument();
+    expect(screen.getByText("waiting 10 days")).toBeInTheDocument();
+  });
+
+  it("SCRUM590_AC1_the_assign_panel_shows_the_accessibility_needs_when_there_are_some", async () => {
+    queueWith({ accessibilityRequirements: "Step-free access to the stage" });
+    const { user } = await renderQueuePage();
+
+    await openPanel(user, "assign");
+
+    expect(screen.getByText("Accessibility needs")).toBeInTheDocument();
+    expect(screen.getByText("Step-free access to the stage")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["blank", "   "],
+    ["null", null],
+  ])("SCRUM590_AC1_the_assign_panel_leaves_out_accessibility_needs_that_are_%s", async (_name, value) => {
+    queueWith({ accessibilityRequirements: value });
+    const { user } = await renderQueuePage();
+
+    await openPanel(user, "assign");
+
+    expect(screen.getByText("Aisha Rahman")).toBeInTheDocument();
+    expect(screen.queryByText("Accessibility needs")).not.toBeInTheDocument();
+  });
+});
+
+describe("SCRUM590_AC4 empty assigned events offer a way forward", () => {
+  it("SCRUM590_AC4_the_empty_assigned_events_state_links_to_the_queue", async () => {
+    vi.mocked(listAssignedEventsForLead).mockResolvedValue([]);
+    render(
+      <MemoryRouter>
+        <AssignedEvents />
+      </MemoryRouter>,
+    );
+
+    const empty = (await screen.findByText("No coordinator is holding an active event.")).closest(".ui-empty-state");
+    expect(within(empty).getByRole("link", { name: "Open the unassigned queue" })).toHaveAttribute(
+      "href",
+      "/unassigned-queue",
+    );
+  });
+
+  it("SCRUM590_AC4_the_filtered_empty_state_clears_the_filters", async () => {
+    const user = userEvent.setup();
+    const noFilters = { coordinatorId: "", status: "", includeFinished: false };
+    vi.mocked(listAssignedEventsForLead).mockImplementation(async (filters) =>
+      filters.coordinatorId || filters.status || filters.includeFinished ? [] : HELD,
+    );
+    await renderAssignedEvents();
+    const coordinator = screen.getByLabelText("Coordinator");
+    const status = screen.getByLabelText("Status");
+    const finished = screen.getByLabelText("Include completed, rejected and cancelled");
+    await user.selectOptions(coordinator, "c1");
+    await user.selectOptions(status, "approved");
+    await user.click(finished);
+    await screen.findByText("No events match these filters.");
+
+    await user.click(screen.getByRole("button", { name: "Clear filters" }));
+
+    expect(await screen.findByText("Planning Night")).toBeInTheDocument();
+    expect(vi.mocked(listAssignedEventsForLead)).toHaveBeenLastCalledWith(noFilters);
+    expect(coordinator).toHaveValue("");
+    expect(status).toHaveValue("");
+    expect(finished).not.toBeChecked();
+    // The button has gone, so focus is on the list's heading, not the page body.
+    expect(screen.getByRole("heading", { level: 2, name: "Events" })).toHaveFocus();
+  });
+});

@@ -59,6 +59,7 @@ import { listAssignedEventsForLead, listCoordinatorOverview } from "../services/
 import { canRetryRead } from "../services/apiErrors";
 import { formatDateTime } from "../services/displayFormat";
 import { readStatusDisplay, statusTone } from "../services/eventRequestStatusDisplay";
+import Button from "./ui/Button";
 import EmptyState from "./ui/EmptyState";
 import ErrorNotice from "./ui/ErrorNotice";
 import LoadingText from "./ui/LoadingText";
@@ -161,6 +162,13 @@ export default function AssignedEvents() {
   const activeStatuses = statuses.filter((entry) => !entry.finished);
   const filtered = filters.coordinatorId !== "" || filters.status !== "" || filters.includeFinished;
 
+  // The button goes as the list reloads, so focus moves to the list's heading
+  // instead of falling to the page body.
+  function clearFilters() {
+    eventsHeadingRef.current?.focus();
+    setFilters(NO_FILTERS);
+  }
+
   return (
     <section className="assigned-events">
       <h1>Assigned events</h1>
@@ -202,11 +210,24 @@ export default function AssignedEvents() {
           filters found nothing, not that nobody holds anything. */}
       {!loading && !error && events.length === 0 && (
         filtered ? (
-          <EmptyState message="No events match these filters." nextStep="Change or clear the filters to see more." />
+          <EmptyState
+            message="No events match these filters."
+            nextStep="Change or clear the filters to see more."
+            action={
+              <Button variant="secondary" onClick={clearFilters}>
+                Clear filters
+              </Button>
+            }
+          />
         ) : (
           <EmptyState
             message="No coordinator is holding an active event."
             nextStep="Assign a request from the unassigned queue."
+            action={
+              <Link className="ui-button ui-button--primary" to="/unassigned-queue">
+                Open the unassigned queue
+              </Link>
+            }
           />
         )
       )}

@@ -111,6 +111,7 @@ export default function UnassignedQueue({ now = () => new Date(), asPage = false
         {panel.kind === "assign" ? (
           <AssignCoordinatorPanel
             request={panel.request}
+            now={now}
             onCancel={() => closePanel()}
             onAssigned={(_updated, chosen) =>
               closePanel(

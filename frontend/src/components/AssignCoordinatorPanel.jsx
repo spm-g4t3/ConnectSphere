@@ -29,6 +29,8 @@ import { useCallback, useEffect, useState } from "react";
 import { assignEventRequest, listCoordinatorWorkload } from "../services/eventRequestService";
 import { activeEventsText, coordinatorName } from "../services/coordinatorDisplay";
 import { canRetryRead } from "../services/apiErrors";
+import { formatDateTimeRange } from "../services/displayFormat";
+import { describeWaiting } from "../services/waitingTime";
 import Button from "./ui/Button";
 import EmptyState from "./ui/EmptyState";
 import ErrorNotice from "./ui/ErrorNotice";
@@ -71,11 +73,12 @@ function assignErrorMessage(err) {
 
 /**
  * @param {object} props
- * @param {object} props.request        the unassigned request
+ * @param {object} props.request        the unassigned request, as the queue row has it
  * @param {Function} props.onCancel     back to the queue, nothing changed
  * @param {Function} props.onAssigned   called with (updatedRequest, chosenCoordinator)
+ * @param {Function} [props.now]        the clock "waiting" is measured against, as the queue's
  */
-export default function AssignCoordinatorPanel({ request, onCancel, onAssigned }) {
+export default function AssignCoordinatorPanel({ request, onCancel, onAssigned, now = () => new Date() }) {
   const [coordinators, setCoordinators] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null); // { message, retryable }
@@ -156,6 +159,25 @@ export default function AssignCoordinatorPanel({ request, onCancel, onAssigned }
         The coordinator you choose becomes responsible for this request and is
         told it is theirs. The Organiser is told who their coordinator is.
       </p>
+
+      {/* The queue row's facts, in its words, so the Lead need not remember
+          them while choosing who should take the request. */}
+      <dl className="assign-coordinator__request">
+        <dt>Organiser</dt>
+        <dd>{request.organiserName ?? "No name on record"}</dd>
+        <dt>When</dt>
+        <dd>{formatDateTimeRange(request.proposedStart, request.proposedEnd, "not set")}</dd>
+        <dt>Expected attendance</dt>
+        <dd>{request.expectedAttendance ?? "not given"}</dd>
+        <dt>In the queue</dt>
+        <dd>{describeWaiting(request.submittedAt, now())}</dd>
+        {request.accessibilityRequirements?.trim() && (
+          <>
+            <dt>Accessibility needs</dt>
+            <dd>{request.accessibilityRequirements}</dd>
+          </>
+        )}
+      </dl>
 
       {loading && <LoadingText />}
       {loadError && (

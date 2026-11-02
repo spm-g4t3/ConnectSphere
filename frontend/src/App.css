@@ -748,6 +748,16 @@ button { cursor: pointer; }
    for the reason the queue's rules give. The radio list is a fieldset, framed
    as the clarification form's field list is. */
 .assign-coordinator h2 { margin-bottom: 8px; }
+/* The request being assigned: label then value, the .decision-outcome shape,
+   under this panel's own class so the two can change apart. */
+.assign-coordinator__request { display: grid; gap: var(--space-1) var(--space-4); grid-template-columns: minmax(120px, 180px) minmax(0, 1fr); margin: var(--space-4) 0 0; max-width: 560px; }
+.assign-coordinator__request dt { color: var(--color-muted); font-size: var(--font-size-sm); font-weight: 700; }
+.assign-coordinator__request dd { color: var(--color-ink); margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+/* At phone width each label sits above its value. After the rules above, so it wins. */
+@media (max-width: 720px) {
+  .assign-coordinator__request { gap: 0; grid-template-columns: 1fr; }
+  .assign-coordinator__request dd { margin-bottom: var(--space-2); }
+}
 .assign-coordinator__form { display: grid; gap: 14px; margin-top: 16px; max-width: 560px; }
 .assign-coordinator__form > label { color: var(--muted); display: grid; gap: 7px; }
 .assign-coordinator__form textarea { background: white; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; min-height: 96px; padding: 10px 12px; resize: vertical; }
