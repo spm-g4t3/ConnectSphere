@@ -31,7 +31,10 @@ export const HOLD_TONE = "info";
 /** A hold about to lapse needs a decision soon, so it takes the awaiting-a-decision amber. */
 export const HOLD_EXPIRING_TONE = "warning";
 
-/** Unknown or missing values fall back to neutral rather than a colour that claims a meaning. */
+/**
+ * Unknown or missing values fall back to neutral rather than a colour that claims a meaning.
+ * Object.hasOwn so a key like "toString" does not find Object.prototype's method.
+ */
 export function toneFor(tones, key) {
-  return tones[key] ?? "neutral";
+  return Object.hasOwn(tones, key) ? tones[key] : "neutral";
 }

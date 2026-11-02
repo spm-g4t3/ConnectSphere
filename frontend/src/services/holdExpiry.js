@@ -8,11 +8,13 @@ function count(n, unit) {
 }
 
 /**
- * "in 2 days", "in 5 hours", "in less than an hour", or "expired".
+ * "in 3 days", "in 36 hours", "in 5 hours", "in less than an hour", or "expired".
  *
- * Rounded to the nearest unit, so a hold set for three days does not read
- * "in 2 days" a minute after it is placed. `soon` is true within 24 hours,
- * when Venue Staff may want to act before the venue is released.
+ * Rounded down past a day, because understating a deadline is the safe
+ * direction: Venue Staff act early rather than find the hold already gone.
+ * Hours are kept below 48 so a short hold just placed does not read "in 1 day".
+ * `soon` is true within 24 hours, when Venue Staff may want to act before the
+ * venue is released.
  *
  * @param {string|Date} expiresAt
  * @param {Date} [now]
@@ -26,5 +28,6 @@ export function describeHoldExpiry(expiresAt, now = new Date()) {
   const soon = remaining <= DAY;
   if (remaining < HOUR) return { relative: "in less than an hour", soon };
   if (soon) return { relative: count(Math.round(remaining / HOUR), "hour"), soon };
-  return { relative: count(Math.round(remaining / DAY), "day"), soon };
+  if (remaining < 2 * DAY) return { relative: count(Math.floor(remaining / HOUR), "hour"), soon };
+  return { relative: count(Math.floor(remaining / DAY), "day"), soon };
 }

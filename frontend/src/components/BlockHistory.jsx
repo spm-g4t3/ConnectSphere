@@ -152,6 +152,9 @@ export default function BlockHistory({ venueId, blockId, refreshKey, currentUser
   }, [venueId, blockId, refreshKey, attempt]);
 
   function retry() {
+    // Set before clearing the error, or one render has no error, no loading
+    // and no entries and flashes the empty state.
+    setLoading(true);
     setError(null);
     setAttempt((n) => n + 1);
   }

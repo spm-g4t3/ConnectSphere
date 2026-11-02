@@ -10,7 +10,7 @@
 // offset. No fake timers.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import BlockHistory, { BlockActor } from "../../src/components/BlockHistory.jsx";
 import { getVenueBlockHistory } from "../../src/services/venueService";
@@ -194,6 +194,29 @@ describe("BlockHistory states", () => {
       expectNoUuidInText();
     });
   }
+
+  it("SCRUM587_AC4_try_again_shows_Loading_and_never_the_empty_state", async () => {
+    const retried = deferred();
+    vi.mocked(getVenueBlockHistory)
+      .mockRejectedValueOnce(httpError(500))
+      .mockReturnValueOnce(retried.promise);
+    const { container } = await renderLoaded();
+
+    // Records every node added, so a one-render flash is caught even though
+    // the effect replaces it before the click resolves.
+    const observer = new MutationObserver(() => {});
+    observer.observe(container, { childList: true, subtree: true });
+    fireEvent.click(within(screen.getByRole("alert")).getByRole("button", { name: "Try again" }));
+    const added = observer.takeRecords().flatMap((record) => [...record.addedNodes]);
+    observer.disconnect();
+
+    expect(added.some((node) => node.textContent?.includes(MSG.empty))).toBe(false);
+    expect(screen.getByText(MSG.loading)).toBeInTheDocument();
+    expect(screen.queryByText(MSG.empty)).not.toBeInTheDocument();
+
+    await act(async () => retried.resolve(HISTORY));
+    expect(entryItems()).toHaveLength(3);
+  });
 
   it("SCRUM17_AC4_shows_the_help_line_under_the_entries", async () => {
     await renderLoaded();

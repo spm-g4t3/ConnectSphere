@@ -39,6 +39,7 @@ import {
 import { toDatetimeLocalValue, toOffsetIsoString } from "../../src/services/datetimeFormat";
 import { ACCESSIBILITY_FEATURES, FACILITIES, ROOM_LAYOUTS } from "../../src/services/venueLookups";
 import { SAFETY_FACTS } from "../../src/services/venueSafetyFacts";
+import { VENUE_TONES, toneFor } from "../../src/services/venueStatusTones";
 import { httpError } from "../helpers/async.js";
 import { pressEscape, stubDialogElement } from "../helpers/dialog.js";
 
@@ -351,6 +352,13 @@ describe("SCRUM587 venue screens on the UI standard", () => {
       const scope = await renderScreen();
       expect(within(scope).getByText(label, { selector: `.ui-status-badge--${tone}` })).toBeInTheDocument();
     });
+
+    it.each(["constructor", "toString"])(
+      "SCRUM587_AC5_a_status_named_like_an_object_method_falls_back_to_neutral (%s)",
+      (key) => {
+        expect(toneFor(VENUE_TONES, key)).toBe("neutral");
+      },
+    );
   });
 });
 

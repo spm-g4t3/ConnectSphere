@@ -9,10 +9,14 @@ const at = (ms) => new Date(NOW.getTime() + ms).toISOString();
 
 describe("describeHoldExpiry", () => {
   it.each([
-    ["two days away", 2 * DAY, "in 2 days", false],
-    ["one day and a minute away", DAY + MINUTE, "in 1 day", false],
-    // Rounded, not truncated: minutes after placing a three-day hold it still reads 3 days.
-    ["three days less a minute away", 3 * DAY - MINUTE, "in 3 days", false],
+    // Rounded down past a day, so the wording never promises more time than is left.
+    ["exactly 48 hours away", 2 * DAY, "in 2 days", false],
+    ["71 hours 59 minutes away", 3 * DAY - MINUTE, "in 2 days", false],
+    ["exactly 72 hours away", 3 * DAY, "in 3 days", false],
+    // Below 48 hours it reads in hours, so 36 hours is not overstated as 2 days.
+    ["36 hours away", 36 * HOUR, "in 36 hours", false],
+    ["24 hours 30 minutes away", DAY + 30 * MINUTE, "in 24 hours", false],
+    ["one day and a minute away", DAY + MINUTE, "in 24 hours", false],
     ["exactly 24 hours away", DAY, "in 24 hours", true],
     ["five hours away", 5 * HOUR, "in 5 hours", true],
     ["one hour away", HOUR, "in 1 hour", true],
