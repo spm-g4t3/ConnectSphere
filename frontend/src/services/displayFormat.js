@@ -129,6 +129,54 @@ export function formatDateTimeRange(startsAt, endsAt, fallback) {
   return `${formatDateTime(startsAt, fallback)} – ${formatDateTime(endsAt, fallback)}`;
 }
 
+/**
+ * As formatDateTimeRange, but a range with neither end is one missing fact,
+ * so the fallback is said once rather than either side of the dash.
+ */
+export function formatDateTimeRangeOrFallback(startsAt, endsAt, fallback) {
+  if (!startsAt && !endsAt) return fallback;
+  return formatDateTimeRange(startsAt, endsAt, fallback);
+}
+
+// A calendar day in the venue calendar is the device's local midnight, so
+// its local date is re-read as a UTC date and formatted in UTC: the label
+// is that day on every device, never shifted by a zone conversion.
+function calendarDayFormat(options) {
+  const format = new Intl.DateTimeFormat("en-SG", { timeZone: "UTC", ...options });
+  return (day) => format.format(new Date(Date.UTC(day.getFullYear(), day.getMonth(), day.getDate())));
+}
+
+/** A calendar day as "Mon". */
+export const formatWeekdayShort = calendarDayFormat({ weekday: "short" });
+
+/** A calendar day as "5 Oct". */
+export const formatDayMonth = calendarDayFormat({ day: "numeric", month: "short" });
+
+/** A calendar day as "Monday, 5 October 2026". */
+export const formatLongDay = calendarDayFormat({
+  weekday: "long",
+  day: "numeric",
+  month: "long",
+  year: "numeric",
+});
+
+/** A calendar day as "Mon, 5 Oct 2026". */
+export const formatShortDay = calendarDayFormat({
+  weekday: "short",
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+});
+
+/** A calendar day as "5 Oct 2026". */
+export const formatCalendarDate = calendarDayFormat({ day: "numeric", month: "short", year: "numeric" });
+
+/** A calendar day as "5". */
+export const formatDayOfMonth = calendarDayFormat({ day: "numeric" });
+
+/** A calendar day's month as "October 2026". */
+export const formatMonthYear = calendarDayFormat({ month: "long", year: "numeric" });
+
 /** "1 minute" / "15 minutes", "1 active event" / "3 active events". */
 export function pluralise(count, unit) {
   return `${count} ${unit}${count === 1 ? "" : "s"}`;

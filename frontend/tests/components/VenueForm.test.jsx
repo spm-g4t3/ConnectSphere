@@ -10,6 +10,7 @@ import userEvent from "@testing-library/user-event";
 
 import VenueForm from "../../src/components/VenueForm.jsx";
 import { createVenue, getVenueDetails, updateVenue } from "../../src/services/venueService";
+import { stubDialogElement } from "../helpers/dialog.js";
 
 vi.mock("../../src/services/venueService", () => ({
   createVenue: vi.fn(),
@@ -51,6 +52,8 @@ beforeEach(() => {
   vi.mocked(createVenue).mockResolvedValue({ id: VENUE_ID });
   vi.mocked(updateVenue).mockResolvedValue({ id: VENUE_ID });
 });
+
+stubDialogElement();
 
 describe("SCRUM186 VenueForm turnaround on create", () => {
   it("SCRUM186_create_offers_seven_options_with_none_selected", () => {
@@ -1080,7 +1083,7 @@ describe("SCRUM575 VenueForm confirming shorter hours", () => {
     expect(onSaved).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "Confirm new hours" }));
-    await user.click(screen.getByRole("button", { name: "Yes, save and flag" }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Save and flag" }));
 
     expect(updateVenue).toHaveBeenCalledTimes(2);
     const hours = [{ day_of_week: 1, opens_at: "09:00", closes_at: "17:00" }];
@@ -1124,14 +1127,14 @@ describe("SCRUM575 VenueForm confirming shorter hours", () => {
     await screen.findByText("Night Market");
 
     await user.click(screen.getByRole("button", { name: "Confirm new hours" }));
-    await user.click(screen.getByRole("button", { name: "Yes, save and flag" }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Save and flag" }));
 
     expect(
       await screen.findByRole("heading", { name: "2 approved bookings fall outside the new opening hours" }),
     ).toBeInTheDocument();
     expect(screen.getByText("Late Talk")).toBeInTheDocument();
     // The new booking has not been seen, so the confirm must be opened again.
-    expect(screen.queryByRole("button", { name: "Yes, save and flag" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(onSaved).not.toHaveBeenCalled();
   });
 });

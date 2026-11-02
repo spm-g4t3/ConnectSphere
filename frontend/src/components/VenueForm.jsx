@@ -28,6 +28,9 @@ import { Fragment, useCallback, useEffect, useId, useRef, useState } from "react
 import { createVenue, getVenueDetails, updateVenue } from "../services/venueService";
 import { describeClosing, formatVenuePeriod } from "../services/datetimeFormat";
 import BlockConflictList from "./BlockConflictList";
+import Button from "./ui/Button";
+import LoadingText from "./ui/LoadingText";
+import ErrorNotice from "./ui/ErrorNotice";
 import {
   ACCESSIBILITY_FEATURES,
   FACILITIES,
@@ -226,7 +229,7 @@ function CodeCheckboxes({ legend, options, selected, onToggle, disabled }) {
   );
 }
 
-export default function VenueForm({ venueId = null, onSaved }) {
+export default function VenueForm({ venueId = null, onSaved, headingRef }) {
   const isEdit = Boolean(venueId);
   const turnaroundHelpId = useId();
   const setupHelpId = useId();
@@ -288,7 +291,7 @@ export default function VenueForm({ venueId = null, onSaved }) {
       });
       setLoadError(null);
     } catch {
-      setLoadError("Could not load this venue. Please go back and try again.");
+      setLoadError("Could not load this venue.");
     } finally {
       setLoading(false);
     }
@@ -297,6 +300,13 @@ export default function VenueForm({ venueId = null, onSaved }) {
   useEffect(() => {
     fetchVenue();
   }, [fetchVenue]);
+
+  /** Try again: back to Loading... so a second failure is visibly a new one. */
+  function retryVenue() {
+    setLoadError(null);
+    setLoading(true);
+    fetchVenue();
+  }
 
   function updateField(field, value) {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -500,15 +510,9 @@ export default function VenueForm({ venueId = null, onSaved }) {
     }
   }
 
-  if (loading) return <p>Loading...</p>;
+  if (loading) return <LoadingText />;
 
-  if (loadError) {
-    return (
-      <p className="venue-form__error" role="alert">
-        {loadError}
-      </p>
-    );
-  }
+  if (loadError) return <ErrorNotice message={loadError} onRetry={retryVenue} />;
 
   // Built from the BASELINE's codes, not the live selection, so an
   // unrecognised code's checkbox stays on screen after it is unticked and the
@@ -526,7 +530,11 @@ export default function VenueForm({ venueId = null, onSaved }) {
 
   return (
     <form className="venue-form" onSubmit={handleSubmit}>
-      <h2>{isEdit ? "Edit venue" : "Add a new venue"}</h2>
+      {/* tabIndex -1 and headingRef: the catalogue moves focus here when it opens
+          this form, which for an edit is only once the venue has loaded. */}
+      <h2 ref={headingRef} tabIndex={-1}>
+        {isEdit ? "Edit venue" : "Add a new venue"}
+      </h2>
 
       <label>
         Name
@@ -646,7 +654,7 @@ export default function VenueForm({ venueId = null, onSaved }) {
         changeLabel="Change hours"
         overrideLabel="Confirm new hours"
         confirmText="Save the new hours, flag these bookings for review and notify each event's coordinator?"
-        confirmLabel="Yes, save and flag"
+        confirmLabel="Save and flag"
         formatPart={formatVenuePeriod}
         onChangePeriod={handleChangeHours}
         onConfirmOverride={(ids) => save(ids)}
@@ -749,11 +757,7 @@ export default function VenueForm({ venueId = null, onSaved }) {
         );
       })}
 
-      {saveError && (
-        <p className="venue-form__error" role="alert">
-          {saveError}
-        </p>
-      )}
+      {saveError && <ErrorNotice message={saveError} />}
 
       {saveDetails.length > 0 && (
         <div className="venue-form__errors" role="alert">
@@ -769,9 +773,9 @@ export default function VenueForm({ venueId = null, onSaved }) {
         </div>
       )}
 
-      <button type="submit" disabled={saving}>
+      <Button type="submit" disabled={saving}>
         {saving ? "Saving..." : isEdit ? "Save changes" : "Create venue"}
-      </button>
+      </Button>
     </form>
   );
 }

@@ -29,7 +29,7 @@
 // AuthProvider, and this panel's tests render without one. Without it, the
 // signed-in user's own changes show as a short id instead of "you".
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   createVenueBlock,
   listVenueBlocks,
@@ -39,19 +39,26 @@ import {
 import { blockErrorMessage, isStaleBlockError } from "../services/venueBlockErrors";
 import { BLOCK_PHASE_LABELS, blockPhase } from "../services/venueBlockDisplay";
 import { reasonLabel } from "../services/venueBlockReasons";
-import { formatRange, formatTimestamp, shortId } from "../services/displayFormat";
+import { formatDateTime, formatDateTimeRange, shortId } from "../services/displayFormat";
 import { blockAuditSummary } from "../services/venueBlockHistoryDisplay";
 import VenueBlockForm from "./VenueBlockForm";
 import BlockConflictList from "./BlockConflictList";
 import BlockHistory, { BlockActor } from "./BlockHistory";
 import { formatOccupiedPeriod } from "../services/occupiedPeriodDisplay";
+import Button from "./ui/Button";
+import StatusBadge from "./ui/StatusBadge";
+import LoadingText from "./ui/LoadingText";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import ConfirmDialog from "./ui/ConfirmDialog";
+import { BLOCK_PHASE_TONES, toneFor } from "../services/venueStatusTones";
 
 /** "1 booking was" / "3 bookings were". */
 function bookingsWere(count) {
   return count === 1 ? "1 booking was" : `${count} bookings were`;
 }
 
-export default function VenueBlocksPanel({ venue, currentUserId }) {
+export default function VenueBlocksPanel({ venue, currentUserId, headingRef }) {
   const [blocks, setBlocks] = useState([]);
   const [loadingBlocks, setLoadingBlocks] = useState(true);
   const [listError, setListError] = useState(null);
@@ -81,6 +88,10 @@ export default function VenueBlocksPanel({ venue, currentUserId }) {
   const [confirmingRemoveId, setConfirmingRemoveId] = useState(null);
   const [removingId, setRemovingId] = useState(null);
   const [removeError, setRemoveError] = useState(null); // { id, message }
+  // The Remove button that opened the dialog, and the list heading that takes
+  // focus instead once that button's row has gone.
+  const removeOpener = useRef(null);
+  const listHeading = useRef(null);
 
   // The block whose history is open, if any. One at a time, so the list
   // does not grow a trail under every row.
@@ -102,6 +113,25 @@ export default function VenueBlocksPanel({ venue, currentUserId }) {
   useEffect(() => {
     fetchBlocks();
   }, [fetchBlocks]);
+
+  // Runs once the dialog has closed: focus cannot move out of an open modal.
+  useEffect(() => {
+    if (confirmingRemoveId !== null || !removeOpener.current) return;
+    const button = removeOpener.current;
+    removeOpener.current = null;
+    (button.isConnected ? button : listHeading.current)?.focus();
+  }, [confirmingRemoveId]);
+
+  function openRemove(block, event) {
+    removeOpener.current = event.currentTarget;
+    setConfirmingRemoveId(block.id);
+  }
+
+  // The error clears first, so a second failure is visibly a new one.
+  function retryBlocks() {
+    setListError(null);
+    fetchBlocks();
+  }
 
   function clearConflicts() {
     setConflicts([]);
@@ -213,8 +243,8 @@ export default function VenueBlocksPanel({ venue, currentUserId }) {
     if (removingId) return; // closes the double-click window before it opens
 
     // confirmingRemoveId stays set until the finally, for the reason
-    // VenueCatalogue's handleRetire gives: "Removing..." lives inside the
-    // confirm block, which would otherwise unmount as the request starts.
+    // VenueCatalogue's handleRetire gives: the dialog stays open and busy
+    // while the request is in flight.
     setRemovingId(block.id);
     setRemoveError(null);
     setNotice(null);
@@ -242,6 +272,7 @@ export default function VenueBlocksPanel({ venue, currentUserId }) {
 
   const now = new Date();
   const rowActionsDisabled = Boolean(formMode) || Boolean(removingId);
+  const confirmingBlock = blocks.find((block) => block.id === confirmingRemoveId);
 
   function renderNotice() {
     if (!notice) return null;
@@ -264,7 +295,7 @@ export default function VenueBlocksPanel({ venue, currentUserId }) {
                   {/* The whole period the booking holds the venue, setup and
                       turnaround included (AC7): that is what the block
                       overlapped, which the event times alone may not show. */}
-                  <span>{formatOccupiedPeriod(booking)}</span>
+                  <span>{formatOccupiedPeriod(booking, formatDateTimeRange)}</span>
                   <code title={booking.eventRequestId ?? undefined}>
                     {booking.eventRequestId ? shortId(booking.eventRequestId) : "no event"}
                   </code>
@@ -292,12 +323,12 @@ export default function VenueBlocksPanel({ venue, currentUserId }) {
 
     return (
       <p className="venue-blocks__audit">
-        Created {formatTimestamp(created.at)}{" "}
+        Created {formatDateTime(created.at)}{" "}
         <BlockActor id={created.by} currentUserId={currentUserId} />
         {amended && (
           <>
             {" · Last amended "}
-            {formatTimestamp(amended.at)}{" "}
+            {formatDateTime(amended.at)}{" "}
             <BlockActor id={amended.by} currentUserId={currentUserId} />
           </>
         )}
@@ -309,8 +340,6 @@ export default function VenueBlocksPanel({ venue, currentUserId }) {
     const phase = blockPhase(block, now);
     const ended = phase === "ended";
     const clashing = clashingBlockIds.includes(block.id);
-    const confirming = confirmingRemoveId === block.id;
-    const removing = removingId === block.id;
     const historyOpen = historyBlockId === block.id;
     const historyId = `block-history-${block.id}`;
 
@@ -326,10 +355,10 @@ export default function VenueBlocksPanel({ venue, currentUserId }) {
       <li key={block.id} className={className}>
         <div className="venue-blocks__item-main">
           <strong>{reasonLabel(block.reason)}</strong>
-          <span>{formatRange(block.startsAt, block.endsAt)}</span>
-          <span className={`status-badge status--block-${phase}`}>
+          <span>{formatDateTimeRange(block.startsAt, block.endsAt)}</span>
+          <StatusBadge tone={toneFor(BLOCK_PHASE_TONES, phase)}>
             {BLOCK_PHASE_LABELS[phase]}
-          </span>
+          </StatusBadge>
           {block.notes && <p className="venue-blocks__notes">{block.notes}</p>}
           {renderAudit(block)}
           {clashing && (
@@ -340,57 +369,45 @@ export default function VenueBlocksPanel({ venue, currentUserId }) {
               Ended blocks are kept as a record and can&apos;t be changed.
             </p>
           )}
-          {removeError?.id === block.id && (
-            <p className="venue-blocks__error" role="alert">
-              {removeError.message}
-            </p>
-          )}
+          {/* No Try again on an action: Remove is still there. */}
+          {removeError?.id === block.id && <ErrorNotice message={removeError.message} />}
         </div>
 
         <div className="venue-blocks__item-actions">
           {/* No Edit or Remove on an ended block: the server refuses both
               with BLOCK_ENDED, and a past closure is a record, not a
               setting. History stays -- it is a read. */}
-          {!ended && !confirming && (
+          {!ended && (
             <>
               {/* A change on a retired venue is refused with VENUE_RETIRED,
                   so Edit goes; Remove stays, because removing a block only
                   reduces blocking and the server allows it. */}
-              <button
+              <Button
+                variant="secondary"
                 onClick={() => openForm({ mode: "edit", block })}
                 disabled={rowActionsDisabled || venueRetired}
                 title={venueRetired ? "A retired venue cannot be blocked." : undefined}
               >
                 Edit
-              </button>
-              <button
-                onClick={() => setConfirmingRemoveId(block.id)}
+              </Button>
+              <Button
+                variant="danger"
+                onClick={(event) => openRemove(block, event)}
                 disabled={rowActionsDisabled}
               >
                 Remove
-              </button>
+              </Button>
             </>
           )}
 
-          {!ended && confirming && (
-            <>
-              <span>Remove this block? Bookings it flagged stay flagged for review.</span>
-              <button onClick={() => handleRemove(block)} disabled={removing}>
-                {removing ? "Removing..." : "Yes, remove"}
-              </button>
-              <button onClick={() => setConfirmingRemoveId(null)} disabled={removing}>
-                Cancel
-              </button>
-            </>
-          )}
-
-          <button
+          <Button
+            variant="secondary"
             onClick={() => toggleHistory(block.id)}
             aria-expanded={historyOpen}
             aria-controls={historyId}
           >
             {historyOpen ? "Hide history" : "History"}
-          </button>
+          </Button>
         </div>
 
         {/* Keyed by block so a different row's history never inherits this
@@ -412,25 +429,22 @@ export default function VenueBlocksPanel({ venue, currentUserId }) {
 
   return (
     <div className="venue-blocks">
-      <h2>
+      {/* tabIndex -1 and headingRef: the catalogue moves focus here when it opens this panel. */}
+      <h2 ref={headingRef} tabIndex={-1}>
         Blocks for {venue.name} — {venue.location}
       </h2>
 
-      {panelError && (
-        <p className="venue-blocks__error" role="alert">
-          {panelError}
-        </p>
-      )}
+      {panelError && <ErrorNotice message={panelError} />}
       {renderNotice()}
 
       {!formMode && (
-        <button
+        <Button
           onClick={() => openForm({ mode: "create" })}
           disabled={venueRetired}
           title={venueRetired ? "A retired venue cannot be blocked." : undefined}
         >
           + Add a block
-        </button>
+        </Button>
       )}
 
       {formMode && (
@@ -448,11 +462,7 @@ export default function VenueBlocksPanel({ venue, currentUserId }) {
             onDatesChanged={clearConflicts}
             onDetailsChanged={clearConflicts}
           />
-          {overrideError && (
-            <p className="venue-blocks__error" role="alert">
-              {overrideError}
-            </p>
-          )}
+          {overrideError && <ErrorNotice message={overrideError} />}
           <BlockConflictList
             conflicts={conflicts}
             onChangePeriod={clearConflicts}
@@ -463,22 +473,55 @@ export default function VenueBlocksPanel({ venue, currentUserId }) {
       )}
 
       <section className="venue-blocks__current">
-        <h3>Current and upcoming blocks</h3>
+        {/* tabIndex -1: focus lands here after a removed block's row goes. */}
+        <h3 ref={listHeading} tabIndex={-1}>
+          Current and upcoming blocks
+        </h3>
 
-        {loadingBlocks && blocks.length === 0 && <p>Loading...</p>}
+        {loadingBlocks && blocks.length === 0 && <LoadingText />}
         {listError && (
-          <p className="venue-blocks__error" role="alert">
-            {listError}
-          </p>
+          <ErrorNotice
+            message={listError}
+            onRetry={retryBlocks}
+          />
         )}
         {!loadingBlocks && !listError && blocks.length === 0 && (
-          <p>This venue has no blocks.</p>
+          <EmptyState
+            message="This venue has no blocks."
+            nextStep={
+              venueRetired
+                ? "A retired venue cannot be blocked."
+                : "Use + Add a block to close the venue for a period."
+            }
+          />
         )}
 
         {blocks.length > 0 && (
           <ul className="venue-blocks__list">{blocks.map(renderRow)}</ul>
         )}
       </section>
+
+      {confirmingBlock && (
+        <ConfirmDialog
+          open
+          title="Remove this block?"
+          confirmLabel={removingId ? "Removing..." : "Remove block"}
+          cancelLabel="Keep block"
+          danger
+          busy={Boolean(removingId)}
+          onConfirm={() => handleRemove(confirmingBlock)}
+          onCancel={() => setConfirmingRemoveId(null)}
+        >
+          <p>
+            {reasonLabel(confirmingBlock.reason)}:{" "}
+            {formatDateTimeRange(confirmingBlock.startsAt, confirmingBlock.endsAt)}
+          </p>
+          <p>
+            {venue.name} is no longer blocked for this period. Bookings it flagged stay flagged
+            for review.
+          </p>
+        </ConfirmDialog>
+      )}
     </div>
   );
 }

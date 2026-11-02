@@ -10,12 +10,13 @@
 
 import { useState } from "react";
 import BookingSuitabilitySummary from "./BookingSuitabilitySummary";
+import Button from "./ui/Button";
+import ErrorNotice from "./ui/ErrorNotice";
+import StatusBadge from "./ui/StatusBadge";
 import { BOOKABLE_EVENT_STATUSES, statusLabel } from "../services/bookingRequestEligibility";
-import {
-  bookingStatusClassName,
-  readBookingStatusDisplay,
-} from "../services/bookingRequestStatusDisplay";
-import { formatTimestamp } from "../services/displayFormat";
+import { readBookingStatusDisplay } from "../services/bookingRequestStatusDisplay";
+import { BOOKING_GROUP_TONES, toneFor } from "../services/venueStatusTones";
+import { formatDateTime } from "../services/displayFormat";
 import { capitalise, replacesFlaggedBookingText } from "../services/flaggedBookingDisplay";
 import { VENUE_TIME_NOTE, formatVenuePeriod, formatVenueRange } from "../services/datetimeFormat";
 import { formatOccupiedPeriod, occupiedPeriodParts } from "../services/occupiedPeriodDisplay";
@@ -78,10 +79,12 @@ export default function PendingBookingRequestCard({
   item,
   expanded,
   onToggle,
+  toggleRef,
   busy,
   marksOnApproval,
   deciding,
   error,
+  onRetry,
   onApprove,
   onReject,
 }) {
@@ -125,9 +128,11 @@ export default function PendingBookingRequestCard({
   return (
     <li className="pending-bookings__card">
       {/* Locked while any decision is in flight, so the deciding card stays
-          open and a refusal shown inside it is not lost to another card. */}
+          open and a refusal shown inside it is not lost to another card.
+          A native button: it is a disclosure row, not an action, so Button would restyle it. */}
       <button
         type="button"
+        ref={toggleRef}
         className="pending-bookings__toggle"
         aria-expanded={expanded}
         aria-controls={regionId}
@@ -137,9 +142,7 @@ export default function PendingBookingRequestCard({
         <strong>{eventName}</strong>
         <span>{venueName}</span>
         <span>{formatVenuePeriod(item.startsAt, item.endsAt)}</span>
-        <span className={`status-badge ${bookingStatusClassName(display.group)}`}>
-          {display.label}
-        </span>
+        <StatusBadge tone={toneFor(BOOKING_GROUP_TONES, display.group)}>{display.label}</StatusBadge>
       </button>
 
       {expanded && (
@@ -188,7 +191,7 @@ export default function PendingBookingRequestCard({
             <dt>Setup notes</dt>
             <dd>{orNotSpecified(item.setupNotes)}</dd>
             <dt>Requested</dt>
-            <dd>{formatTimestamp(item.createdAt, "at an unknown time")}</dd>
+            <dd>{formatDateTime(item.createdAt, "at an unknown time")}</dd>
           </dl>
 
           <BookingSuitabilitySummary
@@ -208,17 +211,13 @@ export default function PendingBookingRequestCard({
                   <span>
                     Occupies {formatOccupiedPeriod(other, formatVenueRange)} {VENUE_TIME_NOTE}
                   </span>
-                  <span>Requested {formatTimestamp(other.createdAt, "at an unknown time")}</span>
+                  <span>Requested {formatDateTime(other.createdAt, "at an unknown time")}</span>
                 </li>
               ))}
             </ol>
           )}
 
-          {error && (
-            <p className="pending-bookings__error" role="alert">
-              {error}
-            </p>
-          )}
+          {error && <ErrorNotice message={error} onRetry={onRetry} />}
 
           <div className="pending-bookings__approve">
             {marksOnApproval > 0 && !approveBlockedBy && (
@@ -228,14 +227,13 @@ export default function PendingBookingRequestCard({
                 Conflicting.
               </p>
             )}
-            <button
-              type="button"
+            <Button
               onClick={() => onApprove(item)}
               disabled={busy || Boolean(approveBlockedBy)}
               aria-describedby={approveBlockedBy}
             >
               {deciding === "approve" ? "Approving..." : "Approve"}
-            </button>
+            </Button>
           </div>
 
           <form className="pending-bookings__reject" onSubmit={handleReject} noValidate>
@@ -263,9 +261,9 @@ export default function PendingBookingRequestCard({
               maxLength={SERVER_TEXT_MAX_LENGTH}
               onChange={(e) => setAlternative(e.target.value)}
             />
-            <button type="submit" disabled={busy}>
+            <Button type="submit" variant="danger" disabled={busy}>
               {deciding === "reject" ? "Rejecting..." : "Reject"}
-            </button>
+            </Button>
           </form>
         </div>
       )}

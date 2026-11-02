@@ -16,6 +16,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import PendingBookingRequestCard from "./PendingBookingRequestCard";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import LoadingText from "./ui/LoadingText";
 import {
   approveBookingRequest,
   getPendingBookingRequests,
@@ -29,6 +32,18 @@ const LIST_ERROR_MESSAGES = {
   403: "Only Venue Staff can see pending booking requests.",
 };
 const LIST_DEFAULT_ERROR = "Pending booking requests could not be loaded. Please try again.";
+
+/**
+ * A failed list load as { message, retryable }. A 401 or 403 repeats on every
+ * attempt (only signing in or another role fixes it), so it gets no Try again.
+ */
+function listLoadError(err) {
+  const status = err?.response?.status;
+  return {
+    message: statusMessageOf(err, LIST_ERROR_MESSAGES, LIST_DEFAULT_ERROR),
+    retryable: status !== 401 && status !== 403,
+  };
+}
 
 /** The notice after an approval: what else it changed (AC3, and the event's own hold). */
 function approvedNotice(item, result) {
@@ -56,10 +71,21 @@ function marksOnApproval(item, pendingIds) {
   return overlapping.filter((other) => pendingIds.has(other.id)).length;
 }
 
-export default function PendingBookingRequests({ onDecided }) {
+/**
+ * Whether sending the same approval again could succeed: only when the server
+ * never answered or failed itself. A 4xx is a refusal that repeats.
+ */
+function isTransient(err) {
+  const status = err?.response?.status;
+  return !status || status >= 500;
+}
+
+export default function PendingBookingRequests({ onDecided, asPage = false }) {
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  // Bumped by Try again, so the guarded first load below runs again.
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [expandedId, setExpandedId] = useState(null);
   // { id, action } while a decision is in flight.
   const [deciding, setDeciding] = useState(null);
@@ -69,6 +95,11 @@ export default function PendingBookingRequests({ onDecided }) {
   const [queueError, setQueueError] = useState(null);
   const [notice, setNotice] = useState(null);
   const sending = useRef(false);
+  const headingRef = useRef(null);
+  const toggles = useRef(new Map());
+  // The card a decision closed, by id and place in the queue, so focus can
+  // follow it once the refetched queue renders instead of dropping to the page.
+  const refocus = useRef(null);
 
   // A refresh after a decision keeps the queue on screen, so it does not raise
   // `loading` again (EquipmentCatalogue's pattern, which also keeps setState
@@ -78,7 +109,7 @@ export default function PendingBookingRequests({ onDecided }) {
       setRequests(asList(await getPendingBookingRequests()));
       setError(null);
     } catch (err) {
-      setError(statusMessageOf(err, LIST_ERROR_MESSAGES, LIST_DEFAULT_ERROR));
+      setError(listLoadError(err));
     }
   }, []);
 
@@ -94,7 +125,7 @@ export default function PendingBookingRequests({ onDecided }) {
           setError(null);
         }
       } catch (err) {
-        if (!cancelled) setError(statusMessageOf(err, LIST_ERROR_MESSAGES, LIST_DEFAULT_ERROR));
+        if (!cancelled) setError(listLoadError(err));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -103,7 +134,24 @@ export default function PendingBookingRequests({ onDecided }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [loadAttempt]);
+
+  // Waits for `deciding` to clear: the toggles are disabled until then, and a
+  // disabled button cannot take focus. The card itself if it is still listed,
+  // else the one now in its place, else the heading.
+  useEffect(() => {
+    if (deciding !== null || !refocus.current) return;
+    const { id, index } = refocus.current;
+    refocus.current = null;
+    const next = requests.find((r) => r.id === id) ?? requests[Math.min(index, requests.length - 1)];
+    (next ? toggles.current.get(next.id) : headingRef.current)?.focus();
+  }, [deciding, requests]);
+
+  function retryLoad() {
+    setError(null);
+    setLoading(true);
+    setLoadAttempt((n) => n + 1);
+  }
 
   async function decide(item, action, send) {
     if (sending.current) return;
@@ -120,6 +168,7 @@ export default function PendingBookingRequests({ onDecided }) {
           : "Rejected; the coordinator has been notified.",
       );
       setExpandedId(null);
+      refocus.current = { id: item.id, index: requests.findIndex((r) => r.id === item.id) };
       onDecided?.();
       await refreshRequests();
     } catch (err) {
@@ -127,14 +176,21 @@ export default function PendingBookingRequests({ onDecided }) {
       if (isStaleDecisionError(err)) {
         setQueueError(message);
         setExpandedId(null);
+        refocus.current = { id: item.id, index: requests.findIndex((r) => r.id === item.id) };
         await refreshRequests();
       } else {
-        setCardError({ id: item.id, message });
+        setCardError({ id: item.id, message, retryable: action === "approve" && isTransient(err) });
+        // The pressed button was disabled while sending, so browsers drop focus; the card's row keeps it.
+        refocus.current = { id: item.id, index: requests.findIndex((r) => r.id === item.id) };
       }
     } finally {
       sending.current = false;
       setDeciding(null);
     }
+  }
+
+  function approve(target) {
+    return decide(target, "approve", () => approveBookingRequest(target.id));
   }
 
   function handleToggle(id) {
@@ -143,47 +199,61 @@ export default function PendingBookingRequests({ onDecided }) {
   }
 
   const pendingIds = new Set(requests.filter((r) => r.status === "pending").map((r) => r.id));
+  // Its own route makes it the page title; on the dashboard it is a section.
+  const Heading = asPage ? "h1" : "h2";
+  // Only a list that loaded is counted; while loading or failed there is nothing to count.
+  const count = loading || error ? null : requests.length;
 
   return (
     <section className="pending-bookings">
-      <h2>Pending booking requests</h2>
+      {/* Focusable from script only, for when the last card leaves the queue. */}
+      <Heading ref={headingRef} tabIndex={-1}>
+        Pending booking requests{count !== null && ` (${count})`}
+      </Heading>
 
-      {loading && <p>Loading...</p>}
-      {error && (
-        <p className="pending-bookings__error" role="alert">
-          {error}
-        </p>
-      )}
-      {queueError && (
-        <p className="pending-bookings__error" role="alert">
-          {queueError}
-        </p>
-      )}
+      {loading && <LoadingText />}
+      {/* Signing in again or a different role is the fix for 401 and 403, not repeating the load. */}
+      {error && <ErrorNotice message={error.message} onRetry={error.retryable ? retryLoad : undefined} />}
+      {/* The queue has already been refetched, so the stale request may be gone. */}
+      {queueError && <ErrorNotice message={queueError} />}
       {notice && (
         <p className="pending-bookings__notice" role="status">
           {notice}
         </p>
       )}
-      {!loading && !error && requests.length === 0 && <p>No pending booking requests.</p>}
+      {!loading && !error && requests.length === 0 && (
+        <EmptyState
+          message="No pending booking requests."
+          nextStep="A request appears here when a coordinator asks to book a venue for their event."
+        />
+      )}
 
       {requests.length > 0 && (
         <ul>
-          {requests.map((item) => (
-            <PendingBookingRequestCard
-              key={item.id}
-              item={item}
-              expanded={expandedId === item.id}
-              onToggle={handleToggle}
-              busy={deciding !== null}
-              marksOnApproval={marksOnApproval(item, pendingIds)}
-              deciding={deciding?.id === item.id ? deciding.action : null}
-              error={cardError?.id === item.id ? cardError.message : null}
-              onApprove={(target) => decide(target, "approve", () => approveBookingRequest(target.id))}
-              onReject={(target, input) =>
-                decide(target, "reject", () => rejectBookingRequest(target.id, input))
-              }
-            />
-          ))}
+          {requests.map((item) => {
+            const ownError = cardError?.id === item.id ? cardError : null;
+            return (
+              <PendingBookingRequestCard
+                key={item.id}
+                item={item}
+                expanded={expandedId === item.id}
+                onToggle={handleToggle}
+                toggleRef={(element) => {
+                  toggles.current.set(item.id, element);
+                  return () => toggles.current.delete(item.id);
+                }}
+                busy={deciding !== null}
+                marksOnApproval={marksOnApproval(item, pendingIds)}
+                deciding={deciding?.id === item.id ? deciding.action : null}
+                error={ownError?.message ?? null}
+                onRetry={ownError?.retryable ? () => approve(item) : undefined}
+                onApprove={approve}
+                onReject={(target, input) =>
+                  decide(target, "reject", () => rejectBookingRequest(target.id, input))
+                }
+              />
+            );
+          })}
         </ul>
       )}
     </section>

@@ -25,7 +25,6 @@
 import { useEffect, useId, useState } from "react";
 import { getVenueCalendar, getVenueDetails } from "../services/venueService";
 import {
-  CALENDAR_LOCALE,
   CALENDAR_VIEWS,
   daysIn,
   entriesOnDay,
@@ -35,9 +34,20 @@ import {
   startOfDay,
   toWireWindow,
 } from "../services/calendarRange";
-import { calendarEntryDisplay } from "../services/calendarEntryDisplay";
-import { formatRange } from "../services/displayFormat";
+import { CALENDAR_KEY, calendarEntryDisplay } from "../services/calendarEntryDisplay";
+import {
+  formatDateTimeRange,
+  formatDayMonth,
+  formatLongDay,
+  formatWeekdayShort,
+} from "../services/displayFormat";
 import { formatOccupiedPeriod } from "../services/occupiedPeriodDisplay";
+import Button from "./ui/Button";
+import StatusBadge from "./ui/StatusBadge";
+import LoadingText from "./ui/LoadingText";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import { VENUE_TONES } from "../services/venueStatusTones";
 
 // Keyed by status, the same shape as VenueDetail's BOOKINGS_ERROR_MESSAGES.
 // The server's `error` string is not surfaced: on the venue routes it is
@@ -56,10 +66,6 @@ const VIEW_LABELS = { day: "Day", week: "Week", month: "Month" };
 
 const EMPTY_TEXT = "Nothing booked or blocked in this period.";
 
-function weekdayShort(day) {
-  return day.toLocaleDateString(CALENDAR_LOCALE, { weekday: "short" });
-}
-
 /**
  * One entry. `compact` (the month view) drops the visible time range to keep
  * a cell small; the range stays in the title either way.
@@ -73,8 +79,8 @@ function CalendarEntry({ entry, compact }) {
   const { label, detail, tone } = entry.display;
   const when =
     entry.kind === "booking" || entry.kind === "hold"
-      ? formatOccupiedPeriod(entry)
-      : formatRange(entry.startsAt, entry.endsAt);
+      ? formatOccupiedPeriod(entry, formatDateTimeRange)
+      : formatDateTimeRange(entry.startsAt, entry.endsAt);
   return (
     <li className={`venue-calendar__entry venue-calendar__entry--${tone}`} title={when}>
       {!compact && <span className="venue-calendar__entry-time">{when}</span>}
@@ -113,12 +119,15 @@ export default function VenueCalendar({ venueId, initialDate = new Date() }) {
   // loading flag to set and reset, and an answer for a window the user has
   // already moved past can never be shown as this one's.
   const [result, setResult] = useState({ key: null, entries: [], error: null });
+  // Bumped by Try again. Part of the request key, so a retry shows Loading...
+  // and an answer to an earlier attempt can never stand in for it.
+  const [attempt, setAttempt] = useState(0);
 
   const titleId = useId();
 
   const range = rangeFor(view, anchor);
   const { from, to } = toWireWindow(range);
-  const requestKey = `${venueId} ${from} ${to}`;
+  const requestKey = `${venueId} ${from} ${to} ${attempt}`;
 
   useEffect(() => {
     let cancelled = false;
@@ -152,13 +161,13 @@ export default function VenueCalendar({ venueId, initialDate = new Date() }) {
       .then((outcome) => {
         // The stale guard: quick clicks start several requests, and only the
         // one for the window still on screen may land.
-        if (!cancelled) setResult({ key: `${venueId} ${from} ${to}`, ...outcome });
+        if (!cancelled) setResult({ key: `${venueId} ${from} ${to} ${attempt}`, ...outcome });
       });
 
     return () => {
       cancelled = true;
     };
-  }, [venueId, from, to]);
+  }, [venueId, from, to, attempt]);
 
   const loading = result.key !== requestKey;
 
@@ -190,40 +199,41 @@ export default function VenueCalendar({ venueId, initialDate = new Date() }) {
       <header className="venue-calendar__header">
         <span className="eyebrow">Venue calendar</span>
         <h1>{venue ? venue.name : "Venue calendar"}</h1>
-        {venue?.retiredAt && <span className="venue-calendar__badge">Retired</span>}
+        {venue?.retiredAt && <StatusBadge tone={VENUE_TONES.retired}>Retired</StatusBadge>}
       </header>
 
       <div className="venue-calendar__toolbar">
         <div className="venue-calendar__nav" role="group" aria-label="Move through the calendar">
-          <button
-            type="button"
+          <Button
+            variant="secondary"
             aria-label={`Previous ${view}`}
             onClick={() => setAnchor((current) => shiftAnchor(view, current, -1))}
           >
             Previous
-          </button>
-          <button type="button" aria-label="Go to today" onClick={() => setAnchor(new Date())}>
+          </Button>
+          <Button variant="secondary" aria-label="Go to today" onClick={() => setAnchor(new Date())}>
             Today
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="secondary"
             aria-label={`Next ${view}`}
             onClick={() => setAnchor((current) => shiftAnchor(view, current, 1))}
           >
             Next
-          </button>
+          </Button>
         </div>
 
         <div className="venue-calendar__views" role="group" aria-label="Calendar view">
           {CALENDAR_VIEWS.map((option) => (
-            <button
+            // The chosen view is the filled variant; aria-pressed says the same in words.
+            <Button
               key={option}
-              type="button"
+              variant={option === view ? "primary" : "secondary"}
               aria-pressed={option === view}
               onClick={() => setView(option)}
             >
               {VIEW_LABELS[option]}
-            </button>
+            </Button>
           ))}
         </div>
       </div>
@@ -232,21 +242,33 @@ export default function VenueCalendar({ venueId, initialDate = new Date() }) {
         {rangeTitle(view, range)}
       </h2>
 
-      {loading && (
-        <p className="venue-calendar__loading" role="status">
-          Loading calendar...
-        </p>
-      )}
+      {/* Each swatch shares its entry's colour rule in App.css, so the key matches. */}
+      <ul className="venue-calendar__legend" aria-label="Calendar key">
+        {CALENDAR_KEY.map(({ label, tone }) => (
+          <li key={tone}>
+            <span className={`venue-calendar__swatch venue-calendar__swatch--${tone}`} aria-hidden="true" />
+            {label}
+          </li>
+        ))}
+      </ul>
+
+      {loading && <LoadingText />}
 
       {!loading && result.error && (
-        <p className="venue-calendar__error" role="alert">
-          {result.error}
-        </p>
+        <ErrorNotice
+          message={result.error}
+          onRetry={() => setAttempt((n) => n + 1)}
+        />
       )}
 
       {!loading && !result.error && (
         <>
-          {visible.length === 0 && <p className="venue-calendar__empty">{EMPTY_TEXT}</p>}
+          {visible.length === 0 && (
+            <EmptyState
+              message={EMPTY_TEXT}
+              nextStep="Use Previous or Next to look at another period."
+            />
+          )}
 
           {view === "day" && visible.length > 0 && <EntryList entries={visible} />}
 
@@ -257,10 +279,8 @@ export default function VenueCalendar({ venueId, initialDate = new Date() }) {
                   <tr>
                     {days.map((day) => (
                       <th key={day.getTime()} scope="col">
-                        <span className="venue-calendar__weekday">{weekdayShort(day)}</span>{" "}
-                        <span className="venue-calendar__date">
-                          {day.toLocaleDateString(CALENDAR_LOCALE, { day: "numeric", month: "short" })}
-                        </span>
+                        <span className="venue-calendar__weekday">{formatWeekdayShort(day)}</span>{" "}
+                        <span className="venue-calendar__date">{formatDayMonth(day)}</span>
                       </th>
                     ))}
                   </tr>
@@ -288,7 +308,7 @@ export default function VenueCalendar({ venueId, initialDate = new Date() }) {
                   <tr>
                     {days.slice(0, 7).map((day) => (
                       <th key={day.getTime()} scope="col">
-                        {weekdayShort(day)}
+                        {formatWeekdayShort(day)}
                       </th>
                     ))}
                   </tr>
@@ -306,19 +326,14 @@ export default function VenueCalendar({ venueId, initialDate = new Date() }) {
                               key={day.getTime()}
                               {...cellProps(day, outside ? " venue-calendar__cell--muted" : "")}
                             >
-                              <button
-                                type="button"
+                              <Button
+                                variant="link"
                                 className="venue-calendar__day-number"
-                                aria-label={`Show ${day.toLocaleDateString(CALENDAR_LOCALE, {
-                                  weekday: "long",
-                                  day: "numeric",
-                                  month: "long",
-                                  year: "numeric",
-                                })}`}
+                                aria-label={`Show ${formatLongDay(day)}`}
                                 onClick={() => showDay(day)}
                               >
                                 {day.getDate()}
-                              </button>
+                              </Button>
                               {dayEntries.length > 0 && <EntryList entries={dayEntries} compact />}
                             </td>
                           );

@@ -35,12 +35,17 @@ import {
   getVenueDetails,
   getVenueHistory,
 } from "../services/venueService";
-import { formatTimestamp, shortId } from "../services/displayFormat";
+import { formatDateTime, formatDateTimeRange, shortId } from "../services/displayFormat";
 import { formatHoursEntry } from "../services/datetimeFormat";
 import { formatTurnaround } from "../services/turnaroundOptions";
 import { safetyFactText } from "../services/venueSafetyFacts";
 import VenueSafetyFacts from "./VenueSafetyFacts";
 import BookingSuitabilitySummary from "./BookingSuitabilitySummary";
+import StatusBadge from "./ui/StatusBadge";
+import LoadingText from "./ui/LoadingText";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import { BOOKING_GROUP_TONES, toneFor } from "../services/venueStatusTones";
 
 const BOOKINGS_ERROR_MESSAGES = {
   400: "That venue id was not recognised. Please go back and refresh.",
@@ -163,7 +168,7 @@ function fmtField(key, value) {
   }
 }
 
-export default function VenueDetail({ venue }) {
+export default function VenueDetail({ venue, headingRef }) {
   // Names the "Safety information" section by its h3, so the page has exactly
   // one region of that name. VenueSafetyFacts inside it, given no venueName,
   // is a plain div and does not repeat it.
@@ -220,13 +225,6 @@ export default function VenueDetail({ venue }) {
     }
   }, [venueId]);
 
-  /** "Try again": back to Loading... so a second failure is visibly a new one. */
-  function retryDetails() {
-    setDetailsError(null);
-    setLoadingDetails(true);
-    fetchDetails();
-  }
-
   const fetchHistory = useCallback(async () => {
     try {
       setHistory(await getVenueHistory(venueId));
@@ -240,6 +238,15 @@ export default function VenueDetail({ venue }) {
       setLoadingHistory(false);
     }
   }, [venueId]);
+
+  // "Try again" goes back to Loading... so a second failure is visibly a new one.
+  function retryFor(setError, setLoading, fetch) {
+    return () => {
+      setError(null);
+      setLoading(true);
+      fetch();
+    };
+  }
 
   useEffect(() => {
     fetchBookings();
@@ -255,7 +262,8 @@ export default function VenueDetail({ venue }) {
 
   return (
     <div className="venue-detail">
-      <h2>
+      {/* tabIndex -1 and headingRef: the catalogue moves focus here when it opens this panel. */}
+      <h2 ref={headingRef} tabIndex={-1}>
         {venue.name} &mdash; {venue.location}
       </h2>
 
@@ -264,16 +272,12 @@ export default function VenueDetail({ venue }) {
         {/* No filter on retirement: a retired venue keeps its safety facts
             (SCRUM-493 AC5), and this shows them like everything else here. */}
 
-        {loadingDetails && <p>Loading...</p>}
+        {loadingDetails && <LoadingText />}
         {detailsError && (
-          <>
-            <p className="venue-detail__error" role="alert">
-              {detailsError}
-            </p>
-            <button type="button" onClick={retryDetails}>
-              Try again
-            </button>
-          </>
+          <ErrorNotice
+            message={detailsError}
+            onRetry={retryFor(setDetailsError, setLoadingDetails, fetchDetails)}
+          />
         )}
 
         {!loadingDetails && !detailsError && details && (
@@ -289,14 +293,18 @@ export default function VenueDetail({ venue }) {
         {/* No filter on retirement, here or server-side. A retired venue's
             bookings are exactly what this section exists to show. */}
 
-        {loadingBookings && <p>Loading...</p>}
+        {loadingBookings && <LoadingText />}
         {bookingsError && (
-          <p className="venue-detail__error" role="alert">
-            {bookingsError}
-          </p>
+          <ErrorNotice
+            message={bookingsError}
+            onRetry={retryFor(setBookingsError, setLoadingBookings, fetchBookings)}
+          />
         )}
         {!loadingBookings && !bookingsError && bookings.length === 0 && (
-          <p>No bookings have been made against this venue.</p>
+          <EmptyState
+            message="No bookings have been made against this venue."
+            nextStep="A booking appears here when an Event Coordinator requests this venue."
+          />
         )}
 
         {bookings.length > 0 && (
@@ -322,10 +330,7 @@ export default function VenueDetail({ venue }) {
                     {hasSuitability && booking.eventName && (
                       <strong className="venue-detail__booking-event">{booking.eventName}</strong>
                     )}
-                    <span>
-                      {formatTimestamp(booking.startsAt)} &ndash;{" "}
-                      {formatTimestamp(booking.endsAt)}
-                    </span>
+                    <span>{formatDateTimeRange(booking.startsAt, booking.endsAt)}</span>
                     <code title={booking.eventRequestId ?? undefined}>
                       {booking.eventRequestId ? shortId(booking.eventRequestId) : "no event"}
                     </code>
@@ -333,7 +338,9 @@ export default function VenueDetail({ venue }) {
                         hold -- pending, rejected, withdrawn -- must not read as
                         one. Absent from older responses, so shown only when sent. */}
                     {booking.statusDisplay?.label && (
-                      <span className="venue-detail__booking-status">{booking.statusDisplay.label}</span>
+                      <StatusBadge tone={toneFor(BOOKING_GROUP_TONES, booking.statusDisplay.group)}>
+                        {booking.statusDisplay.label}
+                      </StatusBadge>
                     )}
                     {hasSuitability && (
                       <BookingSuitabilitySummary
@@ -353,14 +360,18 @@ export default function VenueDetail({ venue }) {
       <section>
         <h3>Change history</h3>
 
-        {loadingHistory && <p>Loading...</p>}
+        {loadingHistory && <LoadingText />}
         {historyError && (
-          <p className="venue-detail__error" role="alert">
-            {historyError}
-          </p>
+          <ErrorNotice
+            message={historyError}
+            onRetry={retryFor(setHistoryError, setLoadingHistory, fetchHistory)}
+          />
         )}
         {!loadingHistory && !historyError && history.length === 0 && (
-          <p>No changes have been recorded for this venue.</p>
+          <EmptyState
+            message="No changes have been recorded for this venue."
+            nextStep="A change appears here when this venue's details are edited."
+          />
         )}
 
         {history.length > 0 && (
@@ -390,7 +401,7 @@ export default function VenueDetail({ venue }) {
                 return (
                   <li key={entry.id}>
                     <div className="venue-history__meta">
-                      <strong>{formatTimestamp(entry.changedAt)}</strong>
+                      <strong>{formatDateTime(entry.changedAt)}</strong>
                       {entry.changedBy ? (
                         <span>
                           by{" "}

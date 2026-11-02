@@ -34,6 +34,8 @@ import {
 } from "../services/venueBlockValidation";
 import { codePointLength } from "../services/venueSafetyFacts";
 import { fieldErrorWiring } from "./fieldErrors";
+import Button from "./ui/Button";
+import ErrorNotice from "./ui/ErrorNotice";
 
 /** The fields that render their own errors. Anything else goes in the alert. */
 const FIELDS = ["startsAt", "endsAt", "reason", "notes"];
@@ -157,25 +159,23 @@ export default function VenueBlockForm({
       : null;
 
   const notesRequired = form.reason === "other";
-  const showAlert = Boolean(formError) || unmatchedServerErrors.length > 0;
 
   return (
     <form className="venue-block-form" onSubmit={handleSubmit} noValidate>
       <h2>{isEdit ? "Change this block" : "Block this venue"}</h2>
 
-      {showAlert && (
+      {/* No Try again: submitting the form again is the retry. */}
+      {formError && <ErrorNotice message={formError} />}
+      {unmatchedServerErrors.length > 0 && (
         <div className="venue-block-form__error" role="alert">
-          {formError && <p>{formError}</p>}
-          {unmatchedServerErrors.length > 0 && (
-            <ul>
-              {unmatchedServerErrors.map((err, i) => (
-                <li key={i}>
-                  {err.field ? `${err.field}: ` : ""}
-                  {err.message}
-                </li>
-              ))}
-            </ul>
-          )}
+          <ul>
+            {unmatchedServerErrors.map((err, i) => (
+              <li key={i}>
+                {err.field ? `${err.field}: ` : ""}
+                {err.message}
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
@@ -270,13 +270,13 @@ export default function VenueBlockForm({
         </p>
       )}
 
-      <button type="submit" disabled={submitting}>
+      <Button type="submit" disabled={submitting}>
         {submitting ? "Saving..." : isEdit ? "Save changes" : "Block venue"}
-      </button>
+      </Button>
       {onCancel && (
-        <button type="button" onClick={onCancel} disabled={submitting}>
+        <Button variant="secondary" onClick={onCancel} disabled={submitting}>
           Cancel
-        </button>
+        </Button>
       )}
     </form>
   );
