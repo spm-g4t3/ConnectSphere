@@ -25,10 +25,13 @@
 
 import { useState } from "react";
 import { listUnassignedEventRequests } from "../services/eventRequestService";
-import { formatRange } from "../services/displayFormat";
+import { formatDateTimeRange } from "../services/displayFormat";
 import { describeWaiting } from "../services/waitingTime";
 import AssignCoordinatorPanel from "./AssignCoordinatorPanel";
 import Button from "./ui/Button";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import LoadingText from "./ui/LoadingText";
 import UnassignedRequestCancelPanel from "./UnassignedRequestCancelPanel";
 import useListRead from "./useListRead";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
@@ -37,7 +40,7 @@ import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 // Lead, an administration problem, not a breakage.
 const QUEUE_ERROR_MESSAGES = {
   403: "Only the Event Coordinator Lead can see the unassigned queue.",
-  500: "The unassigned queue could not be loaded. Please try again.",
+  500: "The unassigned queue could not be loaded.",
 };
 
 /**
@@ -58,10 +61,11 @@ export default function UnassignedQueue({ now = () => new Date(), asPage = false
     data: queue,
     loading,
     error,
+    retryable,
     load: fetchQueue,
   } = useListRead(listUnassignedEventRequests, {
     messages: QUEUE_ERROR_MESSAGES,
-    fallback: "The unassigned queue could not be loaded. Please try again.",
+    fallback: "The unassigned queue could not be loaded.",
   });
 
   // Refetch when the Lead comes back to the tab, as ReviewQueue does: new
@@ -121,17 +125,21 @@ export default function UnassignedQueue({ now = () => new Date(), asPage = false
         )}
       </Title>
 
-      {confirmation && <p role="status">{confirmation}</p>}
-      {loading && <p>Loading...</p>}
-      {error && (
-        <p className="unassigned-queue__error" role="alert">
-          {error}
+      {confirmation && (
+        <p role="status" className="unassigned-queue__confirmation">
+          {confirmation}
         </p>
       )}
+      {loading && <LoadingText />}
+      {/* Hidden while a read is in flight, so Try again cannot start a second one. */}
+      {error && !loading && <ErrorNotice message={error} onRetry={retryable ? fetchQueue : undefined} />}
       {/* AC2-08. Nothing waiting is the good state, and it is said, never
           left as an empty card that could be mistaken for a failed load. */}
       {!loading && !error && queue.length === 0 && (
-        <p>No event requests are waiting for a coordinator.</p>
+        <EmptyState
+          message="No event requests are waiting for a coordinator."
+          nextStep="New requests appear here when organisers submit them."
+        />
       )}
 
       {/* Oldest submission first, as the server orders it; not re-sorted. */}
@@ -141,7 +149,7 @@ export default function UnassignedQueue({ now = () => new Date(), asPage = false
             <div>
               <strong>{request.eventName}</strong>
               <p>Organiser: {request.organiserName ?? "No name on record"}</p>
-              <p>{formatRange(request.proposedStart, request.proposedEnd, "not set")}</p>
+              <p>{formatDateTimeRange(request.proposedStart, request.proposedEnd, "not set")}</p>
               <p>Expected attendance: {request.expectedAttendance ?? "not given"}</p>
               <p className="unassigned-queue__waiting">{describeWaiting(request.submittedAt, now())}</p>
             </div>

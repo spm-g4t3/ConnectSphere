@@ -128,8 +128,8 @@ describe("SCRUM486_AC3 the picker when the list cannot be shown", () => {
 
   it.each([
     [403, "Only the Event Coordinator Lead can assign event requests."],
-    [500, "The list of coordinators could not be loaded. Please try again."],
-    [undefined, "The list of coordinators could not be loaded. Please try again."],
+    [500, "The list of coordinators could not be loaded."],
+    [undefined, "The list of coordinators could not be loaded."],
   ])("SCRUM486_AC3_a_%s_loading_the_list_reads_%j", async (status, message) => {
     vi.mocked(listCoordinatorWorkload).mockRejectedValue(httpError(status));
     renderPanel();

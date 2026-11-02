@@ -11,6 +11,7 @@ import { cancelEventRequest, getEventCancellationImpact } from "../services/even
 import { statusMessageOf } from "../services/apiErrors";
 import { CancellationImpact } from "./EventCancellationPanel";
 import Button from "./ui/Button";
+import ErrorNotice from "./ui/ErrorNotice";
 
 // Keyed by status for both calls, never by the server's text. 403 and 409 are
 // the two ways the race with an assignment, or another Lead, is lost (AC5).
@@ -151,11 +152,8 @@ export default function UnassignedRequestCancelPanel({ request, onCancelled }) {
           </div>
         </>
       )}
-      {error && (
-        <p className="unassigned-queue__error" role="alert">
-          {error}
-        </p>
-      )}
+      {/* Form errors have no Try again: previewing or cancelling again is the retry. */}
+      {error && <ErrorNotice message={error} />}
     </div>
   );
 }

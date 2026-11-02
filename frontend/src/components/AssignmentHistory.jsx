@@ -39,13 +39,17 @@
 // To read the history again after a handover, the parent changes this
 // component's `key`, which remounts it. No refresh prop and no polling.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "../auth/AuthContext";
 import {
   getAssignmentHistory,
   getAssignmentHistoryForReview,
 } from "../services/eventRequestService";
-import { formatTimestamp } from "../services/displayFormat";
+import { canRetryRead } from "../services/apiErrors";
+import { formatDateTime } from "../services/displayFormat";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import LoadingText from "./ui/LoadingText";
 
 const FETCH_BY_VIEW = {
   coordinator: getAssignmentHistoryForReview,
@@ -58,7 +62,7 @@ const FETCH_BY_VIEW = {
 const HISTORY_ERROR_MESSAGES = {
   403: "Only Event Coordinators can see this event's full history.",
   404: "This event's coordinator history is not available.",
-  500: "The coordinator history could not be loaded. Please try again.",
+  500: "The coordinator history could not be loaded.",
 };
 
 /**
@@ -121,7 +125,7 @@ function HistoryEntry({ entry, currentUserId }) {
     <li className="assignment-history__entry">
       <div className="assignment-history__movement">{movement}</div>
       <div className="assignment-history__meta">
-        {formatTimestamp(entry.createdAt, "Not recorded")} &middot; by {madeBy}
+        {formatDateTime(entry.createdAt, "Not recorded")} &middot; by {madeBy}
       </div>
       {noteWasSent && entry.handoverNote && (
         <blockquote className="assignment-history__note">{entry.handoverNote}</blockquote>
@@ -148,43 +152,51 @@ export default function AssignmentHistory({ eventRequestId, view, currentCoordin
   const { user } = useAuth();
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState(null); // { message, retryable }
 
   const fetchHistory = FETCH_BY_VIEW[view] ?? FETCH_BY_VIEW.organiser;
 
   // State is set only in the promise's callbacks, the way
   // CoordinatorRequestDetail loads its change requests, so a response for an
   // event the user has already left is dropped rather than shown.
-  useEffect(() => {
-    let cancelled = false;
-
+  const loadHistory = useCallback((isActive = () => true) =>
     fetchHistory(eventRequestId)
       .then((data) => {
-        if (!cancelled) setEntries(data);
+        if (isActive()) setEntries(data);
       })
       .catch((err) => {
-        if (!cancelled) {
-          setError(
-            HISTORY_ERROR_MESSAGES[err.response?.status] ||
-              "The coordinator history could not be loaded. Please try again.",
-          );
+        if (isActive()) {
+          setError({
+            message: HISTORY_ERROR_MESSAGES[err.response?.status] || "The coordinator history could not be loaded.",
+            retryable: canRetryRead(err),
+          });
         }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+        if (isActive()) setLoading(false);
+      }), [eventRequestId, fetchHistory]);
 
+  useEffect(() => {
+    let cancelled = false;
+    loadHistory(() => !cancelled);
     return () => {
       cancelled = true;
     };
-  }, [eventRequestId, fetchHistory]);
+  }, [loadHistory]);
 
-  if (loading) return <div className="assignment-history"><p>Loading coordinator history...</p></div>;
+  // Loading starts true, so only a retry needs to raise it.
+  function retryHistory() {
+    setLoading(true);
+    setError(null);
+    loadHistory();
+  }
+
+  if (loading) return <div className="assignment-history"><LoadingText /></div>;
 
   if (error) {
     return (
       <div className="assignment-history">
-        <p className="assignment-history__error" role="alert">{error}</p>
+        <ErrorNotice message={error.message} onRetry={error.retryable ? retryHistory : undefined} />
       </div>
     );
   }
@@ -212,7 +224,10 @@ export default function AssignmentHistory({ eventRequestId, view, currentCoordin
       {entries.length === 0 ? (
         // Not "one is assigned on submission": a request cancelled while still
         // a draft also has no history, and will never be submitted.
-        <p>No coordinator has been assigned to this request.</p>
+        <EmptyState
+          message="No coordinator has been assigned to this request."
+          nextStep="If the Event Coordinator Lead assigns one, they will appear here."
+        />
       ) : (
         <ol className="assignment-history__list">
           {entries.map((entry) => (

@@ -1,16 +1,23 @@
 // The Event Coordinator Lead's screens on the shared UI standard: one h1 per
-// page, shared Buttons and StatusBadges. Services are mocked; the panels are
-// real, so the queue is checked with the panels it actually opens.
+// page, shared Buttons and StatusBadges, and the shared loading, empty and
+// error states and dates. Services are mocked; the panels are real, so the
+// queue is checked with the panels it actually opens.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 
 import EventCoordinatorLeadDashboard from "../../src/components/EventCoordinatorLeadDashboard.jsx";
 import UnassignedQueue from "../../src/components/UnassignedQueue.jsx";
 import AssignedEvents from "../../src/components/AssignedEvents.jsx";
+import AssignmentHistory from "../../src/components/AssignmentHistory.jsx";
+import ReassignEventPanel from "../../src/components/ReassignEventPanel.jsx";
+import { useAuth } from "../../src/auth/AuthContext";
 import {
+  assignEventRequest,
+  getAssignmentHistory,
+  getAssignmentHistoryForReview,
   getEventCancellationImpact,
   listAssignedEventsForLead,
   listCoordinatorOverview,
@@ -20,25 +27,40 @@ import {
 import { statusTone } from "../../src/services/eventRequestStatusDisplay";
 import { deferred, httpError } from "../helpers/async.js";
 
+vi.mock("../../src/auth/AuthContext", () => ({ useAuth: vi.fn() }));
 vi.mock("../../src/services/eventRequestService", () => ({
   assignEventRequest: vi.fn(),
   cancelEventRequest: vi.fn(),
+  getAssignmentHistory: vi.fn(),
+  getAssignmentHistoryForReview: vi.fn(),
   getEventCancellationImpact: vi.fn(),
   listAssignedEventsForLead: vi.fn(),
   listCoordinatorOverview: vi.fn(),
   listCoordinatorWorkload: vi.fn(),
+  listCoordinators: vi.fn(),
   listUnassignedEventRequests: vi.fn(),
+  reassignEventRequest: vi.fn(),
 }));
 vi.mock("../../src/components/NotificationInbox", () => ({
   default: () => <section><h2>Notifications</h2></section>,
 }));
 
+// 9:00 am to 11:00 am on 15 Jan 2026, Singapore time.
+const MORNING = "2026-01-15T01:00:00Z";
+const LATE_MORNING = "2026-01-15T03:00:00Z";
 const WAITING = [
-  { id: "r1", eventName: "IS212 Industry Night", organiserName: "Aisha Rahman", submittedAt: "2026-10-01T00:00:00Z" },
+  {
+    id: "r1",
+    eventName: "IS212 Industry Night",
+    organiserName: "Aisha Rahman",
+    submittedAt: "2026-10-01T00:00:00Z",
+    proposedStart: MORNING,
+    proposedEnd: LATE_MORNING,
+  },
   { id: "r2", eventName: "Freshers Welcome", organiserName: "Ben Lim", submittedAt: "2026-10-02T00:00:00Z" },
 ];
 const HELD = [
-  { id: "e1", eventName: "Planning Night", statusDisplay: { label: "Planning", group: "APPROVED" } },
+  { id: "e1", eventName: "Planning Night", proposedStart: MORNING, statusDisplay: { label: "Planning", group: "APPROVED" } },
   { id: "e2", eventName: "Review Night", statusDisplay: { label: "Under review", group: "UNDER_REVIEW" } },
 ];
 const NO_IMPACT = {
@@ -62,6 +84,10 @@ beforeEach(() => {
     statuses: [{ status: "approved", label: "Planning", finished: false }],
     coordinators: [{ id: "c1", fullName: "Priya Nair", activeEvents: 1, byStatus: { approved: 1 } }],
   });
+  vi.mocked(getAssignmentHistory).mockReset().mockResolvedValue([]);
+  vi.mocked(getAssignmentHistoryForReview).mockReset().mockResolvedValue([]);
+  vi.mocked(assignEventRequest).mockReset();
+  vi.mocked(useAuth).mockReturnValue({ user: { id: "lead-1", role: "event_coordinator_lead" } });
 });
 
 function headingNames(level) {
@@ -236,3 +262,280 @@ describe("SCRUM590_AC5 status badges keep their meaning", () => {
     }
   });
 });
+
+describe("SCRUM590_AC4 loading, empty and error states and dates", () => {
+  const HANDOVER = {
+    id: "h1",
+    previousCoordinatorId: null,
+    previousCoordinatorName: null,
+    newCoordinatorId: "c1",
+    newCoordinatorName: "Priya Nair",
+    assignedById: "lead-1",
+    assignedByName: "Lena Lead",
+    automatic: false,
+    createdAt: MORNING,
+  };
+
+  const renderHistory = (view = "coordinator") =>
+    render(<AssignmentHistory eventRequestId="r1" view={view} currentCoordinatorId={null} />);
+
+  function renderAssignedEventsLoading() {
+    render(
+      <MemoryRouter>
+        <AssignedEvents />
+      </MemoryRouter>,
+    );
+  }
+
+  /** Each read on these screens, with the call that makes it and how to show it. */
+  const READS = [
+    ["the queue", listUnassignedEventRequests, () => render(<UnassignedQueue now={NOW} />), "The unassigned queue could not be loaded."],
+    ["assigned events", listAssignedEventsForLead, renderAssignedEventsLoading, "The assigned events could not be loaded."],
+    ["the assignment history", getAssignmentHistoryForReview, () => renderHistory(), "The coordinator history could not be loaded."],
+  ];
+
+  it.each([
+    ["the queue", listUnassignedEventRequests, () => render(<UnassignedQueue now={NOW} />)],
+    ["the assignment history", getAssignmentHistoryForReview, () => renderHistory()],
+  ])("SCRUM590_AC4_%s_says_exactly_Loading_while_it_reads", (_name, service, show) => {
+    vi.mocked(service).mockReturnValue(new Promise(() => {}));
+    show();
+
+    expect(screen.getByRole("status")).toHaveTextContent(/^Loading\.\.\.$/);
+  });
+
+  it("SCRUM590_AC4_assigned_events_says_exactly_Loading_for_each_read", () => {
+    for (const service of [listUnassignedEventRequests, listCoordinatorOverview, listAssignedEventsForLead]) {
+      vi.mocked(service).mockReturnValue(new Promise(() => {}));
+    }
+    renderAssignedEventsLoading();
+
+    // The count, the coordinators table and the events list.
+    const loading = screen.getAllByRole("status");
+    expect(loading).toHaveLength(3);
+    for (const status of loading) expect(status).toHaveTextContent(/^Loading\.\.\.$/);
+  });
+
+  it("SCRUM590_AC4_the_assign_panel_says_exactly_Loading_while_it_reads_the_coordinators", async () => {
+    const { user } = await renderQueuePage();
+    vi.mocked(listCoordinatorWorkload).mockReturnValue(new Promise(() => {}));
+
+    await openPanel(user, "assign");
+
+    expect(screen.getByRole("status")).toHaveTextContent(/^Loading\.\.\.$/);
+  });
+
+  it.each(READS)("SCRUM590_AC4_a_500_on_%s_offers_Try_again_which_reads_again_and_recovers", async (_name, service, show, message) => {
+    const user = userEvent.setup();
+    vi.mocked(service).mockRejectedValueOnce(httpError(500));
+    show();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(message);
+    const calls = vi.mocked(service).mock.calls.length;
+
+    await user.click(within(alert).getByRole("button", { name: "Try again" }));
+
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    expect(vi.mocked(service).mock.calls.length).toBe(calls + 1);
+  });
+
+  it("SCRUM590_AC4_a_500_on_the_assign_panels_coordinators_offers_Try_again_which_recovers", async () => {
+    const { user } = await renderQueuePage();
+    vi.mocked(listCoordinatorWorkload).mockRejectedValueOnce(httpError(500));
+    await openPanel(user, "assign");
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("The list of coordinators could not be loaded.");
+    await user.click(within(alert).getByRole("button", { name: "Try again" }));
+
+    expect(await screen.findByRole("radio", { name: "Priya Nair, 0 active events" })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM590_AC4_a_500_on_the_handover_list_offers_Try_again_which_recovers", async () => {
+    const user = userEvent.setup();
+    vi.mocked(listCoordinatorWorkload)
+      .mockRejectedValueOnce(httpError(500))
+      .mockResolvedValueOnce([{ id: "c2", fullName: "Omar Okafor", activeEvents: 2 }]);
+    render(
+      <ReassignEventPanel
+        request={{ id: "e1", eventName: "Planning Night", assignedCoordinatorId: "c1" }}
+        onCancel={vi.fn()}
+        onReassigned={vi.fn()}
+      />,
+    );
+
+    await user.click(within(await screen.findByRole("alert")).getByRole("button", { name: "Try again" }));
+
+    expect(await screen.findByRole("option", { name: /Omar Okafor/ })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it.each(READS)("SCRUM590_AC4_a_403_on_%s_offers_no_Try_again", async (_name, service, show) => {
+    vi.mocked(service).mockRejectedValue(httpError(403));
+    show();
+
+    const alert = await screen.findByRole("alert");
+    expect(within(alert).queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+  });
+
+  it("SCRUM590_AC4_a_refused_filter_offers_no_Try_again", async () => {
+    const user = userEvent.setup();
+    await renderAssignedEvents();
+    vi.mocked(listAssignedEventsForLead).mockRejectedValue(httpError(400));
+
+    await user.click(screen.getByLabelText("Include completed, rejected and cancelled"));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Those filters could not be applied.");
+    expect(within(alert).queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+  });
+
+  it("SCRUM590_AC4_a_refused_assignment_offers_no_Try_again", async () => {
+    const { user } = await renderQueuePage();
+    vi.mocked(assignEventRequest).mockRejectedValue(httpError(400));
+    await openPanel(user, "assign");
+    await user.click(await screen.findByRole("radio", { name: "Priya Nair, 0 active events" }));
+
+    await user.click(screen.getByRole("button", { name: "Confirm assignment" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("That person cannot be assigned this request.");
+    expect(within(alert).queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["the coordinators' workload", listCoordinatorOverview, "The coordinators' workload could not be loaded."],
+    ["the waiting count", listUnassignedEventRequests, "The number of waiting requests could not be loaded."],
+  ])("SCRUM590_AC4_a_failed_read_of_%s_offers_Try_again_and_leaves_the_list_the_only_alert", async (_name, service, message) => {
+    const user = userEvent.setup();
+    vi.mocked(service).mockRejectedValueOnce(httpError(500));
+    await renderAssignedEventsList();
+
+    const failure = await screen.findByText(message);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    await user.click(within(failure.parentElement).getByRole("button", { name: "Try again" }));
+
+    await waitFor(() => expect(screen.queryByText(message)).not.toBeInTheDocument());
+    expect(vi.mocked(service)).toHaveBeenCalledTimes(2);
+  });
+
+  it("SCRUM590_AC4_a_refused_overview_offers_no_Try_again", async () => {
+    vi.mocked(listCoordinatorOverview).mockRejectedValue(httpError(403));
+    renderAssignedEventsLoading();
+
+    await screen.findByText("The coordinators' workload could not be loaded.");
+    await screen.findByText("Planning Night");
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    [
+      "the queue",
+      () => {
+        vi.mocked(listUnassignedEventRequests).mockResolvedValue([]);
+        render(<UnassignedQueue now={NOW} />);
+      },
+      "No event requests are waiting for a coordinator.",
+      "New requests appear here when organisers submit them.",
+    ],
+    [
+      "assigned events",
+      () => {
+        vi.mocked(listAssignedEventsForLead).mockResolvedValue([]);
+        renderAssignedEventsLoading();
+      },
+      "No coordinator is holding an active event.",
+      "Assign a request from the unassigned queue.",
+    ],
+    [
+      "the coordinators table",
+      () => {
+        vi.mocked(listCoordinatorOverview).mockResolvedValue({ statuses: [], coordinators: [] });
+        renderAssignedEventsLoading();
+      },
+      "There are no Event Coordinators.",
+      "Event Coordinator accounts are set up outside ConnectSphere.",
+    ],
+    [
+      "the assignment history",
+      () => renderHistory("organiser"),
+      "No coordinator has been assigned to this request.",
+      "If the Event Coordinator Lead assigns one, they will appear here.",
+    ],
+    [
+      "the handover panel",
+      () => {
+        vi.mocked(listCoordinatorWorkload).mockResolvedValue([{ id: "c1", fullName: "Priya Nair", activeEvents: 1 }]);
+        render(
+          <ReassignEventPanel
+            request={{ id: "e1", eventName: "Planning Night", assignedCoordinatorId: "c1" }}
+            onCancel={vi.fn()}
+            onReassigned={vi.fn()}
+          />,
+        );
+      },
+      "There is no other Event Coordinator to hand this event to.",
+      "Another Event Coordinator account must be set up outside ConnectSphere before this event can be handed over.",
+    ],
+  ])("SCRUM590_AC4_an_empty_%s_says_what_is_missing_and_what_happens_next", async (_name, show, message, nextStep) => {
+    show();
+
+    const shown = await screen.findByText(message);
+    expect(shown.closest(".ui-empty-state")).toHaveTextContent(nextStep);
+  });
+
+  it("SCRUM590_AC4_an_empty_assign_panel_says_an_account_is_needed", async () => {
+    const { user } = await renderQueuePage();
+    vi.mocked(listCoordinatorWorkload).mockResolvedValue([]);
+    await openPanel(user, "assign");
+
+    const shown = await screen.findByText("There is no Event Coordinator to assign this request to.");
+    expect(shown.closest(".ui-empty-state")).toHaveTextContent(
+      "An Event Coordinator account must be set up outside ConnectSphere before this request can be assigned.",
+    );
+  });
+
+  it("SCRUM590_AC4_filtered_assigned_events_say_to_change_the_filters", async () => {
+    const user = userEvent.setup();
+    await renderAssignedEvents();
+    vi.mocked(listAssignedEventsForLead).mockResolvedValue([]);
+
+    await user.click(screen.getByLabelText("Include completed, rejected and cancelled"));
+
+    const shown = await screen.findByText("No events match these filters.");
+    expect(shown.closest(".ui-empty-state")).toHaveTextContent("Change or clear the filters to see more.");
+  });
+
+  it("SCRUM590_AC4_the_queue_shows_the_period_in_the_standard_format", async () => {
+    await renderQueuePage();
+
+    const row = screen.getByText("IS212 Industry Night").closest("li");
+    expect(within(row).getByText("15 Jan 2026, 9:00 am – 11:00 am")).toBeInTheDocument();
+  });
+
+  it("SCRUM590_AC4_assigned_events_show_the_start_in_the_standard_format", async () => {
+    await renderAssignedEvents();
+
+    const row = screen.getByText("Planning Night").closest("li");
+    expect(within(row).getByText("15 Jan 2026, 9:00 am")).toBeInTheDocument();
+  });
+
+  it("SCRUM590_AC4_the_assignment_history_dates_each_entry_in_the_standard_format", async () => {
+    vi.mocked(getAssignmentHistoryForReview).mockResolvedValue([HANDOVER]);
+    renderHistory();
+
+    expect(await screen.findByText(/^15 Jan 2026, 9:00 am · by/)).toBeInTheDocument();
+  });
+});
+
+/** Assigned events once its list has loaded, whatever the other reads did. */
+async function renderAssignedEventsList() {
+  render(
+    <MemoryRouter>
+      <AssignedEvents />
+    </MemoryRouter>,
+  );
+  await screen.findByText("Planning Night");
+}

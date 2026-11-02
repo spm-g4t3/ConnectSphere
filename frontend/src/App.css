@@ -691,7 +691,6 @@ button { cursor: pointer; }
 .assignment-history__meta { color: var(--muted); font-size: 0.84rem; margin-top: 2px; }
 .assignment-history .assignment-history__note { background: #eef6f3; border-left: 3px solid var(--teal); color: var(--ink); margin: 8px 0 0; padding: 8px 12px; white-space: pre-wrap; }
 .assignment-history__no-note { color: var(--muted); font-size: 0.84rem; font-style: italic; margin-top: 4px; }
-.assignment-history .assignment-history__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 0; padding: 8px 12px; }
 /* A person with no name on record is shown by id, which must read as an
    identifier. The same treatment as the organiser id on My events. */
 .assignment-history code { background: #eef2f1; border-radius: 4px; color: var(--muted); font-size: 0.78rem; font-weight: 400; padding: 2px 6px; }
@@ -726,10 +725,9 @@ button { cursor: pointer; }
 .unassigned-queue__item p { font-size: 0.85rem; margin: 0; overflow-wrap: anywhere; }
 .unassigned-queue__waiting { color: var(--muted); }
 /* The confirmation after an assignment, the same green notice the handover
-   confirmation uses. The <p role="status"> has no class of its own. */
-.unassigned-queue > p[role="status"] { background: #e8f7f1; border-radius: 6px; color: #17684f; margin: 0 0 14px; padding: 8px 12px; }
-/* SCRUM-539. A row's Assign and Cancel request side by side. The panel's
-   error reuses .unassigned-queue__error. */
+   confirmation uses. */
+.unassigned-queue .unassigned-queue__confirmation { background: #e8f7f1; border-radius: 6px; color: #17684f; margin: 0 0 14px; padding: 8px 12px; }
+/* SCRUM-539. A row's Assign and Cancel request side by side. */
 .unassigned-queue__actions { display: flex; flex-wrap: wrap; gap: 8px; }
 /* The waiting count beside the title reads as a note, not part of the name. */
 .unassigned-queue__count { color: var(--color-muted); font-weight: 400; }

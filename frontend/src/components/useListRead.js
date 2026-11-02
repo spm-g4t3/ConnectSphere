@@ -2,19 +2,22 @@
 // failed fetch shows its message over whatever list was already there.
 // Unlike useOpenEventRead it keeps no "loaded" state and no stale guard.
 import { useCallback, useEffect, useState } from "react";
+import { canRetryRead } from "../services/apiErrors";
 
 /**
  * @param {() => Promise<Array>} fetcher  must be stable; it is read on mount
  * @param {object} options
  * @param {Record<number, string>} options.messages  load-error text by status; a stable object
  * @param {string} options.fallback  load-error text for any other status
- * @returns {{ data: Array, loading: boolean, error: string|null, load: () => Promise<Array|null> }}
- *   load() resolves to the fresh list, or null when the fetch failed; it never rejects
+ * @returns {{ data: Array, loading: boolean, error: string|null, retryable: boolean, load: () => Promise<Array|null> }}
+ *   load() resolves to the fresh list, or null when the fetch failed; it never rejects.
+ *   retryable says whether the last failure could go differently if read again.
  */
 export default function useListRead(fetcher, { messages, fallback }) {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [retryable, setRetryable] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -25,6 +28,7 @@ export default function useListRead(fetcher, { messages, fallback }) {
       return fresh;
     } catch (err) {
       setError(messages[err.response?.status] || fallback);
+      setRetryable(canRetryRead(err));
       return null;
     } finally {
       setLoading(false);
@@ -35,5 +39,5 @@ export default function useListRead(fetcher, { messages, fallback }) {
     load();
   }, [load]);
 
-  return { data, loading, error, load };
+  return { data, loading, error, retryable, load };
 }

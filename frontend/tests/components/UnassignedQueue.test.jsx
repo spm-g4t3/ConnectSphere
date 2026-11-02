@@ -17,7 +17,7 @@ import {
   listCoordinatorWorkload,
   listUnassignedEventRequests,
 } from "../../src/services/eventRequestService";
-import { formatRange } from "../../src/services/displayFormat";
+import { formatDateTimeRange } from "../../src/services/displayFormat";
 import { httpError } from "../helpers/async.js";
 
 vi.mock("../../src/services/eventRequestService", () => ({
@@ -79,7 +79,7 @@ describe("SCRUM486_AC2 the unassigned queue", () => {
 
     expect(within(first).getByText("IS212 Industry Night")).toBeInTheDocument();
     expect(within(first).getByText("Organiser: Aisha Rahman")).toBeInTheDocument();
-    expect(within(first).getByText(formatRange(OLDER.proposedStart, OLDER.proposedEnd))).toBeInTheDocument();
+    expect(within(first).getByText(formatDateTimeRange(OLDER.proposedStart, OLDER.proposedEnd))).toBeInTheDocument();
     expect(within(first).getByText("Expected attendance: 120")).toBeInTheDocument();
     expect(within(first).getByText("waiting 3 days")).toBeInTheDocument();
 
@@ -118,8 +118,8 @@ describe("SCRUM486_AC2 the unassigned queue", () => {
 
   it.each([
     [403, "Only the Event Coordinator Lead can see the unassigned queue."],
-    [500, "The unassigned queue could not be loaded. Please try again."],
-    [undefined, "The unassigned queue could not be loaded. Please try again."],
+    [500, "The unassigned queue could not be loaded."],
+    [undefined, "The unassigned queue could not be loaded."],
   ])("SCRUM486_AC2_a_%s_loading_the_queue_reads_%j", async (status, message) => {
     vi.mocked(listUnassignedEventRequests).mockRejectedValue(httpError(status));
     renderQueue();

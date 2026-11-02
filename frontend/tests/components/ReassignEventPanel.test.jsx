@@ -187,7 +187,7 @@ describe("SCRUM486_AC6 every message on the path, true for either caller", () =>
 
   it.each([
     [403, "Only Event Coordinators and the Event Coordinator Lead can hand an event over."],
-    [500, "The list of coordinators could not be loaded. Please try again."],
+    [500, "The list of coordinators could not be loaded."],
   ])("SCRUM486_AC6_loading_the_list_for_a_lead_fails_with_%s", async (status, message) => {
     // The 403 said "Only Event Coordinators can hand an event over" until
     // SCRUM-521, false since 052 let the Lead.
