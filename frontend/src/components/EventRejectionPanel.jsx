@@ -7,7 +7,12 @@
 import { useEffect, useState } from "react";
 import { getEventReadiness, rejectApprovedEvent } from "../services/eventRequestService";
 import ReadinessChecklist from "./ReadinessChecklist";
-import { formatTimestamp } from "../services/displayFormat";
+import { formatDateTime } from "../services/displayFormat";
+// Generic despite its name: a 400, 403 or 404 answers the same if read again.
+import { canRetryEquipmentRead } from "../services/equipmentErrors";
+import Button from "./ui/Button";
+import ErrorNotice from "./ui/ErrorNotice";
+import LoadingText from "./ui/LoadingText";
 
 const ERROR_MESSAGES = {
   403: "Only the coordinator assigned to this event can reject it.",
@@ -25,6 +30,8 @@ function rejectionErrorMessage(error) {
 export default function EventRejectionPanel({ eventRequest, onRejected, onBack, onCancelInstead }) {
   const [readiness, setReadiness] = useState(null);
   const [readError, setReadError] = useState(null);
+  // Bumped by Try again to read the outstanding arrangements again.
+  const [readVersion, setReadVersion] = useState(0);
   const [reason, setReason] = useState("");
   const [rejecting, setRejecting] = useState(false);
   const [error, setError] = useState(null);
@@ -40,18 +47,24 @@ export default function EventRejectionPanel({ eventRequest, onRejected, onBack, 
       })
       .catch((requestError) => {
         if (!cancelled) {
-          setReadError(ERROR_MESSAGES[requestError?.response?.status]
-            ?? "The outstanding arrangements could not be loaded. Please try again.");
+          setReadError({
+            message: ERROR_MESSAGES[requestError?.response?.status]
+              ?? "The outstanding arrangements could not be loaded.",
+            retryable: canRetryEquipmentRead(requestError),
+          });
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [eventRequest.id, approved]);
+  }, [eventRequest.id, approved, readVersion]);
 
-  const back = onBack && (
-    <button className="event-cancellation-page__back" type="button" onClick={onBack}>Back to event</button>
-  );
+  function readAgain() {
+    setReadError(null);
+    setReadVersion((version) => version + 1);
+  }
+
+  const back = onBack && <Button variant="link" onClick={onBack}>Back to event</Button>;
 
   if (eventRequest.status === "rejected") {
     return (
@@ -65,7 +78,7 @@ export default function EventRejectionPanel({ eventRequest, onRejected, onBack, 
             <dt>Reason</dt>
             <dd>{eventRequest.decisionNote || "No reason recorded."}</dd>
             <dt>Rejected on</dt>
-            <dd>{formatTimestamp(eventRequest.decidedAt, "Not recorded")}</dd>
+            <dd>{formatDateTime(eventRequest.decidedAt, "Not recorded")}</dd>
           </dl>
           <p>Its venue bookings, holds and equipment have been released. The organiser can revise and resubmit it.</p>
         </section>
@@ -106,8 +119,10 @@ export default function EventRejectionPanel({ eventRequest, onRejected, onBack, 
         organiser can revise and resubmit it.
       </p>
       <section className="event-cancellation">
-        {!readiness && !readError && <p role="status">Loading the outstanding arrangements...</p>}
-        {readError && <p role="alert">{readError}</p>}
+        {!readiness && !readError && <LoadingText />}
+        {readError && (
+          <ErrorNotice message={readError.message} onRetry={readError.retryable ? readAgain : undefined} />
+        )}
         {readiness && (outstanding.length > 0
           ? <ReadinessChecklist caption="Still outstanding" items={outstanding} />
           : <p>Every essential arrangement is currently met.</p>)}
@@ -125,13 +140,13 @@ export default function EventRejectionPanel({ eventRequest, onRejected, onBack, 
               rows={3}
             />
           </label>
-          <button type="submit" disabled={rejecting || !reason.trim()}>
+          <Button type="submit" variant="danger" disabled={rejecting || !reason.trim()}>
             {rejecting ? "Rejecting..." : "Reject event"}
-          </button>
+          </Button>
         </form>
-        {error && <p role="alert">{error.message}</p>}
+        {error && <ErrorNotice message={error.message} />}
         {error?.cancelInstead && onCancelInstead && (
-          <button type="button" onClick={onCancelInstead}>Cancel event instead</button>
+          <Button variant="secondary" onClick={onCancelInstead}>Cancel event instead</Button>
         )}
       </section>
     </main>

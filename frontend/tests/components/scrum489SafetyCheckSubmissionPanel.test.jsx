@@ -104,7 +104,7 @@ describe("SCRUM489_AC3 the readiness checklist", () => {
     vi.mocked(getEventReadiness).mockReturnValue(new Promise(() => {}));
     renderPanel();
 
-    expect(screen.getByText("Loading the checklist...")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(/^Loading\.\.\.$/);
     expect(submitButton()).toBeDisabled();
   });
 
@@ -142,7 +142,7 @@ describe("SCRUM489_AC3 the readiness checklist", () => {
     expect(alert).toHaveTextContent("The checklist could not be loaded.");
     expect(submitButton()).toBeDisabled();
 
-    await user.click(within(alert).getByRole("button", { name: "Retry" }));
+    await user.click(within(alert).getByRole("button", { name: "Try again" }));
 
     await waitFor(() => expect(checklistRows()).toHaveLength(3));
     expect(getEventReadiness).toHaveBeenCalledTimes(2);

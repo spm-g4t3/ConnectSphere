@@ -7,7 +7,6 @@ import {
   cancelEventRequest,
   getEventCancellationImpact,
 } from "../../src/services/eventRequestService";
-import { sgTime } from "../helpers/singaporeTime.js";
 
 vi.mock("../../src/services/eventRequestService", () => ({
   cancelEventRequest: vi.fn(),
@@ -157,7 +156,7 @@ describe("EventCancellationPanel", () => {
 
     expect(screen.getByText("Event cancelled")).toBeInTheDocument();
     expect(screen.getByText("Organiser withdrew")).toBeInTheDocument();
-    expect(screen.getByText(sgTime("2026-06-01T09:00:00Z"))).toBeInTheDocument();
+    expect(screen.getByText("1 Jun 2026, 5:00 pm")).toBeInTheDocument();
     expect(getEventCancellationImpact).not.toHaveBeenCalled();
   });
 

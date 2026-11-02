@@ -7,7 +7,9 @@ import {
   toDatetimeLocalValue,
   toOffsetIsoString,
 } from "../services/datetimeFormat";
-import { formatTimestamp } from "../services/displayFormat";
+import { formatDateTimeRange } from "../services/displayFormat";
+import Button from "./ui/Button";
+import ErrorNotice from "./ui/ErrorNotice";
 
 function changedFields(eventRequest, fields, equipmentChange) {
   const changes = {};
@@ -64,12 +66,12 @@ function ImpactList({ title, items, name }) {
             </span>
             {item.startsAt && item.endsAt && (
               <span className="event-significant-change__item-detail">
-                {formatTimestamp(item.startsAt, "Not recorded")} – {formatTimestamp(item.endsAt, "Not recorded")}
+                {formatDateTimeRange(item.startsAt, item.endsAt, "Not recorded")}
               </span>
             )}
             {item.occupiedStartsAt && item.occupiedEndsAt && (
               <span className="event-significant-change__item-detail">
-                Occupied {formatTimestamp(item.occupiedStartsAt, "Not recorded")} – {formatTimestamp(item.occupiedEndsAt, "Not recorded")}
+                Occupied {formatDateTimeRange(item.occupiedStartsAt, item.occupiedEndsAt, "Not recorded")}
               </span>
             )}
           </li>
@@ -164,13 +166,9 @@ export default function SignificantEventChangePanel({
   return (
     <main className="event-significant-change-page">
       {onBack && (
-        <button
-          className="event-cancellation-page__back"
-          type="button"
-          onClick={onBack}
-        >
+        <Button variant="link" onClick={onBack}>
           Back to event
-        </button>
+        </Button>
       )}
       <p className="eyebrow">Coordinator action</p>
       <h1>Significant change: {eventRequest.eventName}</h1>
@@ -250,9 +248,9 @@ export default function SignificantEventChangePanel({
               onChange={(event) => invalidatePreview(() => setReason(event.target.value))}
             />
           </label>
-          <button type="submit" disabled={loading || saving}>
+          <Button type="submit" disabled={loading || saving}>
             {loading ? "Loading impact..." : impact ? "Refresh impact preview" : "Preview significant change"}
-          </button>
+          </Button>
         </form>
 
         {impact && (
@@ -309,17 +307,17 @@ export default function SignificantEventChangePanel({
                 />
                 I have reviewed this impact and confirm applying the significant change.
               </label>
-              <button
-                type="button"
+              <Button
                 onClick={handleApply}
                 disabled={!confirmed || saving || loading}
               >
                 {saving ? "Applying change..." : "Confirm significant change"}
-              </button>
+              </Button>
             </div>
           </>
         )}
-        {error && <p role="alert">{error}</p>}
+        {/* No Try again: the preview and the change are both resent from this form. */}
+        {error && <ErrorNotice message={error} />}
       </section>
     </main>
   );

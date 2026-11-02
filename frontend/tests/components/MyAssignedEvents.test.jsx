@@ -148,8 +148,8 @@ describe("SCRUM-266 AC4: Needs attention on My events", () => {
 
     const row = (name) => screen.getByText(name).closest("li");
     await screen.findByText("Flagged event");
-    expect(within(row("Flagged event")).getByText("Needs attention", { selector: ".status-badge" })).toHaveClass(
-      "status--action-required",
+    expect(within(row("Flagged event")).getByText("Needs attention", { selector: ".ui-status-badge" })).toHaveClass(
+      "ui-status-badge--danger",
     );
     expect(within(row("Fine event")).queryByText("Needs attention")).not.toBeInTheDocument();
     expect(within(row("Older payload")).queryByText("Needs attention")).not.toBeInTheDocument();
@@ -173,7 +173,7 @@ describe("SCRUM-310 (SCRUM-315) AC6: Needs attention says why", () => {
     await screen.findByText("Lost speakers gala");
 
     const row = screen.getByText("Lost speakers gala").closest("li");
-    expect(within(row).getByText("Needs attention", { selector: ".status-badge" })).toBeInTheDocument();
+    expect(within(row).getByText("Needs attention", { selector: ".ui-status-badge" })).toBeInTheDocument();
     expect(within(reasonsOf("Lost speakers gala")).getByRole("listitem")).toHaveTextContent(
       "Equipment unavailable: Fewer units of this equipment are usable (Dropped)",
     );

@@ -3,27 +3,39 @@
 // SCRUM-384 (SCRUM-379 AC1, AC2): the assigned coordinator marks a Confirmed event that has ended
 // as completed, with optional closing notes and a confirmation step.
 //
-// Two steps, because completing is final: the notes box, then a summary of what is about to
-// happen with an explicit confirm. Editing the notes again from the summary keeps what was typed. Nothing is
-// sent until the confirm.
+// Two steps, because completing is final: the notes box, then a confirmation dialog that
+// repeats the notes as they will be sent. The notes stay in the box behind it, so going back
+// keeps what was typed. Nothing is sent until the confirm.
 //
-// A page-sized panel with a back button, like EventCancellationPanel: the house pattern, since
-// there is no modal anywhere in this frontend. CoordinatorRequestDetail decides whether to offer
-// it; the server decides whether it is allowed (complete_event_request, 034).
+// CoordinatorRequestDetail decides whether to offer the panel; the server decides whether it
+// is allowed (complete_event_request, 034).
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { completeEventRequest } from "../services/eventRequestService";
 import {
   CLOSING_NOTES_MAX_LENGTH,
   completionErrorMessage,
 } from "../services/eventCompletion";
 import { formatVenuePeriod } from "../services/datetimeFormat";
+import Button from "./ui/Button";
+import ConfirmDialog from "./ui/ConfirmDialog";
+import ErrorNotice from "./ui/ErrorNotice";
 
 export default function EventCompletionPanel({ eventRequest, onCompleted, onBack }) {
   const [notes, setNotes] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
+  const notesRef = useRef(null);
+  const continueRef = useRef(null);
+  // Where focus lands once the dialog has closed without completing, so it is never lost.
+  const refocus = useRef(null);
+
+  useEffect(() => {
+    if (confirming || !refocus.current) return;
+    refocus.current.current?.focus();
+    refocus.current = null;
+  }, [confirming]);
 
   const trimmed = notes.trim();
   // Characters, as the server counts them (an emoji is one), so no maxLength on the box: that
@@ -47,6 +59,8 @@ export default function EventCompletionPanel({ eventRequest, onCompleted, onBack
       onCompleted?.(updated);
     } catch (requestError) {
       setError(completionErrorMessage(requestError));
+      refocus.current = continueRef;
+      setConfirming(false);
     } finally {
       setSubmitting(false);
     }
@@ -55,9 +69,9 @@ export default function EventCompletionPanel({ eventRequest, onCompleted, onBack
   return (
     <main className="event-completion-page">
       {onBack && (
-        <button className="event-completion-page__back" type="button" onClick={onBack} disabled={submitting}>
+        <Button variant="link" onClick={onBack} disabled={submitting}>
           Back to event
-        </button>
+        </Button>
       )}
       <p className="eyebrow">Coordinator action</p>
       <h1>Mark {eventRequest.eventName} as completed</h1>
@@ -67,57 +81,52 @@ export default function EventCompletionPanel({ eventRequest, onCompleted, onBack
       </p>
 
       <section className="event-completion">
-        {!confirming ? (
-          <form onSubmit={handleContinue}>
-            <label>
-              Closing notes (optional)
-              <textarea
-                value={notes}
-                onChange={(event) => { setNotes(event.target.value); setError(null); }}
-                rows={5}
-                aria-describedby="closing-notes-help"
-                aria-invalid={tooLong || undefined}
-              />
-            </label>
-            <p id="closing-notes-help" className="event-completion__help">
-              Only coordinators can see these notes. {characters} of {CLOSING_NOTES_MAX_LENGTH} characters.
+        <form onSubmit={handleContinue}>
+          <label>
+            Closing notes (optional)
+            <textarea
+              ref={notesRef}
+              value={notes}
+              onChange={(event) => { setNotes(event.target.value); setError(null); }}
+              rows={5}
+              aria-describedby="closing-notes-help"
+              aria-invalid={tooLong || undefined}
+            />
+          </label>
+          <p id="closing-notes-help" className="event-completion__help">
+            Only coordinators can see these notes. {characters} of {CLOSING_NOTES_MAX_LENGTH} characters.
+          </p>
+          {tooLong && (
+            <p role="alert">
+              Closing notes can be at most {CLOSING_NOTES_MAX_LENGTH} characters. Shorten them to continue.
             </p>
-            {tooLong && (
-              <p role="alert">
-                Closing notes can be at most {CLOSING_NOTES_MAX_LENGTH} characters. Shorten them to continue.
-              </p>
-            )}
-            <button type="submit" disabled={tooLong}>Continue</button>
-          </form>
-        ) : (
-          <div className="event-completion__confirmation" role="group" aria-label="Confirm completion">
-            <h2>Confirm completion</h2>
-            <p>
-              You are about to mark <strong>{eventRequest.eventName}</strong> as completed. This
-              cannot be undone.
-            </p>
+          )}
+          <Button ref={continueRef} type="submit" disabled={tooLong}>Continue</Button>
+        </form>
+        <ConfirmDialog
+          open={confirming}
+          title={`Mark ${eventRequest.eventName} as completed?`}
+          confirmLabel={submitting ? "Marking as completed..." : "Yes, mark as completed"}
+          cancelLabel="Edit notes"
+          busy={submitting}
+          onConfirm={handleConfirm}
+          onCancel={() => {
+            refocus.current = notesRef;
+            setConfirming(false);
+          }}
+        >
+          <div className="event-completion__confirmation">
+            <p>This cannot be undone.</p>
             <dl>
               <dt>Closing notes</dt>
               <dd className="event-completion__notes-preview">
                 {trimmed || "No closing notes."}
               </dd>
             </dl>
-            <div className="event-completion__actions">
-              <button type="button" onClick={handleConfirm} disabled={submitting}>
-                {submitting ? "Marking as completed..." : "Yes, mark as completed"}
-              </button>
-              <button
-                type="button"
-                className="event-completion__secondary"
-                onClick={() => { setConfirming(false); setError(null); }}
-                disabled={submitting}
-              >
-                Edit notes
-              </button>
-            </div>
           </div>
-        )}
-        {error && <p role="alert">{error}</p>}
+        </ConfirmDialog>
+        {/* No Try again: Continue and the confirm resend from the same notes. */}
+        {error && <ErrorNotice message={error} />}
       </section>
     </main>
   );

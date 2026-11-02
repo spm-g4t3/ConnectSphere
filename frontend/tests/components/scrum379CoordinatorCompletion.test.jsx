@@ -26,6 +26,10 @@ import {
   getEventDecisionHistory,
   getMyEventRequests,
 } from "../../src/services/eventRequestService";
+import { stubDialogElement } from "../helpers/dialog.js";
+
+// The completion panel's confirmation is a ConfirmDialog, which calls showModal and close.
+stubDialogElement();
 
 vi.mock("../../src/auth/AuthContext", () => ({
   useAuth: vi.fn(),

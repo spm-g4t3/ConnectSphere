@@ -1,3 +1,5 @@
+import StatusBadge from "./ui/StatusBadge";
+
 const KEY_LABEL = {
   venue: "Venue",
   equipment: "Equipment",
@@ -17,9 +19,9 @@ export default function ReadinessChecklist({ caption, items }) {
           <tr key={`${item.key}-${item.bookingId ?? item.equipmentRequestId ?? index}`}>
             <td>{item.key === "venue" && item.venueName ? `Venue: ${item.venueName}` : KEY_LABEL[item.key] ?? "Other"}</td>
             <td>
-              <span className={`safety-check-submission__badge safety-check-submission__badge--${item.met ? "met" : "outstanding"}`}>
+              <StatusBadge tone={item.met ? "success" : "danger"}>
                 {item.met ? "Met" : "Outstanding"}
-              </span>
+              </StatusBadge>
             </td>
             <td>{item.detail}</td>
           </tr>

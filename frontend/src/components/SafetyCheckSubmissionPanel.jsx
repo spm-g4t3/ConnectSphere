@@ -7,6 +7,11 @@
 
 import { useEffect, useState } from "react";
 import ChecklistTable from "./ReadinessChecklist";
+import Button from "./ui/Button";
+import ErrorNotice from "./ui/ErrorNotice";
+import LoadingText from "./ui/LoadingText";
+// Generic despite its name: a 400, 403 or 404 answers the same if read again.
+import { canRetryEquipmentRead } from "../services/equipmentErrors";
 import {
   getEventReadiness,
   submitForSafetyReview,
@@ -43,8 +48,9 @@ function isAboutTheNote(data) {
 export default function SafetyCheckSubmissionPanel({ eventRequest, onSubmitted, onStale }) {
   const [readiness, setReadiness] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(false);
-  // Bumped to re-read the checklist: Retry, or a refusal saying it changed.
+  // null, or whether reading again could help.
+  const [loadError, setLoadError] = useState(null);
+  // Bumped to re-read the checklist: Try again, or a refusal saying it changed.
   const [readVersion, setReadVersion] = useState(0);
   const [confirmed, setConfirmed] = useState(false);
   const [note, setNote] = useState("");
@@ -57,14 +63,14 @@ export default function SafetyCheckSubmissionPanel({ eventRequest, onSubmitted, 
     // Any failure, thrown or rejected, is the panel's error state, never the page's.
     async function read() {
       setLoading(true);
-      setLoadError(false);
+      setLoadError(null);
       try {
         const result = await getEventReadiness(eventRequest.id, { noEquipmentConfirmed: confirmed });
         if (!cancelled) setReadiness(result);
-      } catch {
+      } catch (error) {
         if (!cancelled) {
           setReadiness(null);
-          setLoadError(true);
+          setLoadError({ retryable: canRetryEquipmentRead(error) });
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -121,14 +127,12 @@ export default function SafetyCheckSubmissionPanel({ eventRequest, onSubmitted, 
         confirmed. Every item below must be met first.
       </p>
 
-      {loading && <p>Loading the checklist...</p>}
+      {loading && <LoadingText />}
       {!loading && loadError && (
-        <div role="alert">
-          <p>The checklist could not be loaded.</p>
-          <button type="button" onClick={() => setReadVersion((version) => version + 1)}>
-            Retry
-          </button>
-        </div>
+        <ErrorNotice
+          message="The checklist could not be loaded."
+          onRetry={loadError.retryable ? () => setReadVersion((version) => version + 1) : undefined}
+        />
       )}
       {!loading && readiness && (
         <ChecklistTable caption="Readiness checklist" items={items} />
@@ -170,9 +174,9 @@ export default function SafetyCheckSubmissionPanel({ eventRequest, onSubmitted, 
           <p role="alert">The note must be 2,000 characters or fewer.</p>
         )}
 
-        <button type="submit" disabled={!canSubmit}>
+        <Button type="submit" disabled={!canSubmit}>
           {submitting ? "Submitting..." : "Submit for safety check"}
-        </button>
+        </Button>
       </form>
 
       {notReadyLines && (
@@ -181,7 +185,7 @@ export default function SafetyCheckSubmissionPanel({ eventRequest, onSubmitted, 
           <ChecklistTable caption="Still outstanding" items={notReadyLines} />
         </div>
       )}
-      {submitError && <p role="alert">{submitError}</p>}
+      {submitError && <ErrorNotice message={submitError} />}
     </section>
   );
 }

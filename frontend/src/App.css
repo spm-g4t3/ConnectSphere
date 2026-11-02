@@ -546,7 +546,8 @@ button { cursor: pointer; }
 /* SCRUM-384: the Mark as completed panel, laid out as the cancellation panel is. */
 .event-completion-page { display: grid; gap: 18px; }
 .event-completion-page > h1 { color: var(--ink); font-size: clamp(1.8rem, 4vw, 2.7rem); letter-spacing: -0.04em; margin: 0; overflow-wrap: anywhere; }
-.event-completion-page__back { background: transparent !important; color: var(--teal-dark) !important; justify-self: start; padding: 6px 0 !important; text-decoration: underline; }
+/* The page is a grid, which would stretch its Back link to the full width. */
+.event-completion-page > .ui-button, .event-cancellation-page > .ui-button, .event-significant-change-page > .ui-button { justify-self: start; }
 .event-completion-page__intro { margin: 0; }
 .event-completion { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); display: grid; gap: 18px; padding: clamp(20px, 4vw, 32px); }
 .event-completion form { display: grid; gap: 12px; }
@@ -555,22 +556,15 @@ button { cursor: pointer; }
 .event-completion textarea:focus { border-color: var(--teal); outline: 2px solid rgba(8, 127, 123, 0.16); }
 .event-completion__help { color: var(--muted); font-size: 0.86rem; margin: 0; }
 .event-completion__confirmation { display: grid; gap: 12px; }
-.event-completion__confirmation h2 { color: var(--teal-dark); margin: 0; }
 .event-completion__confirmation dl { margin: 0; }
 .event-completion__confirmation dt { color: var(--muted); font-size: 0.8rem; font-weight: 700; margin-bottom: 4px; }
 .event-completion__notes-preview { background: #f7faf9; border-left: 3px solid var(--teal); margin: 0; overflow-wrap: anywhere; padding: 10px 12px; white-space: pre-wrap; }
-.event-completion__actions { display: flex; flex-wrap: wrap; gap: 10px; }
-.event-completion__secondary { background: transparent !important; color: var(--teal-dark) !important; text-decoration: underline; }
 /* SCRUM-489: the safety check submission panel. A table, not a list, so
-   .dashboard li's spread-out flex row never reaches it. The badge's word carries
-   the meaning; the colours are the approved and action-required pairs above. */
+   .dashboard li's spread-out flex row never reaches it. */
 .safety-check-submission__checklist { border-collapse: collapse; margin: 4px 0 12px; width: 100%; }
 .safety-check-submission__checklist caption { color: var(--muted); font-size: 0.86rem; font-weight: 700; padding-bottom: 6px; text-align: left; }
 .safety-check-submission__checklist th, .safety-check-submission__checklist td { border-bottom: 1px solid var(--line); overflow-wrap: anywhere; padding: 8px; text-align: left; vertical-align: top; }
 .safety-check-submission__checklist thead th { color: var(--muted); font-size: 0.8rem; font-weight: 700; }
-.safety-check-submission__badge { border-radius: 999px; display: inline-block; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; padding: 3px 10px; text-transform: uppercase; white-space: nowrap; }
-.safety-check-submission__badge--met { background: #e8f7f1; color: #17684f; }
-.safety-check-submission__badge--outstanding { background: #fff0ee; color: #a43c32; }
 .safety-check-submission form { display: grid; gap: 8px; }
 .safety-check-submission__confirmation label { align-items: flex-start; display: flex; gap: 9px; }
 .safety-check-submission__confirmation p, .safety-check-submission__confirmation blockquote { margin: 4px 0; }
