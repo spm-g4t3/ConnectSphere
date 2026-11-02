@@ -79,6 +79,10 @@
  *    write nothing. Do not add one back, and do not switch the trigger off
  *    from here (the service-role client cannot ALTER TABLE, and an audit guard
  *    is not this script's to lower).
+ *  - Change history cannot be deleted either (022's
+ *    event_change_history_immutable, and its event foreign key is RESTRICT).
+ *    Accepting a change request applies it and writes that history, so the
+ *    holder's decision below is a decline, which applies nothing.
  *  - Events are deleted one at a time, so an event that cannot be removed is
  *    named and the rest still go. The first run deleted them in one statement,
  *    and s1 kept all eleven.
@@ -775,15 +779,24 @@ async function main() {
     ForbiddenError,
     403,
   );
-  const decided = await processChangeRequest(change.id, { decision: 'approved' }, users.B);
-  check(
-    'the holder the Lead chose can decide it',
-    decided.status === 'processed' && decided.processedBy === users.B,
-    `${decided.status}, by ${labelOf(decided.processedBy)}`,
-  );
 
+  // Before the decision: 050's gate refuses a change request on a Submitted event
+  // (REVIEW_NOT_STARTED), after the caller check the refusal above meets.
   const started = await startEventReview(s1.id, users.B);
   check('the holder the Lead chose can start the review', started.status === 'under_review' && started.reviewingCoordinatorId === users.B, started.status);
+
+  // A decline, not an accept: see the change-history hazard in the header. A
+  // decline needs its reason (036).
+  const decided = await processChangeRequest(
+    change.id,
+    { decision: 'rejected', decisionNotes: 'Checked by the assignment script.' },
+    users.B,
+  );
+  check(
+    'the holder the Lead chose can decide it',
+    decided.status === 'processed' && decided.decision === 'rejected' && decided.processedBy === users.B,
+    `${decided.status} ${decided.decision}, by ${labelOf(decided.processedBy)}`,
+  );
 
   // No successful clarification here (removed in SCRUM-486, after the first
   // live run on 12 October). Clarification history is immutable by design
