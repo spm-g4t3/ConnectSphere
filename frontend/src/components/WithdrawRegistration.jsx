@@ -46,6 +46,7 @@ export default function WithdrawRegistration({ registrationId, refusal, onWithdr
   }, [refusal]);
 
   async function handleConfirm() {
+    /* v8 ignore next -- @preserve ConfirmDialog disables Confirm while busy. */
     if (sending.current) return;
     sending.current = true;
     setSubmitting(true);

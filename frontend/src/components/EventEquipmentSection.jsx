@@ -88,7 +88,7 @@ function messageForWrite(err) {
     const details = err.response.data?.details;
     if (Array.isArray(details) && details.length > 0) {
       return details
-        .map(({ field, message }) => `${FIELD_LABELS[field] ?? "Equipment"}: ${message}`)
+        .map(({ field, message }) => `${FIELD_LABELS[field]}: ${message}`)
         .join(". ");
     }
     return WRITE_ERROR_FALLBACK;
@@ -229,7 +229,7 @@ export default function EventEquipmentSection({ requestId, status, canEdit, head
     setBusy(true);
     setAddError(null);
     try {
-      const name = types.find((type) => type.id === typeId)?.name ?? "Equipment";
+      const name = types.find((type) => type.id === typeId).name;
       const next = await addEquipmentLine(requestId, {
         equipmentTypeId: typeId,
         quantity: Number(quantity.trim()),

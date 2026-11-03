@@ -20,9 +20,11 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation, useParams } from "react-router-dom";
 
 import VenueCatalogue from "../../src/components/VenueCatalogue.jsx";
-import { getVenueCatalogue } from "../../src/services/venueService";
+import { getVenueCatalogue, retireVenue } from "../../src/services/venueService";
 import { formatOccupiedPeriod } from "../../src/services/occupiedPeriodDisplay.js";
 import { formatDateTimeRange } from "../../src/services/displayFormat.js";
+import { deferred, httpError } from "../helpers/async.js";
+import { stubDialogElement } from "../helpers/dialog.js";
 
 const formStub = vi.hoisted(() => ({ saved: undefined, options: undefined }));
 
@@ -511,3 +513,64 @@ describe("SCRUM491 VenueCatalogue Place hold", () => {
   });
 });
 
+
+// SCRUM-587 put Retire behind ConfirmDialog, which calls showModal and close.
+stubDialogElement();
+
+describe("SCRUM15_AC3 retiring from the catalogue", () => {
+  const RETIRED_HALL = { ...ACTIVE, retiredAt: "2026-10-01T10:00:00+08:00" };
+
+  async function retireHallA(user) {
+    await user.click(within(rowFor("Hall A")).getByRole("button", { name: "Retire venue" }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Retire venue" }));
+  }
+
+  it("SCRUM15_AC3_a_409_says_already_retired_and_refreshes_the_stale_row", async () => {
+    vi.mocked(retireVenue).mockRejectedValue(httpError(409, { error: "secret driver text" }));
+    const { user } = await renderCatalogue();
+    vi.mocked(getVenueCatalogue).mockResolvedValue([RETIRED_HALL, RETIRED]);
+
+    await retireHallA(user);
+
+    expect(await within(rowFor("Hall A")).findByText("That venue has already been retired.")).toBeInTheDocument();
+    expect(getVenueCatalogue).toHaveBeenCalledTimes(2);
+    expect(within(rowFor("Hall A")).getByText("Retired")).toBeInTheDocument();
+    expect(within(rowFor("Hall A")).queryByRole("button", { name: "Retire venue" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/secret/)).not.toBeInTheDocument();
+  });
+
+  it("SCRUM15_AC3_a_404_refreshes_the_list_so_the_missing_venue_drops_out", async () => {
+    vi.mocked(retireVenue).mockRejectedValue(httpError(404, { error: "secret driver text" }));
+    const { user } = await renderCatalogue();
+    vi.mocked(getVenueCatalogue).mockResolvedValue([RETIRED]);
+
+    await retireHallA(user);
+
+    await waitFor(() => expect(screen.queryByText("Hall A")).not.toBeInTheDocument());
+    expect(getVenueCatalogue).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("Old Annex")).toBeInTheDocument();
+  });
+});
+
+describe("SCRUM17 focus on Back when the venue was retired meanwhile", () => {
+  it("SCRUM17_Back_focuses_the_row_once_its_Manage_blocks_button_is_disabled", async () => {
+    const retiredHall = { ...ACTIVE, retiredAt: "2026-10-01T10:00:00+08:00" };
+    const { user } = await renderCatalogue();
+    await user.click(within(rowFor("Hall A")).getByRole("button", { name: "Manage blocks" }));
+
+    // Back refetches; the panel is opened again before that answer lands, and
+    // the answer says Hall A was retired meanwhile.
+    const refetch = deferred();
+    vi.mocked(getVenueCatalogue).mockReturnValueOnce(refetch.promise);
+    await user.click(screen.getByRole("button", { name: "← Back to the venue catalogue" }));
+    await user.click(within(rowFor("Hall A")).getByRole("button", { name: "Manage blocks" }));
+    refetch.resolve([retiredHall, RETIRED]);
+    vi.mocked(getVenueCatalogue).mockResolvedValue([retiredHall, RETIRED]);
+
+    await user.click(screen.getByRole("button", { name: "← Back to the venue catalogue" }));
+
+    const button = within(rowFor("Hall A")).getByRole("button", { name: "Manage blocks" });
+    expect(button).toBeDisabled();
+    expect(document.activeElement).toBe(screen.getByText("Hall A").closest(".venue-catalogue__item-main"));
+  });
+});

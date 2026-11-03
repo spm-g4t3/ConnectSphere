@@ -50,7 +50,7 @@ function AvailabilityResult({ result }) {
 
   return (
     <section
-      className={`availability-result availability-result--${RESULT_CLASS[result.result] ?? "unavailable"}`}
+      className={`availability-result availability-result--${RESULT_CLASS[result.result]}`}
       aria-live="polite"
     >
       <h2>{result.result}</h2>
@@ -184,6 +184,7 @@ export default function EquipmentAvailabilityCheck() {
 
   async function handleSubmit(event) {
     event.preventDefault();
+    /* v8 ignore next -- @preserve The submit button is disabled while a check runs. */
     if (checking) return;
 
     setChecking(true);

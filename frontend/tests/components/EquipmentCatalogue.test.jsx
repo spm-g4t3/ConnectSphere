@@ -104,6 +104,16 @@ describe("AC5: the list", () => {
     expect(alert).toHaveTextContent("Could not load the equipment catalogue.");
     expect(alert).not.toHaveTextContent("secret");
   });
+
+  it("SCRUM275_AC1_a_refused_load_offers_no_try_again", async () => {
+    service.listEquipment.mockRejectedValue(apiError(403, { error: "restricted" }));
+    render(<EquipmentCatalogue />);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Only Technical Support Staff can manage the equipment catalogue.");
+    // Asking again would be refused the same way.
+    expect(within(alert).queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+  });
 });
 
 
@@ -388,6 +398,24 @@ describe("AC6: retiring and reinstating", () => {
     await waitFor(() => expect(service.reinstateEquipment).toHaveBeenCalledWith("o1"));
     await waitFor(() => expect(service.listEquipment).toHaveBeenCalledTimes(2));
   });
+
+  it("SCRUM275_AC6_a_reinstate_finishing_while_a_panel_is_open_leaves_the_panel_and_its_focus", async () => {
+    const user = userEvent.setup();
+    let finish;
+    service.reinstateEquipment.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    await openCatalogue();
+
+    await user.click(screen.getByRole("button", { name: "Reinstate Overhead projector (legacy)" }));
+    await user.click(screen.getByRole("button", { name: "Add equipment type" }));
+    const title = screen.getByRole("heading", { name: "Add an equipment type" });
+    expect(title).toHaveFocus();
+
+    finish({});
+    await waitFor(() => expect(service.listEquipment).toHaveBeenCalledTimes(2));
+
+    // The reinstate's focus target is in the list, which the panel replaced.
+    expect(screen.getByRole("heading", { name: "Add an equipment type" })).toHaveFocus();
+  });
 });
 
 
@@ -430,5 +458,18 @@ describe("AC8: the change history", () => {
     await user.click(screen.getByRole("button", { name: "History for Projector (HD)" }));
 
     expect(await screen.findByText("Could not load this type's history.")).toBeInTheDocument();
+  });
+
+  it("SCRUM275_AC8_a_refused_history_read_offers_no_try_again", async () => {
+    const user = userEvent.setup();
+    service.getEquipmentHistory.mockRejectedValue(apiError(403, { error: "restricted" }));
+    await openCatalogue();
+
+    await user.click(screen.getByRole("button", { name: "History for Projector (HD)" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Only Technical Support Staff can manage the equipment catalogue.");
+    expect(within(alert).queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+    expect(service.getEquipmentHistory).toHaveBeenCalledTimes(1);
   });
 });

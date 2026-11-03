@@ -190,6 +190,37 @@ describe("SCRUM-192 loading and listing (SCRUM188_AC6)", () => {
     expect(within(other).getAllByText("Suitable").length).toBeGreaterThan(0);
   });
 
+  // The API sends venueName null when the venue row could not be joined.
+  it("SCRUM188_AC6_a_venue_without_a_name_is_headed_this_venue", async () => {
+    vi.mocked(getEventVenueSuitability).mockResolvedValue([item({ venueName: null })]);
+    renderSection();
+
+    const li = (await screen.findByRole("heading", { name: "This venue" })).closest("li");
+    expect(within(li).getByText("Criteria for This venue")).toBeInTheDocument();
+  });
+
+  // atRequest is null for a request stored before SCRUM-190, so there is
+  // nothing to name even though it was overridden.
+  it("SCRUM188_AC6_an_override_with_no_stored_result_names_nothing_and_alerts_on_what_fails", async () => {
+    vi.mocked(getEventVenueSuitability).mockResolvedValue([
+      item({
+        suitabilityOverridden: true,
+        current: { suitable: false, criteria: withUnmet(["Layout"]), checked: CHECKED },
+        atRequest: null,
+        newlyUnmet: ["Layout"],
+      }),
+    ]);
+    renderSection();
+
+    await screen.findByRole("heading", { name: "Hall A" });
+    const li = venueItem("Hall A");
+    expect(within(li).queryByText(/Requested although it did not meet/)).not.toBeInTheDocument();
+    expect(within(li).getByRole("alert")).toHaveTextContent(
+      "This venue no longer meets this request's requirements: Layout",
+    );
+    expect(within(li).queryByText(/overridden by coordinator/)).not.toBeInTheDocument();
+  });
+
   it("SCRUM188_AC6_an_event_with_no_venue_says_so_quietly", async () => {
     vi.mocked(getEventVenueSuitability).mockResolvedValue([]);
     renderSection();

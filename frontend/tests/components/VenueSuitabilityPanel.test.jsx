@@ -127,6 +127,44 @@ describe("SCRUM-191 a failed check", () => {
   });
 });
 
+// The effect reruns when the requirements change; the answer to the old ones
+// must not overwrite the answer to the new ones, whether it succeeds or fails.
+describe("SCRUM-191 a superseded check is dropped", () => {
+  const NEW_REQUIREMENTS = { layout: "banquet", accessibility: [], facilities: [] };
+  const SUITABLE = { ...RESULT, suitable: true, criteria: RESULT.criteria.map((c) => ({ ...c, met: true })) };
+
+  it("SCRUM188_AC2_a_late_answer_to_the_old_requirements_is_ignored", async () => {
+    const first = deferred();
+    vi.mocked(checkVenueSuitability).mockReturnValueOnce(first.promise).mockResolvedValueOnce(SUITABLE);
+    const { rerender } = renderPanel();
+
+    rerender(<VenueSuitabilityPanel event={EVENT} venue={VENUE} requirements={NEW_REQUIREMENTS} canRequest />);
+    expect(await screen.findByText("Suitable")).toBeInTheDocument();
+    expect(vi.mocked(checkVenueSuitability).mock.calls[1]).toEqual(["e1", "v1", NEW_REQUIREMENTS]);
+
+    first.resolve(RESULT);
+    await first.promise;
+
+    expect(screen.getByText("Suitable")).toBeInTheDocument();
+    expect(screen.queryByText("Not suitable")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM188_AC1_a_late_failure_of_the_old_check_shows_no_error", async () => {
+    const first = deferred();
+    vi.mocked(checkVenueSuitability).mockReturnValueOnce(first.promise).mockResolvedValueOnce(SUITABLE);
+    const { rerender } = renderPanel();
+
+    rerender(<VenueSuitabilityPanel event={EVENT} venue={VENUE} requirements={NEW_REQUIREMENTS} canRequest />);
+    expect(await screen.findByText("Suitable")).toBeInTheDocument();
+
+    first.reject(httpError(500));
+    await first.promise.catch(() => {});
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByText("Suitable")).toBeInTheDocument();
+  });
+});
+
 describe("SCRUM-191 carrying the result into a request", () => {
   it("SCRUM191_request_this_venue_hands_the_venue_and_result_to_the_parent", async () => {
     vi.mocked(checkVenueSuitability).mockResolvedValue(RESULT);

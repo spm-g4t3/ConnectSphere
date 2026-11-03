@@ -19,7 +19,7 @@
 // convenience.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import EventEquipmentSection from "../../src/components/EventEquipmentSection.jsx";
@@ -827,5 +827,57 @@ describe("SCRUM-310 (SCRUM-315) AC5: a line with a flagged reservation is marked
 
     await screen.findByRole("group", { name: "Equipment unavailable for Projector" });
     expect(screen.getByRole("button", { name: "Edit Projector" })).toBeEnabled();
+  });
+});
+
+
+describe("AC1 and AC11: reads that come back late or fail on the refresh", () => {
+  // Lets a settled read's callbacks run.
+  const flush = () => act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+
+  it("SCRUM21_AC1_a_refused_add_whose_refresh_also_fails_says_the_list_could_not_be_loaded", async () => {
+    addEquipmentLine.mockRejectedValue(httpError(409));
+    const user = userEvent.setup();
+    renderSection();
+    await screen.findByRole("option", { name: "Microphone" });
+    await user.selectOptions(screen.getByLabelText("Equipment type"), "Microphone");
+    getEventEquipment.mockRejectedValueOnce(httpError(500));
+
+    await user.click(screen.getByRole("button", { name: "Add equipment" }));
+
+    expect(await screen.findByText("Could not load this event's equipment.")).toBeInTheDocument();
+    expect(getEventEquipment).toHaveBeenCalledTimes(2);
+  });
+
+  it("SCRUM21_AC11_a_late_read_for_the_previous_event_does_not_replace_the_current_events_lines", async () => {
+    let finishFirst;
+    getEventEquipment
+      .mockReturnValueOnce(new Promise((resolve) => { finishFirst = resolve; }))
+      .mockResolvedValueOnce(state({ lines: [line({ id: MIC_LINE, equipmentTypeId: MIC_TYPE, name: "Microphone", quantity: 4 })] }));
+    const { rerender } = renderSection({ status: "under_review" });
+
+    rerender(<EventEquipmentSection requestId="other-event" status="under_review" canEdit />);
+    expect(await screen.findByText("Quantity: 4")).toBeInTheDocument();
+
+    finishFirst(state());
+    await flush();
+
+    expect(screen.getByText("Quantity: 4")).toBeInTheDocument();
+    expect(screen.queryByText("Quantity: 2")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM21_AC1_a_catalogue_that_arrives_after_the_event_left_approved_offers_no_add_form", async () => {
+    let finishCatalogue;
+    getActiveEquipmentTypes.mockReturnValueOnce(new Promise((resolve) => { finishCatalogue = resolve; }));
+    const { rerender } = renderSection();
+    await screen.findByText("Quantity: 2");
+
+    rerender(<EventEquipmentSection requestId={REQUEST_ID} status="confirmed" canEdit />);
+    finishCatalogue(CATALOGUE);
+    await flush();
+
+    expect(screen.queryByRole("button", { name: "Add equipment" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Microphone" })).not.toBeInTheDocument();
+    expect(screen.getByText("Equipment on a confirmed event can only be changed as a significant change.")).toBeInTheDocument();
   });
 });
