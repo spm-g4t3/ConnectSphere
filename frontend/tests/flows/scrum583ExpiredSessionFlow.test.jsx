@@ -55,6 +55,7 @@ describe("SCRUM583_AC1_AC5 an expired session ends on the login page with one me
     renderAppAt("/dashboard");
 
     await waitFor(() => expect(here()).toBe("/login"));
+    expect(await screen.findByRole("heading", { name: "Log in" })).toBeInTheDocument();
     expect(screen.queryByText(/session has expired/i)).toBeNull();
     expect(screen.queryByText(/sign in again to/i)).toBeNull();
     expect(document.body.textContent.match(/sign in again/gi)).toHaveLength(1);
