@@ -15,6 +15,7 @@ import { formatVenuePeriod } from "../services/datetimeFormat";
 import { getMyBookingRequests, releaseVenueBooking } from "../services/bookingRequestService";
 import { releaseErrorMessage } from "../services/bookingRequestErrors";
 import { SERVER_TEXT_MAX_LENGTH } from "../services/textLimits";
+import Button from "./ui/Button";
 
 const LIST_ERROR = "Venue bookings could not be loaded.";
 
@@ -57,12 +58,12 @@ function ReleaseForm({ id, busy, onConfirm, onKeep }) {
         {length.toLocaleString("en-US")} / {SERVER_TEXT_MAX_LENGTH.toLocaleString("en-US")}
       </p>
       <div className="event-venue-bookings__actions">
-        <button type="submit" disabled={busy || reason.trim() === ""}>
+        <Button type="submit" variant="danger" disabled={busy || reason.trim() === ""}>
           {busy ? "Releasing..." : "Confirm release"}
-        </button>
-        <button type="button" disabled={busy} onClick={onKeep}>
+        </Button>
+        <Button variant="secondary" disabled={busy} onClick={onKeep}>
           Keep this venue
-        </button>
+        </Button>
       </div>
     </form>
   );
@@ -97,9 +98,9 @@ function VenueBooking({ row, headingLevel, open, busy, error, onOpen, onKeep, on
           </p>
         )}
         {!released && !open && (
-          <button type="button" disabled={busy} onClick={() => onOpen(row)}>
+          <Button variant="secondary" disabled={busy} onClick={() => onOpen(row)}>
             Release this venue
-          </button>
+          </Button>
         )}
         {!released && open && (
           <ReleaseForm id={`${headingId}-reason`} busy={busy} onConfirm={(reason) => onConfirm(row, reason)} onKeep={onKeep} />
@@ -189,9 +190,9 @@ export default function EventVenueBookings({ eventRequestId, onReleased, onStale
       {error && (
         <div className="pending-bookings__error" role="alert">
           <p>{error}</p>
-          <button type="button" onClick={load}>
+          <Button variant="secondary" onClick={load}>
             Try again
-          </button>
+          </Button>
         </div>
       )}
       {listError && (

@@ -334,3 +334,65 @@ describe("SCRUM586_AC4 the dates this screen formats", () => {
     expect(screen.getByText("Reply by 20 Jan 2030")).toBeInTheDocument();
   });
 });
+
+describe("SCRUM586_AC3 every button in the tabs and the rail is shared", () => {
+  /** The visible buttons, less Find a venue's, which another story aligns. */
+  function sharedOrNot() {
+    return screen.getAllByRole("button").filter((button) => {
+      const section = button.closest("section");
+      return section?.querySelector(":scope > :is(h2, h3, h4)")?.textContent !== "Find a venue";
+    });
+  }
+
+  it("SCRUM586_AC3_every_tab_with_its_rows_open_shows_only_shared_buttons", async () => {
+    vi.mocked(flaggedBookingService.getEventFlaggedBookings).mockResolvedValue([FLAGGED]);
+    vi.mocked(bookingRequestService.getMyBookingRequests).mockResolvedValue([BOOKING]);
+    vi.mocked(venueSuitabilityService.getEventVenueSuitability).mockResolvedValue([
+      { bookingId: "b1", venueId: "v1", venueName: "Hall B", status: "approved", current: null },
+    ]);
+    vi.mocked(eventEquipmentService.getEventEquipment).mockResolvedValue({
+      request: {
+        id: "q1",
+        status: "pending_review",
+        statusLabel: "Pending review",
+        lines: [{ id: "l1", equipmentTypeId: "t1", name: "Projector", quantity: 2, technicalNotes: null, typeRetired: false }],
+      },
+    });
+    vi.mocked(eventRequestService.getCoordinatorChangeRequests).mockResolvedValue([
+      { id: "r1", requestGroupId: "g1", changeField: "equipment", requestedChange: "Two more microphones", details: "Two more microphones", currentValue: null, organiserNote: null, status: "outstanding", decision: null, createdAt: "2026-01-10T03:00:00Z" },
+    ]);
+    const { user } = renderDetail(HOLDER, eventRequest("approved"));
+    const seen = new Set();
+    const check = () => {
+      for (const button of sharedOrNot()) {
+        expect(button, button.textContent).toHaveClass("ui-button");
+        seen.add(button.textContent);
+      }
+    };
+
+    await openTab(user, "Venues");
+    await user.click(await screen.findByRole("button", { name: "Release this venue" }));
+    await screen.findByRole("button", { name: "Keep this venue" });
+    expect(screen.getByRole("button", { name: "Confirm release" })).toHaveClass("ui-button--danger");
+    check();
+    await openTab(user, "Equipment");
+    await user.click(await screen.findByRole("button", { name: "Remove Projector" }));
+    check();
+    await openTab(user, "Details");
+    check();
+    await openTab(user, "Activity");
+    await screen.findByRole("button", { name: "View clarification history" });
+    check();
+
+    // Each kind this story converted was on screen to be checked.
+    for (const name of ["Find a replacement venue", "Confirm release", "Keep this venue", "Recheck", "Yes, remove", "Keep it", "Review", "View clarification history"]) {
+      expect(seen, name).toContain(name);
+    }
+  });
+
+  it("SCRUM586_AC3_the_leads_hand_over_is_a_secondary_shared_button", () => {
+    renderDetail(LEAD, eventRequest("approved"));
+
+    expect(screen.getByRole("button", { name: "Hand over to another coordinator" })).toHaveClass("ui-button", "ui-button--secondary");
+  });
+});

@@ -32,6 +32,7 @@ import ErrorNotice from "./ui/ErrorNotice";
 import LoadingText from "./ui/LoadingText";
 import StatusBadge from "./ui/StatusBadge";
 import useFocusAfterRetry from "./useFocusAfterRetry";
+import useReturnFocus from "./useReturnFocus";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 
 // Keyed by status, the same shape as ReviewQueue's QUEUE_ERROR_MESSAGES.
@@ -40,7 +41,7 @@ import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 // message says so instead of "could not load".
 const MY_EVENTS_ERROR_MESSAGES = {
   403: "Only Event Coordinators have a My events list.",
-  500: "Your events could not be loaded. Please try again.",
+  500: "Your events could not be loaded.",
 };
 
 // The order the groups appear in, and what each is called on this screen.
@@ -147,7 +148,7 @@ function OrganiserName({ event }) {
   );
 }
 
-function EventRow({ event, onOpen }) {
+function EventRow({ event, onOpen, openerRef }) {
   // Labels come from the API, so this component never interprets a status.
   const display = readStatusDisplay(event);
   const overdue = event.status === "pending_clarification" &&
@@ -178,7 +179,7 @@ function EventRow({ event, onOpen }) {
         <SafetyApprovalNotice status={event.status} />
         <NeedsAttentionReasons event={event} />
       </div>
-      <Button onClick={() => onOpen(event)}>Open</Button>
+      <Button ref={openerRef} onClick={() => onOpen(event)}>Open</Button>
     </li>
   );
 }
@@ -198,6 +199,9 @@ export default function MyAssignedEvents({ onEventChanged, asPage = false } = {}
   // Which panel is open, if any: { mode: "detail", request } | null. The same
   // full-page-panel-with-a-back-button pattern ReviewQueue uses.
   const [activePanel, setActivePanel] = useState(null);
+  // The finished groups the coordinator has opened. Kept here, as the list
+  // unmounts while an event is open, so Back can reach a row inside one.
+  const [openFinished, setOpenFinished] = useState(() => new Set());
 
   const fetchEvents = useCallback(async () => {
     setLoading(true);
@@ -216,7 +220,7 @@ export default function MyAssignedEvents({ onEventChanged, asPage = false } = {}
     } catch (err) {
       setError(
         MY_EVENTS_ERROR_MESSAGES[err.response?.status] ||
-          "Your events could not be loaded. Please try again.",
+          "Your events could not be loaded.",
       );
       setRetryable(canRetryRead(err));
       return null;
@@ -238,6 +242,18 @@ export default function MyAssignedEvents({ onEventChanged, asPage = false } = {}
 
   // Try again goes away as its read starts, so focus moves to the title.
   const { headingRef, retry } = useFocusAfterRetry(fetchEvents);
+  // An event can be listed twice (Needs attention and its group), so the
+  // opener is keyed by where it was opened from as well as by the event.
+  const openerKey = activePanel ? `${activePanel.from}:${activePanel.request.id}` : null;
+  const { listHeadingRef, rowRef, returnFocusTo } = useReturnFocus(openerKey, loading);
+  function titleRef(node) {
+    headingRef.current = node;
+    listHeadingRef.current = node;
+  }
+  function closeDetail() {
+    returnFocusTo(openerKey);
+    setActivePanel(null);
+  }
   const Title = asPage ? "h1" : "h2";
   // One level under the title, wherever the list is mounted.
   const GroupHeading = asPage ? "h2" : "h3";
@@ -250,13 +266,14 @@ export default function MyAssignedEvents({ onEventChanged, asPage = false } = {}
     return (
       <section>
         {asPage && <h1>My events</h1>}
-        <Button variant="link" onClick={() => setActivePanel(null)}>
+        <Button variant="link" onClick={closeDetail}>
           &larr; Back to my events
         </Button>
         <CoordinatorRequestDetail
           request={activePanel.request}
+          focusOnOpen
           onReviewDecisionProcessed={() => {
-            setActivePanel(null);
+            closeDetail();
             fetchEvents();
             onEventChanged?.();
           }}
@@ -270,7 +287,15 @@ export default function MyAssignedEvents({ onEventChanged, asPage = false } = {}
   }
 
   const groups = groupByStatus(events);
-  const openEvent = (request) => setActivePanel({ mode: "detail", request });
+  const openFrom = (from) => (request) => setActivePanel({ mode: "detail", request, from });
+  function toggleFinished(group, open) {
+    setOpenFinished((previous) => {
+      const next = new Set(previous);
+      if (open) next.add(group);
+      else next.delete(group);
+      return next;
+    });
+  }
   const now = new Date();
   const overdueClarifications = events
     .filter((event) =>
@@ -282,7 +307,7 @@ export default function MyAssignedEvents({ onEventChanged, asPage = false } = {}
 
   return (
     <section className="my-assigned-events">
-      <Title ref={headingRef} tabIndex={-1}>
+      <Title ref={titleRef} tabIndex={-1}>
         My events
       </Title>
 
@@ -295,7 +320,7 @@ export default function MyAssignedEvents({ onEventChanged, asPage = false } = {}
           <p>Clarification reply dates have passed. No status change has been made.</p>
           <ul>
             {overdueClarifications.map((event) => (
-              <EventRow key={event.id} event={event} onOpen={openEvent} />
+              <EventRow key={event.id} event={event} onOpen={openFrom("attention")} openerRef={rowRef(`attention:${event.id}`)} />
             ))}
           </ul>
         </div>
@@ -312,13 +337,18 @@ export default function MyAssignedEvents({ onEventChanged, asPage = false } = {}
         const rows = (
           <ul>
             {groupEvents.map((event) => (
-              <EventRow key={event.id} event={event} onOpen={openEvent} />
+              <EventRow key={event.id} event={event} onOpen={openFrom("group")} openerRef={rowRef(`group:${event.id}`)} />
             ))}
           </ul>
         );
 
         return finished ? (
-          <details key={group} className="my-assigned-events__group my-assigned-events__group--finished">
+          <details
+            key={group}
+            className="my-assigned-events__group my-assigned-events__group--finished"
+            open={openFinished.has(group)}
+            onToggle={(toggle) => toggleFinished(group, toggle.currentTarget.open)}
+          >
             <summary>
               {heading} <span className="my-assigned-events__count">({groupEvents.length})</span>
             </summary>

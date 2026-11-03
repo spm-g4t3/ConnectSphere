@@ -202,6 +202,22 @@ describe("SCRUM586_AC4 loading, error, empty and date text follow the standard",
     await waitFor(() => expect(screen.getByRole("heading", { name: new RegExp(`^${name}`) })).toHaveFocus());
   });
 
+  it.each([
+    { name: "Review queue", message: "The review queue could not be loaded." },
+    { name: "My events", message: "Your events could not be loaded." },
+    { name: "Venue requests", message: "Your venue requests could not be loaded." },
+    { name: "Needs attention", message: "Your Needs attention list could not be loaded." },
+  ])("SCRUM586_AC4_a_failed_read_beside_try_again_says_only_what_failed ($name)", async ({ name, message }) => {
+    const { Component, read } = SCREENS.find((entry) => entry.name === name);
+    read.mockRejectedValue(httpError(500));
+    renderScreen(Component);
+
+    const alert = await screen.findByRole("alert");
+    // Try again is the instruction, so the message does not repeat it.
+    expect(within(alert).getByText(new RegExp(`^${message.replace(/\./g, "\\.")}$`))).toBeInTheDocument();
+    expect(within(alert).getByRole("button", { name: "Try again" })).toBeInTheDocument();
+  });
+
   it.each(SCREENS.flatMap((entry) => [403, 404].map((status) => ({ ...entry, status }))))(
     "SCRUM586_AC4_offers_no_try_again_after_a_refused_or_missing_read ($name, $status)",
     async ({ Component, read, status }) => {

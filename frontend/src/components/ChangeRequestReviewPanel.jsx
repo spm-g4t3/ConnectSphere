@@ -24,6 +24,7 @@ import {
   outcomeLabel,
 } from "../services/changeRequestDisplay";
 import { CancellationImpact } from "./EventCancellationPanel";
+import Button from "./ui/Button";
 
 // AC2: the statuses process_change_request (036) accepts a decision in.
 const PROCESSABLE_STATUSES = new Set([
@@ -308,9 +309,9 @@ export default function ChangeRequestReviewPanel({ eventRequest, canProcess, onP
               Cancellation reason
               <textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)} />
             </label>
-            <button type="button" disabled={busy || !trimmed || tooLong} onClick={() => decide("approved", trimmed)}>
+            <Button variant="danger" disabled={busy || !trimmed || tooLong} onClick={() => decide("approved", trimmed)}>
               {busy ? "Cancelling..." : "Confirm cancellation"}
-            </button>
+            </Button>
           </div>
         ) : mode === "decline" ? (
           <div className="change-request-review__decline">
@@ -319,9 +320,9 @@ export default function ChangeRequestReviewPanel({ eventRequest, canProcess, onP
               <textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)} />
             </label>
             {tooLong && <p className="coordinator-clarification__error">The reason must be 2,000 characters or fewer.</p>}
-            <button type="button" disabled={busy || !trimmed || tooLong} onClick={() => decide("rejected", trimmed)}>
+            <Button disabled={busy || !trimmed || tooLong} onClick={() => decide("rejected", trimmed)}>
               {busy ? "Declining..." : "Confirm decline"}
-            </button>
+            </Button>
           </div>
         ) : (
           <div className="change-request-review__accept">
@@ -332,22 +333,21 @@ export default function ChangeRequestReviewPanel({ eventRequest, canProcess, onP
               </label>
             )}
             {tooLong && <p className="coordinator-clarification__error">The note must be 2,000 characters or fewer.</p>}
-            <button
-              type="button"
+            <Button
               disabled={busy || invalid.length > 0 || tooLong || (isOther && !trimmed)}
               onClick={() => (isCancellation ? openCancellation() : decide("approved", trimmed || undefined))}
             >
               {busy ? "Saving..." : "Accept"}
-            </button>
-            <button type="button" disabled={busy} onClick={() => { setMode("decline"); setNote(""); }}>
+            </Button>
+            <Button variant="secondary" disabled={busy} onClick={() => { setMode("decline"); setNote(""); }}>
               Decline
-            </button>
+            </Button>
           </div>
         )}
         {cardLines(review.group.id)}
-        <button type="button" className="change-request-review__close" onClick={closeReview}>
+        <Button variant="secondary" className="change-request-review__close" onClick={closeReview}>
           Close review
-        </button>
+        </Button>
       </div>
     );
   }
@@ -388,7 +388,7 @@ export default function ChangeRequestReviewPanel({ eventRequest, canProcess, onP
               {review?.group.id !== group.id && cardLines(group.id)}
               {group.open && processable && review?.group.id !== group.id && (
                 <div className="coordinator-change-requests__actions">
-                  <button type="button" disabled={busy} onClick={() => loadPreview(group)}>Review</button>
+                  <Button disabled={busy} onClick={() => loadPreview(group)}>Review</Button>
                 </div>
               )}
             </li>

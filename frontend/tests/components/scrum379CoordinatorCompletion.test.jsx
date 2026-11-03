@@ -278,7 +278,7 @@ describe("SCRUM379 completing from the event screen", () => {
 
     await openPanel(harness);
 
-    expect(screen.getByRole("heading", { level: 1, name: "Mark IS212 Industry Night as completed" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Mark IS212 Industry Night as completed" })).toBeInTheDocument();
     expect(screen.queryByText("The request")).not.toBeInTheDocument();
     expect(completeEventRequest).not.toHaveBeenCalled();
   });

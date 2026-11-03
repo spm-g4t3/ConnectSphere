@@ -10,7 +10,7 @@
 // `expected` no longer matches what it holds (AC9). Only altered fields are
 // sent, so a name edit is never a significant one.
 
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { getEventRequestForReview, updateEventRequestDetails } from "../services/eventRequestService";
 import { codeOf, fieldErrorsFrom, makeErrorMapper } from "../services/apiErrors";
 import { readStatusDisplay } from "../services/eventRequestStatusDisplay";
@@ -26,6 +26,7 @@ import {
   editableDetailFields,
 } from "../services/eventDetailFields";
 import { fieldErrorWiring } from "./fieldErrors";
+import Button from "./ui/Button";
 
 // The server's limit, counted as it counts: in characters, not UTF-16 units.
 const REASON_MAX_LENGTH = 4000;
@@ -119,8 +120,11 @@ function toWireValue(field, value) {
  * @param {object} props.eventRequest  the event as the detail holds it when the panel opens
  * @param {() => void} props.onBack
  * @param {(saved: object) => void} props.onSaved  the event, with changedFields
+ * @param {number} [props.headingLevel]  the page title's level: 1 on the event's
+ *   own page, 2 inside a list whose title is the h1
  */
-export default function EventDetailsEditPanel({ eventRequest, onBack, onSaved }) {
+export default function EventDetailsEditPanel({ eventRequest, onBack, onSaved, headingLevel = 1 }) {
+  const Title = `h${headingLevel}`;
   const idPrefix = useId();
   const [opened] = useState(() => {
     const fields = editableDetailFields(eventRequest.status);
@@ -137,6 +141,12 @@ export default function EventDetailsEditPanel({ eventRequest, onBack, onSaved })
   const [message, setMessage] = useState(null);
   const [clientErrors, setClientErrors] = useState([]);
   const [serverErrors, setServerErrors] = useState([]);
+  const headingRef = useRef(null);
+
+  // The button that opened this page has gone, so focus starts on its title.
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, []);
 
   const reasonLength = Array.from(reason).length;
   const { messagesFor, errorId, ariaFor } = fieldErrorWiring(idPrefix, [...clientErrors, ...serverErrors]);
@@ -232,11 +242,11 @@ export default function EventDetailsEditPanel({ eventRequest, onBack, onSaved })
 
   return (
     <main className="event-details-edit-page">
-      <button className="event-cancellation-page__back" type="button" onClick={onBack}>
+      <Button variant="link" onClick={onBack}>
         Back to event
-      </button>
+      </Button>
       <p className="eyebrow">Coordinator action</p>
-      <h1>Edit event information: {eventRequest.eventName}</h1>
+      <Title ref={headingRef} tabIndex={-1}>Edit event information: {eventRequest.eventName}</Title>
       <section className="event-details-edit">
         {!opened.allFields && (
           <p className="event-details-edit__notice">
@@ -269,9 +279,9 @@ export default function EventDetailsEditPanel({ eventRequest, onBack, onSaved })
             {renderFieldErrors("reason")}
           </div>
           {message && <p className="event-details-edit__message" role="alert">{message}</p>}
-          <button type="submit" disabled={saving}>
+          <Button type="submit" disabled={saving}>
             {saving ? "Saving..." : "Save changes"}
-          </button>
+          </Button>
         </form>
       </section>
     </main>

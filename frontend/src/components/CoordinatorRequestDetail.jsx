@@ -71,6 +71,7 @@ import RegistrationCounts from "./RegistrationCounts";
 import Button from "./ui/Button";
 import StatusBadge from "./ui/StatusBadge";
 import Tabs from "./ui/Tabs";
+import useReturnFocus from "./useReturnFocus";
 import { isRegistrationConfigurable } from "../services/registrationStatuses";
 import {
   decideEventRequest,
@@ -275,12 +276,15 @@ function defaultEventTab(status) {
  * @param {object} props
  * @param {boolean} [props.asPage]  true at /event-requests/:id, where the event's
  *                                  name is the page's h1; inside a list it is h2
+ * @param {boolean} [props.focusOnOpen]  true when opened from a list row, whose
+ *                                  button has gone, so focus starts on the title
  */
 export default function CoordinatorRequestDetail({
   request,
   onReviewDecisionProcessed,
   onChangeRequestProcessed,
   asPage = false,
+  focusOnOpen = false,
 }) {
   // A mutation response belongs to the parent record it started from.
   const [localUpdate, setLocalUpdate] = useState(null);
@@ -397,6 +401,35 @@ export default function CoordinatorRequestDetail({
   const [startReviewError, setStartReviewError] = useState(null);
   const [decisionError, setDecisionError] = useState(null);
 
+  // Each swap-in page hides the opener that opened it. Leaving it puts focus
+  // back on that opener, or on the title if the event's new status removed it.
+  const openPanel = reassigning ? "reassign"
+    : cancellationPage ? "cancel"
+      : rejectionPage ? "reject"
+        : completionPage ? "complete"
+          : significantChangePage ? "revise"
+            : detailsEditPage ? "edit" : null;
+  const { listHeadingRef: titleRef, rowRef: openerRef, returnFocusTo } = useReturnFocus(openPanel, false);
+  function closePanel(key, close) {
+    returnFocusTo(key);
+    close(false);
+  }
+
+  useEffect(() => {
+    if (focusOnOpen) titleRef.current?.focus();
+  }, [focusOnOpen, titleRef]);
+
+  // A step that succeeds replaces the button that took it, so focus moves to
+  // the Next step heading and the event's new state is read from there.
+  const nextStepRef = useRef(null);
+  const [nextStepFocus, setNextStepFocus] = useState(0);
+  useEffect(() => {
+    if (nextStepFocus) (nextStepRef.current ?? titleRef.current)?.focus();
+  }, [nextStepFocus, titleRef]);
+  function focusNextStep() {
+    setNextStepFocus((count) => count + 1);
+  }
+
   useEffect(() => {
     if (!equipmentHandOff) return;
     equipmentSectionRef.current?.scrollIntoView?.({ block: "start" });
@@ -421,6 +454,7 @@ export default function CoordinatorRequestDetail({
         requestedFields,
       );
       onReviewDecisionProcessed?.();
+      focusNextStep();
     } catch (error) {
       setReviewDecisionError(
         RETURN_FOR_AMENDMENT_ERROR_MESSAGES[error.response?.status] ||
@@ -445,6 +479,7 @@ export default function CoordinatorRequestDetail({
     try {
       const updated = await startEventReview(request.id);
       setUpdatedRequest(updated);
+      focusNextStep();
       onChangeRequestProcessed?.();
     } catch (error) {
       setStartReviewError(
@@ -497,6 +532,7 @@ export default function CoordinatorRequestDetail({
       });
       setUpdatedRequest(updated);
       setReviewNote("");
+      focusNextStep();
       onChangeRequestProcessed?.();
     } catch (error) {
       const status = error.response?.status;
@@ -531,6 +567,7 @@ export default function CoordinatorRequestDetail({
     try {
       await closeEventClarification(request.id, note);
       onReviewDecisionProcessed?.();
+      focusNextStep();
     } catch (error) {
       setClosureError(
         error.response?.data?.error || "Could not close the clarification request.",
@@ -562,17 +599,21 @@ export default function CoordinatorRequestDetail({
       id: updated?.assignedCoordinatorId ?? chosen?.id ?? null,
       fullName: chosen?.fullName ?? null,
     });
-    setReassigning(false);
+    closePanel("reassign", setReassigning);
     setHistoryVersion((version) => version + 1);
     onChangeRequestProcessed?.();
   }
+
+  // A page swapped in takes the event title's level, so the screen keeps one h1.
+  const panelTitleLevel = asPage ? 1 : 2;
 
   if (reassigning) {
     return (
       <ReassignEventPanel
         request={request}
         outgoingCoordinatorId={assignedCoordinatorId}
-        onCancel={() => setReassigning(false)}
+        headingLevel={panelTitleLevel}
+        onCancel={() => closePanel("reassign", setReassigning)}
         onReassigned={handleReassigned}
       />
     );
@@ -582,7 +623,8 @@ export default function CoordinatorRequestDetail({
     return (
       <EventCancellationPanel
         eventRequest={current}
-        onBack={() => setCancellationPage(false)}
+        headingLevel={panelTitleLevel}
+        onBack={() => closePanel("cancel", setCancellationPage)}
         onCancelled={(updated) => {
           setUpdatedRequest(updated);
           onChangeRequestProcessed?.();
@@ -595,7 +637,8 @@ export default function CoordinatorRequestDetail({
     return (
       <EventRejectionPanel
         eventRequest={current}
-        onBack={() => setRejectionPage(false)}
+        headingLevel={panelTitleLevel}
+        onBack={() => closePanel("reject", setRejectionPage)}
         onRejected={(updated) => {
           setUpdatedRequest(updated);
           onChangeRequestProcessed?.();
@@ -612,10 +655,11 @@ export default function CoordinatorRequestDetail({
     return (
       <EventCompletionPanel
         eventRequest={current}
-        onBack={() => setCompletionPage(false)}
+        headingLevel={panelTitleLevel}
+        onBack={() => closePanel("complete", setCompletionPage)}
         onCompleted={(updated) => {
           setUpdatedRequest(updated);
-          setCompletionPage(false);
+          closePanel("complete", setCompletionPage);
           setCompletedNotice({ eventId: updated.id });
           onChangeRequestProcessed?.();
         }}
@@ -627,10 +671,11 @@ export default function CoordinatorRequestDetail({
     return (
       <SignificantEventChangePanel
         eventRequest={current}
-        onBack={() => setSignificantChangePage(false)}
+        headingLevel={panelTitleLevel}
+        onBack={() => closePanel("revise", setSignificantChangePage)}
         onApplied={(updated) => {
           setUpdatedRequest(updated);
-          setSignificantChangePage(false);
+          closePanel("revise", setSignificantChangePage);
           setFlaggedVersion((version) => version + 1);
           setVenueVersion((version) => version + 1);
           onChangeRequestProcessed?.();
@@ -643,10 +688,11 @@ export default function CoordinatorRequestDetail({
     return (
       <EventDetailsEditPanel
         eventRequest={current}
-        onBack={() => setDetailsEditPage(false)}
+        headingLevel={panelTitleLevel}
+        onBack={() => closePanel("edit", setDetailsEditPage)}
         onSaved={({ changedFields, ...updated }) => {
           setUpdatedRequest(updated);
-          setDetailsEditPage(false);
+          closePanel("edit", setDetailsEditPage);
           setDetailsSaved({ eventId: updated.id, message: `Saved. Changed: ${detailFieldList(changedFields)}.` });
           onChangeRequestProcessed?.();
         }}
@@ -703,7 +749,7 @@ export default function CoordinatorRequestDetail({
   return (
     <div className="coordinator-request-detail">
       <header className="coordinator-request-detail__header">
-        <Title className="coordinator-request-detail__title">{current.eventName}</Title>
+        <Title ref={titleRef} tabIndex={-1} className="coordinator-request-detail__title">{current.eventName}</Title>
         <p className="coordinator-request-detail__badges">
           <StatusBadge tone={statusTone(display.group)}>{display.label}</StatusBadge>
           <NeedsAttentionBadge event={current} />
@@ -716,6 +762,7 @@ export default function CoordinatorRequestDetail({
               <Button
                 variant="secondary"
                 className="coordinator-request-detail__significant-change"
+                ref={openerRef("revise")}
                 onClick={() => setSignificantChangePage(true)}
               >
                 Revise event details
@@ -725,13 +772,14 @@ export default function CoordinatorRequestDetail({
               <Button
                 variant="secondary"
                 className="coordinator-request-detail__edit-details"
+                ref={openerRef("edit")}
                 onClick={() => setDetailsEditPage(true)}
               >
                 Edit event information
               </Button>
             )}
             {canComplete && (
-              <Button className="coordinator-request-detail__complete" onClick={() => setCompletionPage(true)}>
+              <Button ref={openerRef("complete")} className="coordinator-request-detail__complete" onClick={() => setCompletionPage(true)}>
                 Mark as completed
               </Button>
             )}
@@ -739,6 +787,7 @@ export default function CoordinatorRequestDetail({
               <Button
                 variant="secondary"
                 className="coordinator-request-detail__cancel"
+                ref={openerRef("cancel")}
                 onClick={() => setCancellationPage(true)}
               >
                 Cancel event
@@ -748,6 +797,7 @@ export default function CoordinatorRequestDetail({
               <Button
                 variant="secondary"
                 className="coordinator-request-detail__reject"
+                ref={openerRef("reject")}
                 onClick={() => setRejectionPage(true)}
               >
                 Reject event
@@ -765,7 +815,7 @@ export default function CoordinatorRequestDetail({
               gate, and the error tables above say in words why the server refused. */}
           {hasNextStep && (
             <section className="coordinator-request-detail__next-step" aria-labelledby={`${decisionIds}-next`}>
-              <SectionHeading id={`${decisionIds}-next`}>Next step</SectionHeading>
+              <SectionHeading id={`${decisionIds}-next`} ref={nextStepRef} tabIndex={-1}>Next step</SectionHeading>
               {display.description && <p>{display.description}</p>}
               <NeedsAttentionReasons event={current} />
               <SafetyApprovalNotice status={current.status} />
@@ -780,6 +830,7 @@ export default function CoordinatorRequestDetail({
                   onConfirmed={(updated) => {
                     setUpdatedRequest(updated);
                     setConfirmationFeedback({ eventId: updated.id, success: true, message: "Event confirmed successfully." });
+                    focusNextStep();
                     onChangeRequestProcessed?.();
                   }}
                   onStale={(message) => {
@@ -811,6 +862,7 @@ export default function CoordinatorRequestDetail({
                   headingLevel={sectionLevel + 1}
                   onSubmitted={(updated) => {
                     setUpdatedRequest(updated);
+                    focusNextStep();
                     onChangeRequestProcessed?.();
                   }}
                   onStale={() => onChangeRequestProcessed?.()}
@@ -1324,9 +1376,9 @@ export default function CoordinatorRequestDetail({
 
             {canReassign && (
               <div className="coordinator-reassign">
-                <button type="button" onClick={() => setReassigning(true)}>
+                <Button variant="secondary" ref={openerRef("reassign")} onClick={() => setReassigning(true)}>
                   Hand over to another coordinator
-                </button>
+                </Button>
               </div>
             )}
           </section>

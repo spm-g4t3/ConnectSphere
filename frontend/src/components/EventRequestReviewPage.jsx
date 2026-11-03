@@ -42,7 +42,7 @@ import useFocusAfterRetry from "./useFocusAfterRetry";
 const LOAD_ERROR_MESSAGES = {
   403: "Only Event Coordinators and the Event Coordinator Lead can open an event here.",
   404: "This event isn't available to you. It may have been handed over to another coordinator, or it may no longer exist.",
-  500: "This event request could not be loaded. Please try again.",
+  500: "This event request could not be loaded.",
 };
 
 // The Lead reads every event, so their 404 is only ever a draft or a missing id:
@@ -66,7 +66,7 @@ export default function EventRequestReviewPage() {
       const status = err.response?.status;
       setError(
         (isLead && status === 404 ? LEAD_NOT_FOUND : LOAD_ERROR_MESSAGES[status]) ||
-          "This event request could not be loaded. Please try again.",
+          "This event request could not be loaded.",
       );
       setRetryable(canRetryRead(err));
     } finally {

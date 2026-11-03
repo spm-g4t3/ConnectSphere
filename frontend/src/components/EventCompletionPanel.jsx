@@ -21,7 +21,13 @@ import Button from "./ui/Button";
 import ConfirmDialog from "./ui/ConfirmDialog";
 import ErrorNotice from "./ui/ErrorNotice";
 
-export default function EventCompletionPanel({ eventRequest, onCompleted, onBack }) {
+/**
+ * @param {object} props
+ * @param {number} [props.headingLevel]  the page title's level: 1 on the event's
+ *   own page, 2 inside a list whose title is the h1
+ */
+export default function EventCompletionPanel({ eventRequest, onCompleted, onBack, headingLevel = 1 }) {
+  const Title = `h${headingLevel}`;
   const [notes, setNotes] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -30,6 +36,12 @@ export default function EventCompletionPanel({ eventRequest, onCompleted, onBack
   const continueRef = useRef(null);
   // Where focus lands once the dialog has closed without completing, so it is never lost.
   const refocus = useRef(null);
+  const headingRef = useRef(null);
+
+  // The button that opened this page has gone, so focus starts on its title.
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, []);
 
   useEffect(() => {
     if (confirming || !refocus.current) return;
@@ -74,7 +86,7 @@ export default function EventCompletionPanel({ eventRequest, onCompleted, onBack
         </Button>
       )}
       <p className="eyebrow">Coordinator action</p>
-      <h1>Mark {eventRequest.eventName} as completed</h1>
+      <Title ref={headingRef} tabIndex={-1}>Mark {eventRequest.eventName} as completed</Title>
       <p className="event-completion-page__intro">
         The event ran {formatVenuePeriod(eventRequest.proposedStart, eventRequest.proposedEnd, "at a time that is not recorded")}.
         Completing it is final: its records stay viewable, but it can no longer be changed.

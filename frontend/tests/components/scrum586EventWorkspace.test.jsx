@@ -257,7 +257,8 @@ describe("SCRUM586_AC4 the event page's loading and error states", () => {
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveClass("ui-error-notice");
-    expect(alert).toHaveTextContent("This event request could not be loaded. Please try again.");
+    // Said beside Try again, so no "Please try again." of its own.
+    expect(within(alert).getByText(/^This event request could not be loaded\.$/)).toBeInTheDocument();
     await user.click(within(alert).getByRole("button", { name: "Try again" }));
 
     expect(await screen.findByRole("heading", { level: 1, name: "IS212 Industry Night" })).toBeInTheDocument();

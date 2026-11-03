@@ -57,6 +57,7 @@ import { recheckErrorMessage } from "../services/venueSuitabilityErrors";
 import VenueSuitabilityResult from "./VenueSuitabilityResult";
 import { labelFor } from "../services/venueSuitabilityDisplay";
 import { ROOM_LAYOUTS } from "../services/venueLookups";
+import Button from "./ui/Button";
 
 const RETIRED_MESSAGE = "It can no longer host this event, so request another venue.";
 const ITEM_ERROR_MESSAGE = "This venue could not be rechecked. Press Recheck to try again.";
@@ -208,9 +209,9 @@ export default function EventVenueSuitability({ eventRequestId, onLoaded, headin
           <p className="event-venue-suitability__error" role="alert">
             {state.error}
           </p>
-          <button type="button" onClick={recheck}>
+          <Button variant="secondary" onClick={recheck}>
             Try again
-          </button>
+          </Button>
         </>
       )}
 
@@ -227,9 +228,9 @@ export default function EventVenueSuitability({ eventRequestId, onLoaded, headin
       )}
 
       {state.status === "done" && (
-        <button type="button" className="event-venue-suitability__recheck" onClick={recheck}>
+        <Button variant="secondary" className="event-venue-suitability__recheck" onClick={recheck}>
           Recheck
-        </button>
+        </Button>
       )}
     </div>
   );

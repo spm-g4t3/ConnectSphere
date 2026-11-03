@@ -45,3 +45,9 @@
 .ui-tabs__tab.ui-tabs__tab[aria-selected="true"] { border-bottom-color: var(--color-accent); color: var(--color-accent-dark); }
 .ui-tabs__tab:focus-visible, .ui-tabs__panel:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 .ui-tabs__panel { padding-top: var(--space-4); }
+/* At phone width the tabs stay on one line and the strip scrolls, not the page.
+   The selected underline sits above the strip's line, as the strip now clips. */
+@media (max-width: 720px) {
+  .ui-tabs__list { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; }
+  .ui-tabs__tab.ui-tabs__tab { flex: none; margin-bottom: 0; white-space: nowrap; }
+}

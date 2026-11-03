@@ -32,6 +32,7 @@ import LoadingText from "./ui/LoadingText";
 import StatusBadge from "./ui/StatusBadge";
 import useFocusAfterRetry from "./useFocusAfterRetry";
 import useListRead from "./useListRead";
+import useReturnFocus from "./useReturnFocus";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 
 // Keyed by status, the same shape as VenueCatalogue's RETIRE_ERROR_MESSAGES
@@ -43,7 +44,7 @@ import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 // "Could not load the queue" would send the wrong person looking.
 const QUEUE_ERROR_MESSAGES = {
   403: "Only Event Coordinators can see the review queue.",
-  500: "The review queue could not be loaded. Please try again.",
+  500: "The review queue could not be loaded.",
 };
 
 /**
@@ -70,7 +71,7 @@ export default function ReviewQueue({ asPage = false } = {}) {
     load: fetchQueue,
   } = useListRead(getEventRequestQueue, {
     messages: QUEUE_ERROR_MESSAGES,
-    fallback: "The review queue could not be loaded. Please try again.",
+    fallback: "The review queue could not be loaded.",
   });
 
   // Refetch when the Coordinator comes back to the tab — the same mechanism
@@ -85,20 +86,32 @@ export default function ReviewQueue({ asPage = false } = {}) {
 
   // Try again goes away as its read starts, so focus moves to the title.
   const { headingRef, retry } = useFocusAfterRetry(fetchQueue);
+  // Back puts focus on the row's Review button, or on the title once the row has left the queue.
+  const openId = activePanel?.mode === "detail" ? activePanel.request.id : null;
+  const { listHeadingRef, rowRef, returnFocusTo } = useReturnFocus(openId, loading);
+  function titleRef(node) {
+    headingRef.current = node;
+    listHeadingRef.current = node;
+  }
+  function closeDetail() {
+    returnFocusTo(openId);
+    setActivePanel(null);
+  }
   const Title = asPage ? "h1" : "h2";
 
   // On its own page the h1 stays above the panel, so the page keeps its one h1.
   if (activePanel?.mode === "detail") {
     return (
-      <section>
+      <section className="review-queue">
         {asPage && <h1>Review queue</h1>}
-        <Button variant="link" onClick={() => setActivePanel(null)}>
+        <Button variant="link" onClick={closeDetail}>
           &larr; Back to the review queue
         </Button>
         <CoordinatorRequestDetail
           request={activePanel.request}
+          focusOnOpen
           onReviewDecisionProcessed={() => {
-            setActivePanel(null);
+            closeDetail();
             fetchQueue();
           }}
           onChangeRequestProcessed={async () => {
@@ -118,8 +131,8 @@ export default function ReviewQueue({ asPage = false } = {}) {
   }
 
   return (
-    <section>
-      <Title ref={headingRef} tabIndex={-1}>
+    <section className="review-queue">
+      <Title ref={titleRef} tabIndex={-1}>
         Review queue
       </Title>
 
@@ -148,7 +161,7 @@ export default function ReviewQueue({ asPage = false } = {}) {
                 <strong>{request.eventName}</strong>
                 <StatusBadge tone={statusTone(display.group)}>{display.label}</StatusBadge>
               </span>
-              <Button onClick={() => setActivePanel({ mode: "detail", request })}>
+              <Button ref={rowRef(request.id)} onClick={() => setActivePanel({ mode: "detail", request })}>
                 Review
               </Button>
             </li>

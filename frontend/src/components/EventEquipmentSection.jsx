@@ -40,6 +40,7 @@ import {
 import { describeFlaggedLine } from "../services/equipmentFlagDisplay";
 import { SERVER_TEXT_MAX_LENGTH } from "../services/textLimits";
 import "./EventEquipmentSection.css";
+import Button from "./ui/Button";
 
 // Keyed by status code, as the panel's other tables are: the database's own
 // messages are written for developers.
@@ -394,12 +395,12 @@ export default function EventEquipmentSection({ requestId, status, canEdit, head
                     </p>
                   )}
                   <div className="event-equipment__actions">
-                    <button type="submit" disabled={busy}>
+                    <Button type="submit" disabled={busy}>
                       {busy ? "Saving..." : "Save changes"}
-                    </button>
-                    <button type="button" disabled={busy} onClick={cancelEdit}>
+                    </Button>
+                    <Button variant="secondary" disabled={busy} onClick={cancelEdit}>
                       Cancel
-                    </button>
+                    </Button>
                   </div>
                 </form>
               ) : (
@@ -426,22 +427,22 @@ export default function EventEquipmentSection({ requestId, status, canEdit, head
                   )}
                   {editable && removingId !== line.id && (
                     <div className="event-equipment__actions">
-                      <button
-                        type="button"
+                      <Button
+                        variant="secondary"
                         aria-label={`Edit ${line.name}`}
                         disabled={busy}
                         onClick={() => startEdit(line)}
                       >
                         Edit
-                      </button>
-                      <button
-                        type="button"
+                      </Button>
+                      <Button
+                        variant="secondary"
                         aria-label={`Remove ${line.name}`}
                         disabled={busy}
                         onClick={() => askToRemove(line)}
                       >
                         Remove
-                      </button>
+                      </Button>
                     </div>
                   )}
                   {editable && removingId === line.id && (
@@ -457,11 +458,11 @@ export default function EventEquipmentSection({ requestId, status, canEdit, head
                         </p>
                       )}
                       <div className="event-equipment__actions">
-                        <button type="button" disabled={busy} onClick={() => handleRemove(line)}>
+                        <Button disabled={busy} onClick={() => handleRemove(line)}>
                           {busy ? "Removing..." : "Yes, remove"}
-                        </button>
-                        <button
-                          type="button"
+                        </Button>
+                        <Button
+                          variant="secondary"
                           disabled={busy}
                           onClick={() => {
                             setRemovingId(null);
@@ -469,7 +470,7 @@ export default function EventEquipmentSection({ requestId, status, canEdit, head
                           }}
                         >
                           Keep it
-                        </button>
+                        </Button>
                       </div>
                     </div>
                   )}
@@ -540,9 +541,9 @@ export default function EventEquipmentSection({ requestId, status, canEdit, head
             </p>
           )}
           <div className="event-equipment__actions">
-            <button type="submit" disabled={busy || choosable.length === 0}>
+            <Button type="submit" disabled={busy || choosable.length === 0}>
               {busy ? "Adding..." : "Add equipment"}
-            </button>
+            </Button>
           </div>
         </form>
       )}

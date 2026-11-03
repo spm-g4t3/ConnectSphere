@@ -4,7 +4,7 @@
 // arrangements cannot be met. The outstanding lines come from the confirmation
 // readiness check (N07); the coordinator decides, nothing rejects on its own.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getEventReadiness, rejectApprovedEvent } from "../services/eventRequestService";
 import ReadinessChecklist from "./ReadinessChecklist";
 import { formatDateTime } from "../services/displayFormat";
@@ -27,7 +27,14 @@ function rejectionErrorMessage(error) {
   return ERROR_MESSAGES[status] ?? "The event could not be rejected. No changes have been made; try again.";
 }
 
-export default function EventRejectionPanel({ eventRequest, onRejected, onBack, onCancelInstead }) {
+/**
+ * @param {object} props
+ * @param {number} [props.headingLevel]  the page title's level: 1 on the event's
+ *   own page, 2 inside a list whose title is the h1
+ */
+export default function EventRejectionPanel({ eventRequest, onRejected, onBack, onCancelInstead, headingLevel = 1 }) {
+  const Title = `h${headingLevel}`;
+  const SectionHeading = `h${headingLevel + 1}`;
   const [readiness, setReadiness] = useState(null);
   const [readError, setReadError] = useState(null);
   // Bumped by Try again to read the outstanding arrangements again.
@@ -37,6 +44,14 @@ export default function EventRejectionPanel({ eventRequest, onRejected, onBack, 
   const [error, setError] = useState(null);
 
   const approved = eventRequest.status === "approved";
+  const rejected = eventRequest.status === "rejected";
+  const headingRef = useRef(null);
+
+  // The opener has gone, and on success so has the reject button, so focus
+  // starts on the title each time the page changes.
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, [rejected]);
 
   useEffect(() => {
     if (!approved) return undefined;
@@ -66,14 +81,14 @@ export default function EventRejectionPanel({ eventRequest, onRejected, onBack, 
 
   const back = onBack && <Button variant="link" onClick={onBack}>Back to event</Button>;
 
-  if (eventRequest.status === "rejected") {
+  if (rejected) {
     return (
       <main className="event-cancellation-page">
         {back}
         <p className="eyebrow">Rejection recorded</p>
-        <h1>{eventRequest.eventName}</h1>
+        <Title ref={headingRef} tabIndex={-1}>{eventRequest.eventName}</Title>
         <section className="event-cancellation">
-          <h2>Event rejected</h2>
+          <SectionHeading>Event rejected</SectionHeading>
           <dl>
             <dt>Reason</dt>
             <dd>{eventRequest.decisionNote || "No reason recorded."}</dd>
@@ -112,7 +127,7 @@ export default function EventRejectionPanel({ eventRequest, onRejected, onBack, 
     <main className="event-cancellation-page">
       {back}
       <p className="eyebrow">Coordinator action</p>
-      <h1>Reject {eventRequest.eventName}</h1>
+      <Title ref={headingRef} tabIndex={-1}>Reject {eventRequest.eventName}</Title>
       <p className="event-cancellation-page__intro">
         Reject this event if its essential arrangements cannot be met. Its venue
         bookings, holds and equipment are released straight away, and the

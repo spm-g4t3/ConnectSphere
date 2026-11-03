@@ -248,12 +248,28 @@ button { cursor: pointer; }
 .coordinator-decision__label { font-weight: 700; }
 .coordinator-decision__hint { color: var(--color-muted); font-size: var(--font-size-sm); }
 .coordinator-request-detail__stepper { display: grid; gap: var(--space-2); list-style: none; margin: 0 0 var(--space-4); padding: 0; }
-.coordinator-request-detail .coordinator-request-detail__stepper > li.coordinator-request-detail__step { align-items: center; color: var(--color-muted); display: flex; font-size: var(--font-size-md); gap: var(--space-2); padding: 0; }
+/* Row and start stated, so the .dashboard li rules neither stack each dot over
+   its label at phone width nor push the label to the far edge. */
+.coordinator-request-detail .coordinator-request-detail__stepper > li.coordinator-request-detail__step { align-items: center; color: var(--color-muted); display: flex; flex-direction: row; font-size: var(--font-size-md); gap: var(--space-2); justify-content: flex-start; padding: 0; }
 .coordinator-request-detail__step::before { border: 2px solid var(--color-line); border-radius: var(--radius-pill); box-sizing: border-box; content: ""; flex: none; height: 12px; width: 12px; }
 .coordinator-request-detail .coordinator-request-detail__stepper > li.coordinator-request-detail__step--done { color: var(--color-ink); }
 .coordinator-request-detail__step--done::before { background: var(--color-accent); border-color: var(--color-accent); }
 .coordinator-request-detail .coordinator-request-detail__stepper > li.coordinator-request-detail__step--current { color: var(--color-accent-dark); font-weight: 700; }
 .coordinator-request-detail__step--current::before { border-color: var(--color-accent); }
+/* One visible ring for every control and focused title on the coordinator's
+   screens, so keyboard users can always see where they are. */
+.dashboard--coordinator :is(a, button, input, select, textarea, summary, [tabindex]):focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+/* Event and venue names can be one long word; they wrap inside a 360px screen. */
+.review-queue__title, .my-assigned-events__summary, .my-booking-requests__summary, .coordinator-attention__summary,
+.dashboard--coordinator .reassign-event > :is(h1, h2), .dashboard--coordinator .ui-confirm-dialog { min-width: 0; overflow-wrap: anywhere; }
+/* At phone width every control on these screens is a 44px target, and a
+   dialog's buttons wrap instead of running past its edge. */
+@media (max-width: 720px) {
+  .dashboard--coordinator :is(.review-queue, .my-assigned-events, .my-booking-requests, .coordinator-attention, .coordinator-request-detail, .event-cancellation-page, .event-completion-page, .event-significant-change-page, .event-details-edit-page, .reassign-event, .ui-confirm-dialog) :is(button, select, summary, input:not([type="checkbox"], [type="radio"])) { min-height: 44px; }
+  .dashboard--coordinator .coordinator-request-detail p > a:only-child { align-items: center; display: inline-flex; min-height: 44px; }
+  .dashboard--coordinator :is(.event-cancellation-page, .event-significant-change-page, .coordinator-clarification__fields) label:has(> input:is([type="checkbox"], [type="radio"])) { align-items: center; display: flex; gap: var(--space-2); min-height: 44px; }
+  .dashboard--coordinator .ui-confirm-dialog .ui-confirm-dialog__actions { flex-wrap: wrap; }
+}
 .dashboard--coordinator .coordinator-change-requests > li { display: block; }
 .dashboard--coordinator .coordinator-change-requests__actions { align-items: start; }
 /* The rule above makes every .dashboard p muted grey, which would render a
@@ -581,9 +597,9 @@ button { cursor: pointer; }
 .coordinator-attention__meta { color: var(--muted); display: flex; flex-wrap: wrap; font-size: 0.85rem; gap: 4px 16px; }
 /* SCRUM-384: the Mark as completed panel, laid out as the cancellation panel is. */
 .event-completion-page { display: grid; gap: 18px; }
-.event-completion-page > h1 { color: var(--ink); font-size: clamp(1.8rem, 4vw, 2.7rem); letter-spacing: -0.04em; margin: 0; overflow-wrap: anywhere; }
+.event-completion-page > :is(h1, h2) { color: var(--ink); font-size: clamp(1.8rem, 4vw, 2.7rem); letter-spacing: -0.04em; margin: 0; overflow-wrap: anywhere; }
 /* The page is a grid, which would stretch its Back link to the full width. */
-.event-completion-page > .ui-button, .event-cancellation-page > .ui-button, .event-significant-change-page > .ui-button { justify-self: start; }
+.event-completion-page > .ui-button, .event-cancellation-page > .ui-button, .event-significant-change-page > .ui-button, .event-details-edit-page > .ui-button { justify-self: start; }
 .event-completion-page__intro { margin: 0; }
 .event-completion { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); display: grid; gap: 18px; padding: clamp(20px, 4vw, 32px); }
 .event-completion form { display: grid; gap: 12px; }
@@ -610,8 +626,7 @@ button { cursor: pointer; }
 .safety-check-submission__counter { font-variant-numeric: tabular-nums; }
 .safety-check-submission form > button { justify-self: start; margin-top: 6px; }
 .event-cancellation-page { display: grid; gap: 18px; }
-.event-cancellation-page > h1 { color: var(--ink); font-size: clamp(1.8rem, 4vw, 2.7rem); letter-spacing: -0.04em; margin: 0; overflow-wrap: anywhere; }
-.event-cancellation-page__back { background: transparent !important; color: var(--teal-dark) !important; justify-self: start; padding: 6px 0 !important; text-decoration: underline; }
+.event-cancellation-page > :is(h1, h2) { color: var(--ink); font-size: clamp(1.8rem, 4vw, 2.7rem); letter-spacing: -0.04em; margin: 0; overflow-wrap: anywhere; }
 .event-cancellation-page__intro { margin: 0; }
 .event-cancellation { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); display: grid; gap: 18px; padding: clamp(20px, 4vw, 32px); }
 .event-cancellation form { display: grid; gap: 16px; }
@@ -623,8 +638,8 @@ button { cursor: pointer; }
 .event-cancellation fieldset label, .event-cancellation__confirmation label { align-items: flex-start; color: var(--ink); display: flex; gap: 9px; }
 .event-cancellation input[type="radio"], .event-cancellation input[type="checkbox"] { flex: 0 0 auto; margin-top: 4px; }
 .event-cancellation__impact { border-top: 1px solid var(--line); display: grid; gap: 10px; padding-top: 18px; }
-.event-cancellation__impact h3 { color: var(--teal-dark); margin: 0; }
-.event-cancellation__impact h4 { margin: 0 0 6px; }
+.event-cancellation__impact > :is(h3, h4) { color: var(--teal-dark); margin: 0; }
+.event-cancellation__impact section > :is(h4, h5) { margin: 0 0 6px; }
 .event-cancellation__impact section ul { margin: 0; padding-left: 22px; }
 .event-cancellation__impact section li { line-height: 1.5; }
 .event-cancellation__impact p { color: var(--muted); font-size: 0.9rem; line-height: 1.5; margin: 0; }
@@ -633,7 +648,7 @@ button { cursor: pointer; }
 .event-cancellation dt { color: var(--muted); font-weight: 700; }
 .event-cancellation dd { margin: 0; overflow-wrap: anywhere; }
 .event-significant-change-page { display: grid; gap: 18px; }
-.event-significant-change-page > h1 { color: var(--ink); font-size: clamp(1.8rem, 4vw, 2.7rem); letter-spacing: -0.04em; margin: 0; overflow-wrap: anywhere; }
+.event-significant-change-page > :is(h1, h2) { color: var(--ink); font-size: clamp(1.8rem, 4vw, 2.7rem); letter-spacing: -0.04em; margin: 0; overflow-wrap: anywhere; }
 .event-significant-change { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); display: grid; gap: 18px; padding: clamp(20px, 4vw, 32px); }
 .event-significant-change form { display: grid; gap: 16px; }
 .event-significant-change form > label { color: var(--muted); display: grid; gap: 7px; }
@@ -642,7 +657,7 @@ button { cursor: pointer; }
 .event-significant-change__equipment { align-items: flex-start; color: var(--ink) !important; display: flex !important; gap: 9px; }
 .event-significant-change__equipment input { flex: 0 0 auto; margin-top: 4px; }
 .event-significant-change__impact, .event-significant-change__confirmation { border-top: 1px solid var(--line); display: grid; gap: 10px; padding-top: 18px; }
-.event-significant-change__impact h2 { color: var(--teal-dark); margin: 0; }
+.event-significant-change__impact > :is(h2, h3) { color: var(--teal-dark); margin: 0; }
 .event-significant-change__impact { gap: 16px; }
 .event-significant-change__stats { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
 .event-significant-change__stat { background: #f4f8f7; border: 1px solid var(--line); border-radius: 8px; display: grid; gap: 2px; padding: 12px 14px; }
@@ -650,7 +665,7 @@ button { cursor: pointer; }
 .event-significant-change__stat span { color: var(--muted); font-size: 0.85rem; }
 .event-significant-change__notice { background: #fff7e6; border: 1px solid #f0d9a8; border-radius: 8px; color: var(--ink); margin: 0; padding: 10px 14px; }
 .event-significant-change__group { display: grid; gap: 8px; }
-.event-significant-change__group h3 { color: var(--ink); font-size: 1rem; margin: 0; }
+.event-significant-change__group > :is(h3, h4) { color: var(--ink); font-size: 1rem; margin: 0; }
 .event-significant-change__group ul { display: grid; gap: 8px; list-style: none; margin: 0; padding: 0; }
 .event-significant-change__group li { border: 1px solid var(--line); border-radius: 8px; display: grid; gap: 2px; padding: 10px 14px; }
 .event-significant-change__item-name { color: var(--ink); font-weight: 600; }
@@ -660,7 +675,7 @@ button { cursor: pointer; }
 
 /* SCRUM-387: the coordinator's direct edit, laid out as the significant change page. */
 .event-details-edit-page { display: grid; gap: 18px; }
-.event-details-edit-page > h1 { color: var(--ink); font-size: clamp(1.8rem, 4vw, 2.7rem); letter-spacing: -0.04em; margin: 0; overflow-wrap: anywhere; }
+.event-details-edit-page > :is(h1, h2) { color: var(--ink); font-size: clamp(1.8rem, 4vw, 2.7rem); letter-spacing: -0.04em; margin: 0; overflow-wrap: anywhere; }
 .event-details-edit { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); display: grid; gap: 18px; padding: clamp(20px, 4vw, 32px); }
 .event-details-edit form { display: grid; gap: 16px; }
 .event-details-edit__field { display: grid; gap: 6px; }
@@ -732,10 +747,10 @@ button { cursor: pointer; }
    teal. */
 .dashboard--coordinator .coordinator-reassign { margin-top: 14px; }
 .dashboard--coordinator .coordinator-reassign__notice { background: #e8f7f1; border-radius: 6px; color: #17684f; margin: 14px 0 0; padding: 8px 12px; }
-.dashboard--coordinator .reassign-event h2 { margin-bottom: 8px; }
+.dashboard--coordinator .reassign-event > :is(h1, h2) { margin-bottom: 8px; }
 .dashboard--coordinator .reassign-event__form { display: grid; gap: 14px; margin-top: 16px; max-width: 560px; }
-.dashboard--coordinator .reassign-event__form label { color: var(--muted); display: grid; gap: 7px; }
-.dashboard--coordinator .reassign-event__form select, .dashboard--coordinator .reassign-event__form textarea { background: white; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; padding: 10px 12px; }
+.dashboard--coordinator .reassign-event__form label { color: var(--muted); display: grid; gap: 7px; min-width: 0; }
+.dashboard--coordinator .reassign-event__form select, .dashboard--coordinator .reassign-event__form textarea { background: white; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; min-width: 0; padding: 10px 12px; }
 .dashboard--coordinator .reassign-event__form textarea { min-height: 96px; resize: vertical; }
 .dashboard--coordinator .reassign-event__form select:focus, .dashboard--coordinator .reassign-event__form textarea:focus { border-color: var(--teal); outline: 2px solid rgba(8, 127, 123, 0.16); }
 .dashboard--coordinator .reassign-event__hint { font-size: 0.84rem; margin: -6px 0 0; }

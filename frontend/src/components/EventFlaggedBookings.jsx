@@ -20,6 +20,7 @@ import { venueText } from "../services/flaggedBookingDisplay";
 import { cancelFlaggedBooking, getEventFlaggedBookings } from "../services/flaggedBookingService";
 import { coordinatorCancelErrorMessage, isStaleResolutionError } from "../services/flaggedBookingErrors";
 import { statusMessageOf } from "../services/apiErrors";
+import Button from "./ui/Button";
 
 const LIST_ERROR_MESSAGES = {
   403: "Only the coordinator assigned to this event can see its flagged bookings.",
@@ -61,9 +62,9 @@ function FlaggedBooking({ item, headingLevel, busy, cancelling, error, replacing
 
         {/* Not a toggle: it picks this booking for Find a venue below, so the
             choice is said in text rather than as a pressed state. */}
-        <button type="button" disabled={busy} onClick={() => onReplace(item)}>
+        <Button variant="secondary" disabled={busy} onClick={() => onReplace(item)}>
           Find a replacement venue
-        </button>
+        </Button>
         {replacing && <p className="pending-bookings__event-status">Finding a replacement below.</p>}
         <FlaggedBookingReasonForm
           id={`${regionId}-cancel`}
@@ -161,9 +162,9 @@ export default function EventFlaggedBookings({ eventRequestId, replacingId, onRe
       {error && (
         <div className="pending-bookings__error" role="alert">
           <p>{error}</p>
-          <button type="button" onClick={load}>
+          <Button variant="secondary" onClick={load}>
             Try again
-          </button>
+          </Button>
         </div>
       )}
       {listError && (

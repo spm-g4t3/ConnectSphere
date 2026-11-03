@@ -48,7 +48,7 @@ import useFocusAfterRetry from "./useFocusAfterRetry";
 // on the coordinator role, so a 403 means the account's role is wrong.
 const LIST_ERROR_MESSAGES = {
   403: "Only Event Coordinators have a list of venue requests.",
-  500: "Your venue requests could not be loaded. Please try again.",
+  500: "Your venue requests could not be loaded.",
 };
 
 // A conflicting request is still open, so its coordinator can withdraw it too.
@@ -157,7 +157,7 @@ export default function MyBookingRequests({ asPage = false } = {}) {
     } catch (err) {
       setError(
         LIST_ERROR_MESSAGES[err.response?.status] ||
-          "Your venue requests could not be loaded. Please try again.",
+          "Your venue requests could not be loaded.",
       );
       setRetryable(canRetryRead(err));
     } finally {

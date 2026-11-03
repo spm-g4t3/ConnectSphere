@@ -45,7 +45,7 @@ export default function CoordinatorAttentionList({ refreshKey = 0 }) {
     } catch (err) {
       setError(
         LOAD_ERROR_MESSAGES[err.response?.status] ||
-          "Your Needs attention list could not be loaded. Please try again.",
+          "Your Needs attention list could not be loaded.",
       );
       setRetryable(canRetryRead(err));
     } finally {

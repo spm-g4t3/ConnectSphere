@@ -16,6 +16,7 @@ import EventCancellationPanel from "../../src/components/EventCancellationPanel.
 import EventRejectionPanel from "../../src/components/EventRejectionPanel.jsx";
 import EventConfirmationPanel from "../../src/components/EventConfirmationPanel.jsx";
 import EventCompletionPanel from "../../src/components/EventCompletionPanel.jsx";
+import EventDetailsEditPanel from "../../src/components/EventDetailsEditPanel.jsx";
 import SignificantEventChangePanel from "../../src/components/SignificantEventChangePanel.jsx";
 import SafetyCheckSubmissionPanel from "../../src/components/SafetyCheckSubmissionPanel.jsx";
 import NeedsAttentionBadge from "../../src/components/NeedsAttentionBadge.jsx";
@@ -42,9 +43,11 @@ vi.mock("../../src/services/eventRequestService", () => ({
   confirmEventRequest: vi.fn(),
   getEventCancellationImpact: vi.fn(),
   getEventReadiness: vi.fn(),
+  getEventRequestForReview: vi.fn(),
   previewSignificantEventChange: vi.fn(),
   rejectApprovedEvent: vi.fn(),
   submitForSafetyReview: vi.fn(),
+  updateEventRequestDetails: vi.fn(),
 }));
 
 // ConfirmDialog calls showModal and close, which jsdom lacks.
@@ -200,6 +203,15 @@ describe("SCRUM586_AC3 the event panels use the shared Button and StatusBadge", 
     render(<SafetyCheckSubmissionPanel eventRequest={EVENT} onSubmitted={vi.fn()} />);
     await screen.findByRole("table", { name: "Readiness checklist" });
     expectEveryButtonIsShared();
+  });
+
+  it("SCRUM586_AC3_the_edit_details_page_has_a_link_back_and_a_primary_save", () => {
+    render(<EventDetailsEditPanel eventRequest={{ ...EVENT, status: "approved" }} onBack={vi.fn()} onSaved={vi.fn()} />);
+
+    expectEveryButtonIsShared();
+    expect(screen.getByRole("button", { name: "Back to event" })).toHaveClass("ui-button--link");
+    expect(screen.getByRole("button", { name: "Save changes" })).toHaveClass("ui-button--primary");
+    expect(document.querySelector(".event-cancellation-page__back")).toBeNull();
   });
 
   it("SCRUM586_AC3_no_panel_keeps_its_own_back_or_secondary_class", async () => {
