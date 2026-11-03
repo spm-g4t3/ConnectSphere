@@ -87,7 +87,7 @@ describe("SCRUM-488 AC6: My events with events in the safety statuses", () => {
 
     for (const [name, label] of [["At the safety check", "Safety check"], ["Cleared by safety", "Safety approved"]]) {
       const row = (await screen.findByText(name)).closest("li");
-      expect(within(row).getByText(label)).toHaveClass("status-badge");
+      expect(within(row).getByText(label)).toHaveClass("ui-status-badge");
     }
     expect(screen.getAllByRole("listitem")).toHaveLength(EVENTS.length);
   });
@@ -98,14 +98,14 @@ describe("SCRUM-488 AC6: My events with events in the safety statuses", () => {
 
     // Under review holds the review and the safety check; Approved holds the
     // planning and the safety approval. Each badge keeps its own label.
-    expect(within(group("Under review")).getAllByText(/^(Under review|Safety check)$/, { selector: ".status-badge" }).map((node) => node.textContent))
+    expect(within(group("Under review")).getAllByText(/^(Under review|Safety check)$/, { selector: ".ui-status-badge" }).map((node) => node.textContent))
       .toEqual(["Under review", "Safety check"]);
-    expect(within(group("Approved")).getAllByText(/^(Planning|Safety approved)$/, { selector: ".status-badge" }).map((node) => node.textContent))
+    expect(within(group("Approved")).getAllByText(/^(Planning|Safety approved)$/, { selector: ".ui-status-badge" }).map((node) => node.textContent))
       .toEqual(["Planning", "Safety approved"]);
     expect(within(screen.getByText("At the safety check").closest("li")).getByText("Safety check"))
-      .toHaveClass("status--under-review");
+      .toHaveClass("ui-status-badge--info");
     expect(within(screen.getByText("Cleared by safety").closest("li")).getByText("Safety approved"))
-      .toHaveClass("status--approved");
+      .toHaveClass("ui-status-badge--success");
     expect(within(screen.getByText("Cleared by safety").closest("li")).getByRole("status"))
       .toHaveTextContent("Safety approval complete");
   });
@@ -130,7 +130,7 @@ describe("SCRUM-488 AC6: My events with events in the safety statuses", () => {
 
     expect(within(group("Approved")).getAllByRole("listitem").map((row) => within(row).getByRole("button").closest("li").querySelector("strong").textContent))
       .toEqual(["Cleared first", "Planning second"]);
-    expect(within(group("Confirmed")).getByText("Confirmed", { selector: ".status-badge" })).toHaveClass("status--confirmed");
+    expect(within(group("Confirmed")).getByText("Confirmed", { selector: ".ui-status-badge" })).toHaveClass("ui-status-badge--accent");
     // Finished events stay collapsed, one click away, as before.
     expect(screen.getByText(/^Cancelled/, { selector: "summary" }).closest("details")).not.toHaveAttribute("open");
   });

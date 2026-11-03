@@ -142,10 +142,10 @@ button { cursor: pointer; }
 .my-event-requests { margin: 0 auto; max-width: 1080px; padding: 54px 24px; }
 .my-event-requests__header { align-items: center; display: flex; gap: 20px; justify-content: space-between; margin-bottom: 24px; }
 .my-event-requests__header h1 { color: var(--ink); font-size: 1.8rem; margin: 0; }
-.my-event-requests__header > button, .my-event-requests__item-actions button, .my-event-requests__back, .review-queue__back, .venue-search__back { background: var(--teal); border: 0; border-radius: 6px; color: white; padding: 10px 14px; }
+.my-event-requests__header > button, .my-event-requests__item-actions button, .my-event-requests__back, .venue-search__back { background: var(--teal); border: 0; border-radius: 6px; color: white; padding: 10px 14px; }
 .my-event-requests__header > button:hover, .my-event-requests__item-actions button:hover { background: var(--teal-dark); }
-.my-event-requests__back, .review-queue__back, .venue-search__back { background: transparent; border: 1px solid var(--line); color: var(--teal-dark); margin-bottom: 18px; }
-.my-event-requests__back:hover, .review-queue__back:hover, .venue-search__back:hover { background: #eef6f3; }
+.my-event-requests__back, .venue-search__back { background: transparent; border: 1px solid var(--line); color: var(--teal-dark); margin-bottom: 18px; }
+.my-event-requests__back:hover, .venue-search__back:hover { background: #eef6f3; }
 .my-event-requests__list { display: grid; gap: 14px; list-style: none; margin: 0; padding: 0; }
 .my-event-requests__item { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 18px rgba(24, 61, 58, 0.05); display: block; padding: 20px; transition: background-color 0.8s ease, border-color 0.8s ease, box-shadow 0.8s ease; }
 /* SCRUM-172 (AC7): the event a notification was opened for. */
@@ -222,7 +222,7 @@ button { cursor: pointer; }
 /* The rule above makes every .dashboard p muted grey, which would render a
    failed retire in exactly the same voice as the empty-state text. Same
    colour pair as .venue-search__error. */
-.dashboard .review-queue__error, .dashboard .unassigned-queue__error, .dashboard .venue-block-form__error, .dashboard .notification-inbox__row-error, .dashboard .venue-hold-form__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 6px 0 0; padding: 8px 12px; }
+.dashboard .unassigned-queue__error, .dashboard .venue-block-form__error, .dashboard .notification-inbox__row-error, .dashboard .venue-hold-form__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 6px 0 0; padding: 8px 12px; }
 /* NECESSARY, not cosmetic. .dashboard li above forces flex with
    justify-content: space-between, which on a checkbox row throws the box to
    one edge of the card and its label to the other with the whole width
@@ -417,9 +417,9 @@ button { cursor: pointer; }
 /* SCRUM-333. My events' status groups. Rows inherit `.dashboard li` (a flex
    row, details left and the Open button right); these only space the groups
    and lay out the left side. The finished groups are <details>, so their
-   heading is a <summary> styled to match the open groups' <h3>. */
+   heading is a <summary> styled to match the open groups' heading. */
 .my-assigned-events__group { margin-top: 20px; }
-.my-assigned-events__group h3, .my-assigned-events__group > summary { color: var(--ink); font-size: 0.95rem; font-weight: 700; margin: 0 0 4px; }
+.my-assigned-events__group > :is(h2, h3), .my-assigned-events__group > summary { color: var(--ink); font-size: 0.95rem; font-weight: 700; margin: 0 0 4px; }
 .my-assigned-events__group > summary { cursor: pointer; }
 .my-assigned-events__group > summary:hover { color: var(--teal-dark); }
 .my-assigned-events__count { color: var(--muted); font-weight: 400; }
@@ -477,13 +477,6 @@ button { cursor: pointer; }
 .dashboard--attendee .ui-error-notice { margin: 0 0 var(--space-3); }
 /* Event names can be one long word; wrap them inside a 360px screen. */
 .dashboard--attendee li, .dashboard--attendee .browse-event-details__success, .dashboard--attendee .ui-error-notice { overflow-wrap: anywhere; }
-.dashboard--coordinator .my-booking-requests button:disabled { cursor: not-allowed; opacity: 0.55; }
-.dashboard--coordinator .status--booking-pending { background: #fff6e5; color: #8a5a00; }
-.dashboard--coordinator .status--booking-conflicting { background: #fff0ee; color: #a43c32; }
-.dashboard--coordinator .status--booking-approved { background: #e8f7f1; color: #17684f; }
-.dashboard--coordinator .status--booking-flagged { background: #fff0ee; color: #a43c32; }
-.dashboard--coordinator .status--booking-rejected { background: #fff0ee; color: #a43c32; }
-.dashboard--coordinator .status--booking-withdrawn, .dashboard--coordinator .status--booking-cancelled, .dashboard--coordinator .status--booking-released, .dashboard--coordinator .status--booking-unknown { background: #eef2f1; color: var(--muted); }
 .clarification-overdue { color: #a43c32; font-weight: 700; }
 .my-assigned-events__needs-attention { background: #fff6e5; border-left: 3px solid #bb7a12; margin-top: 16px; padding: 12px; }
 .clarification-history { display: grid; gap: 10px; margin: 12px 0 0; }
@@ -734,7 +727,7 @@ button { cursor: pointer; }
 .unassigned-queue__actions { display: flex; flex-wrap: wrap; gap: 8px; }
 /* The waiting count beside the title reads as a note, not part of the name. */
 .unassigned-queue__count { color: var(--color-muted); font-weight: 400; }
-.dashboard--coordinator-lead > section > .ui-button--link { margin-bottom: var(--space-3); }
+.dashboard--coordinator-lead > section > .ui-button--link, .dashboard--coordinator > section > .ui-button--link { margin-bottom: var(--space-3); }
 /* One visible ring for every control and focused title on the Lead's screens,
    so keyboard users can always see where they are. */
 .dashboard--coordinator-lead :is(a, button, input, select, textarea, [tabindex]):focus-visible,
@@ -1201,7 +1194,7 @@ button.event-registration-page__back { background: none; border: 0; cursor: poin
   .assigned-events .my-assigned-events__summary { overflow-wrap: anywhere; }
 }
 /* The row title has no column gap, so the badge keeps the space the old per-screen badge had. */
-.assigned-events .my-assigned-events__title .ui-status-badge { margin-left: var(--space-2); }
+.my-assigned-events__title .ui-status-badge, .my-booking-requests__title .ui-status-badge, .review-queue__title .ui-status-badge { margin-left: var(--space-2); }
 
 /* SCRUM-258: Venue Staff's pending booking requests. Each card is a block, not
    the flex row .dashboard li makes it, and its toggle reads as a row rather

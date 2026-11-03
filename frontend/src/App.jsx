@@ -209,7 +209,7 @@ function AppRoutes() {
           element={
             <ProtectedRoute allowedRoles={["event_coordinator"]}>
               <div className="dashboard dashboard--coordinator">
-                <ReviewQueue />
+                <ReviewQueue asPage />
               </div>
             </ProtectedRoute>
           }
@@ -228,7 +228,7 @@ function AppRoutes() {
           element={
             <ProtectedRoute allowedRoles={["event_coordinator"]}>
               <div className="dashboard dashboard--coordinator">
-                <MyAssignedEvents />
+                <MyAssignedEvents asPage />
               </div>
             </ProtectedRoute>
           }
@@ -290,13 +290,13 @@ function AppRoutes() {
         {/* SCRUM-255: the coordinator's venue booking requests and their
             statuses. Gated and wrapped as /my-events is, for the same reasons:
             GET /booking-requests/mine is role-checked server-side, and the
-            wrapper is what colours the status badges. */}
+            wrapper gives the list its card styling. */}
         <Route
           path="/my-venue-requests"
           element={
             <ProtectedRoute allowedRoles={["event_coordinator"]}>
               <div className="dashboard dashboard--coordinator">
-                <MyBookingRequests />
+                <MyBookingRequests asPage />
               </div>
             </ProtectedRoute>
           }
