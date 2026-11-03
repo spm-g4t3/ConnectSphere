@@ -11,24 +11,28 @@
 //
 // Built the way ReviewQueue is, on purpose, so the two sections on one screen
 // behave alike: a useCallback fetch, a refetch when the tab regains focus, a
-// status-keyed error table, readStatusDisplay and statusClassName for badges,
+// status-keyed error table, readStatusDisplay and statusTone for badges,
 // an activePanel for the detail view, and a <section> root that takes its card
-// styling and badge colours from whichever .dashboard--coordinator wrapper
-// mounted it. That is why App.jsx's /my-events route supplies the wrapper
-// itself, as /review-queue does.
+// styling from whichever .dashboard--coordinator wrapper mounted it. That is
+// why App.jsx's /my-events route supplies the wrapper itself, as /review-queue does.
 
 import { useCallback, useEffect, useState } from "react";
 import { getMyAssignedEvents } from "../services/eventRequestService";
-import {
-  readStatusDisplay,
-  statusClassName,
-} from "../services/eventRequestStatusDisplay";
-import { formatEventDate } from "../services/displayFormat";
+import { canRetryRead } from "../services/apiErrors";
+import { readStatusDisplay, statusTone } from "../services/eventRequestStatusDisplay";
+import { formatDateTime } from "../services/displayFormat";
 import { isReplyOverdue } from "../services/datetimeFormat";
 import SafetyApprovalNotice from "./SafetyApprovalNotice";
 import NeedsAttentionBadge from "./NeedsAttentionBadge";
 import NeedsAttentionReasons from "./NeedsAttentionReasons";
 import CoordinatorRequestDetail from "./CoordinatorRequestDetail";
+import Button from "./ui/Button";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import LoadingText from "./ui/LoadingText";
+import StatusBadge from "./ui/StatusBadge";
+import useFocusAfterRetry from "./useFocusAfterRetry";
+import useReturnFocus from "./useReturnFocus";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 
 // Keyed by status, the same shape as ReviewQueue's QUEUE_ERROR_MESSAGES.
@@ -37,7 +41,7 @@ import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 // message says so instead of "could not load".
 const MY_EVENTS_ERROR_MESSAGES = {
   403: "Only Event Coordinators have a My events list.",
-  500: "Your events could not be loaded. Please try again.",
+  500: "Your events could not be loaded.",
 };
 
 // The order the groups appear in, and what each is called on this screen.
@@ -144,7 +148,7 @@ function OrganiserName({ event }) {
   );
 }
 
-function EventRow({ event, onOpen }) {
+function EventRow({ event, onOpen, openerRef }) {
   // Labels come from the API, so this component never interprets a status.
   const display = readStatusDisplay(event);
   const overdue = event.status === "pending_clarification" &&
@@ -156,9 +160,7 @@ function EventRow({ event, onOpen }) {
       <div className="my-assigned-events__summary">
         <span className="my-assigned-events__title">
           <strong>{event.eventName}</strong>
-          <span className={`status-badge ${statusClassName(display.group)}`}>
-            {display.label}
-          </span>
+          <StatusBadge tone={statusTone(display.group)}>{display.label}</StatusBadge>
           <NeedsAttentionBadge event={event} />
           {/* SCRUM-402 (SCRUM-404): submissions waiting, counted by GET /mine. */}
           {event.openChangeRequestCount > 0 && (
@@ -168,7 +170,7 @@ function EventRow({ event, onOpen }) {
           )}
         </span>
         <span className="my-assigned-events__meta">
-          <span>{formatEventDate(event.proposedStart)}</span>
+          <span>{formatDateTime(event.proposedStart, "Date not set")}</span>
           {overdue && <strong className="clarification-overdue">Overdue</strong>}
           <span>
             Organiser: <OrganiserName event={event} />
@@ -177,20 +179,29 @@ function EventRow({ event, onOpen }) {
         <SafetyApprovalNotice status={event.status} />
         <NeedsAttentionReasons event={event} />
       </div>
-      <button onClick={() => onOpen(event)}>Open</button>
+      <Button ref={openerRef} onClick={() => onOpen(event)}>Open</Button>
     </li>
   );
 }
 
-export default function MyAssignedEvents({ onEventChanged } = {}) {
+/**
+ * @param {object} props
+ * @param {Function} [props.onEventChanged]  told when the detail panel changed an event
+ * @param {boolean} [props.asPage]  true at /my-events, where the title is the
+ *                                  page's h1; on the dashboard it is h2
+ */
+export default function MyAssignedEvents({ onEventChanged, asPage = false } = {}) {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [retryable, setRetryable] = useState(false);
 
   // Which panel is open, if any: { mode: "detail", request } | null. The same
-  // full-page-panel-with-a-back-button pattern ReviewQueue uses; there is no
-  // modal anywhere in this frontend.
+  // full-page-panel-with-a-back-button pattern ReviewQueue uses.
   const [activePanel, setActivePanel] = useState(null);
+  // The finished groups the coordinator has opened. Kept here, as the list
+  // unmounts while an event is open, so Back can reach a row inside one.
+  const [openFinished, setOpenFinished] = useState(() => new Set());
 
   const fetchEvents = useCallback(async () => {
     setLoading(true);
@@ -209,8 +220,9 @@ export default function MyAssignedEvents({ onEventChanged } = {}) {
     } catch (err) {
       setError(
         MY_EVENTS_ERROR_MESSAGES[err.response?.status] ||
-          "Your events could not be loaded. Please try again.",
+          "Your events could not be loaded.",
       );
+      setRetryable(canRetryRead(err));
       return null;
     } finally {
       setLoading(false);
@@ -228,19 +240,40 @@ export default function MyAssignedEvents({ onEventChanged } = {}) {
   // request per visit, not one every few seconds per open tab.
   useRefetchOnReturn(fetchEvents);
 
+  // Try again goes away as its read starts, so focus moves to the title.
+  const { headingRef, retry } = useFocusAfterRetry(fetchEvents);
+  // An event can be listed twice (Needs attention and its group), so the
+  // opener is keyed by where it was opened from as well as by the event.
+  const openerKey = activePanel ? `${activePanel.from}:${activePanel.request.id}` : null;
+  const { listHeadingRef, rowRef, returnFocusTo } = useReturnFocus(openerKey, loading);
+  function titleRef(node) {
+    headingRef.current = node;
+    listHeadingRef.current = node;
+  }
+  function closeDetail() {
+    returnFocusTo(openerKey);
+    setActivePanel(null);
+  }
+  const Title = asPage ? "h1" : "h2";
+  // One level under the title, wherever the list is mounted.
+  const GroupHeading = asPage ? "h2" : "h3";
+
   // The row from this list is a complete event request (the backend selects
   // the same columns as every other read), so the detail panel renders from it
-  // with no second fetch, as it does from a queue row.
+  // with no second fetch, as it does from a queue row. On its own page the h1
+  // stays above the panel, so the page keeps its one h1.
   if (activePanel?.mode === "detail") {
     return (
       <section>
-        <button className="review-queue__back" onClick={() => setActivePanel(null)}>
+        {asPage && <h1>My events</h1>}
+        <Button variant="link" onClick={closeDetail}>
           &larr; Back to my events
-        </button>
+        </Button>
         <CoordinatorRequestDetail
           request={activePanel.request}
+          focusOnOpen
           onReviewDecisionProcessed={() => {
-            setActivePanel(null);
+            closeDetail();
             fetchEvents();
             onEventChanged?.();
           }}
@@ -254,7 +287,15 @@ export default function MyAssignedEvents({ onEventChanged } = {}) {
   }
 
   const groups = groupByStatus(events);
-  const openEvent = (request) => setActivePanel({ mode: "detail", request });
+  const openFrom = (from) => (request) => setActivePanel({ mode: "detail", request, from });
+  function toggleFinished(group, open) {
+    setOpenFinished((previous) => {
+      const next = new Set(previous);
+      if (open) next.add(group);
+      else next.delete(group);
+      return next;
+    });
+  }
   const now = new Date();
   const overdueClarifications = events
     .filter((event) =>
@@ -266,41 +307,48 @@ export default function MyAssignedEvents({ onEventChanged } = {}) {
 
   return (
     <section className="my-assigned-events">
-      <h2>My events</h2>
+      <Title ref={titleRef} tabIndex={-1}>
+        My events
+      </Title>
 
-      {loading && <p>Loading...</p>}
-      {error && (
-        <p className="review-queue__error" role="alert">
-          {error}
-        </p>
-      )}
+      {loading && <LoadingText />}
+      {/* Hidden while a read is in flight, so Try again cannot start a second one. */}
+      {error && !loading && <ErrorNotice message={error} onRetry={retryable ? retry : undefined} />}
       {!loading && !error && overdueClarifications.length > 0 && (
         <div className="my-assigned-events__needs-attention" role="region" aria-label="Needs attention">
-          <h3>Needs attention</h3>
+          <GroupHeading>Needs attention</GroupHeading>
           <p>Clarification reply dates have passed. No status change has been made.</p>
           <ul>
             {overdueClarifications.map((event) => (
-              <EventRow key={event.id} event={event} onOpen={openEvent} />
+              <EventRow key={event.id} event={event} onOpen={openFrom("attention")} openerRef={rowRef(`attention:${event.id}`)} />
             ))}
           </ul>
         </div>
       )}
       {/* Nothing assigned is the good state, not a missing resource. */}
       {!loading && !error && events.length === 0 && (
-        <p>No events are assigned to you right now.</p>
+        <EmptyState
+          message="No events are assigned to you right now."
+          nextStep="Events appear here when the Event Coordinator Lead assigns them to you."
+        />
       )}
 
       {groups.map(({ group, heading, finished, events: groupEvents }) => {
         const rows = (
           <ul>
             {groupEvents.map((event) => (
-              <EventRow key={event.id} event={event} onOpen={openEvent} />
+              <EventRow key={event.id} event={event} onOpen={openFrom("group")} openerRef={rowRef(`group:${event.id}`)} />
             ))}
           </ul>
         );
 
         return finished ? (
-          <details key={group} className="my-assigned-events__group my-assigned-events__group--finished">
+          <details
+            key={group}
+            className="my-assigned-events__group my-assigned-events__group--finished"
+            open={openFinished.has(group)}
+            onToggle={(toggle) => toggleFinished(group, toggle.currentTarget.open)}
+          >
             <summary>
               {heading} <span className="my-assigned-events__count">({groupEvents.length})</span>
             </summary>
@@ -308,9 +356,9 @@ export default function MyAssignedEvents({ onEventChanged } = {}) {
           </details>
         ) : (
           <div key={group} className="my-assigned-events__group">
-            <h3>
+            <GroupHeading>
               {heading} <span className="my-assigned-events__count">({groupEvents.length})</span>
-            </h3>
+            </GroupHeading>
             {rows}
           </div>
         );

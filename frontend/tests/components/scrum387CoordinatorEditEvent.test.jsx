@@ -17,6 +17,7 @@ import { MemoryRouter } from "react-router-dom";
 import CoordinatorRequestDetail from "../../src/components/CoordinatorRequestDetail.jsx";
 import MyEventRequests from "../../src/components/MyEventRequests.jsx";
 import { useAuth } from "../../src/auth/AuthContext";
+import { openTab } from "../helpers/eventTabs.js";
 import {
   applySignificantEventChange,
   getAssignmentHistory,
@@ -127,7 +128,8 @@ function renderDetail(user, request = eventRequest(), props = {}) {
 }
 
 const editButton = () => screen.queryByRole("button", { name: "Edit event information" });
-const historySection = () => screen.queryByRole("region", { name: "Change history" });
+// Hidden too, so "not shown" holds whichever tab is open; the reading tests open Activity.
+const historySection = () => screen.queryByRole("region", { name: "Change history", hidden: true });
 
 beforeEach(() => {
   vi.mocked(getEventChangeHistory).mockReset();
@@ -238,7 +240,8 @@ describe("SCRUM-387 the change history on the coordinator's detail", () => {
     ["the_assigned_coordinator", COORDINATOR_USER],
     ["the_lead", LEAD_USER],
   ])("SCRUM387_AC7_%s_reads_it_beside_the_past_decisions", async (_label, user) => {
-    renderDetail(user);
+    const harness = renderDetail(user);
+    await openTab(harness.user, "Activity");
 
     const section = historySection();
     expect(within(section).getByRole("heading", { name: "Change history" })).toBeInTheDocument();
@@ -251,7 +254,8 @@ describe("SCRUM-387 the change history on the coordinator's detail", () => {
       id: "d1", decision: "rejected", decisionNote: "Too few marshals.", decidedByName: "Priya Nair",
       decidedAt: "2026-10-15T03:00:00Z", supersededReason: "reopened_for_revision", supersededAt: "2026-10-16T03:00:00Z",
     }]);
-    renderDetail(COORDINATOR_USER);
+    const { user } = renderDetail(COORDINATOR_USER);
+    await openTab(user, "Activity");
 
     const decisions = await screen.findByRole("region", { name: "Previous decisions" });
     const clarifications = screen.getByRole("heading", { name: "Clarification history" });

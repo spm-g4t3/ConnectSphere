@@ -6,9 +6,10 @@ import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
  * Registered and waitlisted totals for the event's assigned Coordinator. The
  * backend decides who may read them; a refusal simply hides the panel. Read
  * again on return to the tab, like the attendee's lists, so promotions and
- * departures made meanwhile show.
+ * departures made meanwhile show. headingLevel is the event screen's section level.
  */
-export default function RegistrationCounts({ eventId }) {
+export default function RegistrationCounts({ eventId, headingLevel = 3 }) {
+  const Heading = `h${headingLevel}`;
   const [counts, setCounts] = useState(null);
   const [failed, setFailed] = useState(false);
 
@@ -32,7 +33,7 @@ export default function RegistrationCounts({ eventId }) {
 
   return (
     <section className="registration-counts" aria-labelledby="registration-counts-heading">
-      <h3 id="registration-counts-heading">Registrations</h3>
+      <Heading id="registration-counts-heading">Registrations</Heading>
       <dl>
         <div>
           <dt>Registered</dt>

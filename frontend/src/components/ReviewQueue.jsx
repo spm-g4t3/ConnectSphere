@@ -17,21 +17,22 @@
 // the notifications card.
 //
 // It renders a <section> and NOT the `dashboard dashboard--coordinator`
-// wrapper, so the card styling and the badge rules both come from whichever
-// parent mounted it. That is why App.jsx's /review-queue route has to supply
-// the wrapper itself: App.css scopes .status-badge to a dashboard class
-// deliberately (blast-radius control — see its own comment), so without one
-// every badge here renders as bare text.
+// wrapper, so the card styling comes from whichever parent mounted it. That is
+// why App.jsx's /review-queue route supplies the wrapper itself.
 
 import { useState } from "react";
 import { useLocation } from "react-router-dom";
 import { getEventRequestQueue } from "../services/eventRequestService";
-import {
-  readStatusDisplay,
-  statusClassName,
-} from "../services/eventRequestStatusDisplay";
+import { readStatusDisplay, statusTone } from "../services/eventRequestStatusDisplay";
 import CoordinatorRequestDetail from "./CoordinatorRequestDetail";
+import Button from "./ui/Button";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import LoadingText from "./ui/LoadingText";
+import StatusBadge from "./ui/StatusBadge";
+import useFocusAfterRetry from "./useFocusAfterRetry";
 import useListRead from "./useListRead";
+import useReturnFocus from "./useReturnFocus";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 
 // Keyed by status, the same shape as VenueCatalogue's RETIRE_ERROR_MESSAGES
@@ -43,16 +44,19 @@ import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 // "Could not load the queue" would send the wrong person looking.
 const QUEUE_ERROR_MESSAGES = {
   403: "Only Event Coordinators can see the review queue.",
-  500: "The review queue could not be loaded. Please try again.",
+  500: "The review queue could not be loaded.",
 };
 
-export default function ReviewQueue() {
+/**
+ * @param {object} props
+ * @param {boolean} [props.asPage]  true at /review-queue, where the title is the
+ *                                  page's h1; on the dashboard it is h2
+ */
+export default function ReviewQueue({ asPage = false } = {}) {
   const location = useLocation();
   // Which panel is open, if any: { mode: "detail", request } | null. The same
   // full-page-panel-with-a-back-button pattern MyEventRequests and
-  // VenueCatalogue use — there is not one modal, <dialog> or window.confirm
-  // anywhere in this frontend and this is not the place to introduce the
-  // first.
+  // VenueCatalogue use.
   const [activePanel, setActivePanel] = useState(() =>
     location.state?.request
       ? { mode: "detail", request: location.state.request }
@@ -63,10 +67,11 @@ export default function ReviewQueue() {
     data: queue,
     loading,
     error,
+    retryable,
     load: fetchQueue,
   } = useListRead(getEventRequestQueue, {
     messages: QUEUE_ERROR_MESSAGES,
-    fallback: "The review queue could not be loaded. Please try again.",
+    fallback: "The review queue could not be loaded.",
   });
 
   // Refetch when the Coordinator comes back to the tab — the same mechanism
@@ -79,16 +84,34 @@ export default function ReviewQueue() {
   // per open tab.
   useRefetchOnReturn(fetchQueue);
 
+  // Try again goes away as its read starts, so focus moves to the title.
+  const { headingRef, retry } = useFocusAfterRetry(fetchQueue);
+  // Back puts focus on the row's Review button, or on the title once the row has left the queue.
+  const openId = activePanel?.mode === "detail" ? activePanel.request.id : null;
+  const { listHeadingRef, rowRef, returnFocusTo } = useReturnFocus(openId, loading);
+  function titleRef(node) {
+    headingRef.current = node;
+    listHeadingRef.current = node;
+  }
+  function closeDetail() {
+    returnFocusTo(openId);
+    setActivePanel(null);
+  }
+  const Title = asPage ? "h1" : "h2";
+
+  // On its own page the h1 stays above the panel, so the page keeps its one h1.
   if (activePanel?.mode === "detail") {
     return (
-      <section>
-        <button className="review-queue__back" onClick={() => setActivePanel(null)}>
+      <section className="review-queue">
+        {asPage && <h1>Review queue</h1>}
+        <Button variant="link" onClick={closeDetail}>
           &larr; Back to the review queue
-        </button>
+        </Button>
         <CoordinatorRequestDetail
           request={activePanel.request}
+          focusOnOpen
           onReviewDecisionProcessed={() => {
-            setActivePanel(null);
+            closeDetail();
             fetchQueue();
           }}
           onChangeRequestProcessed={async () => {
@@ -108,17 +131,19 @@ export default function ReviewQueue() {
   }
 
   return (
-    <section>
-      <h2>Review queue</h2>
+    <section className="review-queue">
+      <Title ref={titleRef} tabIndex={-1}>
+        Review queue
+      </Title>
 
-      {loading && <p>Loading...</p>}
-      {error && (
-        <p className="review-queue__error" role="alert">
-          {error}
-        </p>
-      )}
+      {loading && <LoadingText />}
+      {/* Hidden while a read is in flight, so Try again cannot start a second one. */}
+      {error && !loading && <ErrorNotice message={error} onRetry={retryable ? retry : undefined} />}
       {!loading && !error && queue.length === 0 && (
-        <p>Nothing is waiting for review right now.</p>
+        <EmptyState
+          message="Nothing is waiting for review right now."
+          nextStep="Requests appear here when they are waiting for your decision."
+        />
       )}
 
       {/* Oldest waiting first, ordered by the backend on submitted_at and
@@ -132,15 +157,13 @@ export default function ReviewQueue() {
           const display = readStatusDisplay(request);
           return (
             <li key={request.id}>
-              <span>
+              <span className="review-queue__title">
                 <strong>{request.eventName}</strong>
-                <span className={`status-badge ${statusClassName(display.group)}`}>
-                  {display.label}
-                </span>
+                <StatusBadge tone={statusTone(display.group)}>{display.label}</StatusBadge>
               </span>
-              <button onClick={() => setActivePanel({ mode: "detail", request })}>
+              <Button ref={rowRef(request.id)} onClick={() => setActivePanel({ mode: "detail", request })}>
                 Review
-              </button>
+              </Button>
             </li>
           );
         })}

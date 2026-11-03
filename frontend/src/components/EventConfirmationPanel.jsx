@@ -1,13 +1,20 @@
 import { useEffect, useRef, useState } from "react";
 import { confirmEventRequest, getEventReadiness } from "../services/eventRequestService";
+// Generic despite its name: a 400, 403 or 404 answers the same if read again.
+import { canRetryEquipmentRead } from "../services/equipmentErrors";
 import ReadinessChecklist from "./ReadinessChecklist";
+import Button from "./ui/Button";
+import ErrorNotice from "./ui/ErrorNotice";
+import LoadingText from "./ui/LoadingText";
 
 const ACCESS_ERRORS = {
   403: "Only the assigned Event Coordinator can confirm this event. Refresh the event to check its assignment.",
   404: "This event is no longer available.",
 };
 
-export default function EventConfirmationPanel({ eventRequest, onConfirmed, onStale }) {
+// headingLevel: the event screen's section level, where this panel sits.
+export default function EventConfirmationPanel({ eventRequest, onConfirmed, onStale, headingLevel = 3 }) {
+  const Heading = `h${headingLevel}`;
   const revision = `${eventRequest.id}:${eventRequest.updatedAt ?? ""}`;
   const [readiness, setReadiness] = useState(null);
   const [acknowledgedRevision, setAcknowledgedRevision] = useState(null);
@@ -46,7 +53,10 @@ export default function EventConfirmationPanel({ eventRequest, onConfirmed, onSt
       } catch (error) {
         if (!cancelled) {
           setReadiness(null);
-          setReadError(ACCESS_ERRORS[error?.response?.status] ?? "The readiness checklist could not be loaded. Please try again.");
+          setReadError({
+            message: ACCESS_ERRORS[error?.response?.status] ?? "The readiness checklist could not be loaded.",
+            retryable: canRetryEquipmentRead(error),
+          });
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -113,14 +123,11 @@ export default function EventConfirmationPanel({ eventRequest, onConfirmed, onSt
 
   return (
     <section className="safety-check-submission" aria-label="Confirm event">
-      <h3>Confirm Event</h3>
+      <Heading>Confirm Event</Heading>
       <p>Every arrangement below must be ready. Confirmation checks the current arrangements again.</p>
-      {loading && <p role="status">Loading the readiness checklist...</p>}
+      {loading && <LoadingText />}
       {!loading && readError && (
-        <div role="alert">
-          <p>{readError}</p>
-          <button type="button" onClick={refreshChecklist}>Retry checklist</button>
-        </div>
+        <ErrorNotice message={readError.message} onRetry={readError.retryable ? refreshChecklist : undefined} />
       )}
       {!loading && readiness && <ReadinessChecklist caption="Readiness checklist" items={items} />}
       <form onSubmit={handleSubmit} aria-busy={submitting}>
@@ -142,9 +149,9 @@ export default function EventConfirmationPanel({ eventRequest, onConfirmed, onSt
             <blockquote>{acknowledgement.organiserRequirements}</blockquote>
           </div>
         )}
-        <button type="submit" disabled={!canSubmit}>{submitting ? "Confirming..." : "Confirm Event"}</button>
+        <Button type="submit" disabled={!canSubmit}>{submitting ? "Confirming..." : "Confirm Event"}</Button>
       </form>
-      {submitError && <p role="alert">{submitError}</p>}
+      {submitError && <ErrorNotice message={submitError} />}
       {outstanding && <ReadinessChecklist caption="Still outstanding" items={outstanding} />}
     </section>
   );

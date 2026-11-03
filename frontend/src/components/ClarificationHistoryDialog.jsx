@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import ClarificationHistory from "./ClarificationHistory";
+import Button from "./ui/Button";
 
 export default function ClarificationHistoryDialog({
   eventRequestId,
@@ -28,13 +29,13 @@ export default function ClarificationHistoryDialog({
 
   return (
     <>
-      <button
-        type="button"
+      <Button
+        variant="secondary"
         className="clarification-history__open"
         onClick={() => setOpen(true)}
       >
         {isOpenQuestion ? "View previous messages" : "View clarification history"}
-      </button>
+      </Button>
       {open && (
         <dialog
           ref={dialogRef}
@@ -53,15 +54,15 @@ export default function ClarificationHistoryDialog({
               <h2 id="clarification-history-dialog-title">Clarification history</h2>
               {eventName && <p>{eventName}</p>}
             </div>
-            <button
+            <Button
               ref={closeButtonRef}
-              type="button"
+              variant="secondary"
               className="clarification-history-dialog__close"
               aria-label="Close clarification history"
               onClick={closeDialog}
             >
               Close
-            </button>
+            </Button>
           </div>
           <ClarificationHistory
             eventRequestId={eventRequestId}

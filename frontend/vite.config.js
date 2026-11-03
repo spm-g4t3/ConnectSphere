@@ -298,6 +298,11 @@ const SCRUM591_FILES = [
   'src/components/useReturnFocus.js',
 ]
 
+// SCRUM-586: the shared Tabs component, a new file this story owns.
+const SCRUM586_FILES = [
+  'src/components/ui/Tabs.jsx',
+]
+
 // https://vite.dev/config/
 //
 // defineConfig comes from vitest/config rather than vite so the `test` block
@@ -358,6 +363,7 @@ export default defineConfig({
         ...SCRUM478_FILES.map((file) => [file, FULL]),
         ...SCRUM584_FILES.map((file) => [file, FULL]),
         ...SCRUM591_FILES.map((file) => [file, FULL]),
+        ...SCRUM586_FILES.map((file) => [file, FULL]),
       ]),
     },
   },

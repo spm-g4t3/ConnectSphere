@@ -159,9 +159,15 @@ import {
   ROOM_LAYOUTS,
 } from "../services/venueLookups";
 import { codesText } from "../services/venueSuitabilityDisplay";
+import { canRetryRead } from "../services/apiErrors";
 import BookingRequestPanel from "./BookingRequestPanel";
 import VenueSuitabilityPanel from "./VenueSuitabilityPanel";
 import { fieldErrorWiring } from "./fieldErrors";
+import Button from "./ui/Button";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import LoadingText from "./ui/LoadingText";
+import useReturnFocus from "./useReturnFocus";
 
 /** The default for `liveRequests`: one shared empty Map, so it is stable. */
 const NO_LIVE_REQUESTS = new Map();
@@ -187,7 +193,8 @@ const RESULT_CODE_LISTS = [
  * One matching venue: its name as the heading, the rest as a <dl>, then the
  * SCRUM-191 check and SCRUM-254 request buttons.
  */
-function VenueResult({ venue, headingId, checkDisabled, onCheck, requestDisabled, lockedReason, onRequest }) {
+function VenueResult({ venue, headingId, headingLevel, checkDisabled, onCheck, requestDisabled, lockedReason, onRequest, rowRef }) {
+  const Heading = `h${headingLevel}`;
   // SCRUM-525: the hint that explains a locked Request button, by id.
   const lockedHintId = `${headingId}-locked`;
   const rows = [
@@ -202,7 +209,7 @@ function VenueResult({ venue, headingId, checkDisabled, onCheck, requestDisabled
   ];
   return (
     <article className="event-venue-finder__result" aria-labelledby={headingId}>
-      <h4 id={headingId}>{venue.name}</h4>
+      <Heading id={headingId}>{venue.name}</Heading>
       <dl>
         {rows.map(({ term, value }) => (
           <div key={term} className="event-venue-finder__result-row">
@@ -211,18 +218,21 @@ function VenueResult({ venue, headingId, checkDisabled, onCheck, requestDisabled
           </div>
         ))}
       </dl>
-      {/* type="button": these sit inside the search form and must not submit it. */}
-      <button
-        type="button"
+      {/* Button is type="button": these sit inside the search form and must not
+          submit it. A disabled one cannot take focus, so it gets no return ref. */}
+      <Button
+        variant="secondary"
+        ref={checkDisabled ? undefined : rowRef(`check:${venue.id}`)}
         className="event-venue-finder__check"
         aria-label={`Check suitability: ${venue.name}`}
         disabled={checkDisabled}
-        onClick={() => onCheck(venue)}
+        onClick={() => onCheck(venue, `check:${venue.id}`)}
       >
         Check suitability
-      </button>
-      <button
-        type="button"
+      </Button>
+      <Button
+        variant="secondary"
+        ref={requestDisabled ? undefined : rowRef(`request:${venue.id}`)}
         className="event-venue-finder__request"
         aria-label={`Request this venue: ${venue.name}`}
         disabled={requestDisabled}
@@ -230,7 +240,7 @@ function VenueResult({ venue, headingId, checkDisabled, onCheck, requestDisabled
         onClick={() => onRequest(venue)}
       >
         Request this venue
-      </button>
+      </Button>
       {lockedReason && (
         <p className="event-venue-finder__hint" id={lockedHintId}>
           {lockedReason}
@@ -245,24 +255,25 @@ function VenueResult({ venue, headingId, checkDisabled, onCheck, requestDisabled
  * returned. A disclosure, so the venue list is fetched only once someone
  * opens it, and only once. It sits outside the search form (see the header).
  */
-function OtherVenueCheck({ disabled, onCheck }) {
+function OtherVenueCheck({ disabled, onCheck, checkRef }) {
   const idPrefix = useId();
   const [open, setOpen] = useState(false);
   // null until loaded, so "not loaded yet" and "no active venues" differ.
   const [venues, setVenues] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [loadError, setLoadError] = useState(false);
+  // null, or whether reading the list again could go differently.
+  const [loadError, setLoadError] = useState(null);
   const [selectedId, setSelectedId] = useState("");
 
   async function load() {
     setLoading(true);
-    setLoadError(false);
+    setLoadError(null);
     try {
       const rows = await searchActiveVenues();
       // The search already leaves retired venues out; this is belt and braces.
       setVenues((Array.isArray(rows) ? rows : []).filter((venue) => !venue?.retiredAt));
-    } catch {
-      setLoadError(true);
+    } catch (err) {
+      setLoadError({ retryable: canRetryRead(err) });
     } finally {
       setLoading(false);
     }
@@ -278,32 +289,36 @@ function OtherVenueCheck({ disabled, onCheck }) {
   const bodyId = `${idPrefix}-body`;
   const selectId = `${idPrefix}-venue`;
 
+  const toggleRef = useRef(null);
+  // Try again goes away as the list reloads, so focus goes back to the toggle.
+  async function retry() {
+    await load();
+    toggleRef.current?.focus();
+  }
+
   return (
     <div className="event-venue-finder__other">
-      <button
-        type="button"
+      <Button
+        variant="secondary"
+        ref={toggleRef}
         aria-expanded={open}
         aria-controls={bodyId}
         disabled={disabled}
         onClick={toggle}
       >
         Check another venue
-      </button>
+      </Button>
       {open && (
         <div id={bodyId} className="event-venue-finder__other-body">
-          {loading && <p className="event-venue-finder__hint">Loading venues...</p>}
-          {loadError && (
-            <>
-              <p className="event-venue-finder__error" role="alert">
-                Could not load the list of venues. Please try again.
-              </p>
-              <button type="button" onClick={load}>
-                Try again
-              </button>
-            </>
+          {loading && <LoadingText />}
+          {loadError && !loading && (
+            <ErrorNotice message="Could not load the list of venues." onRetry={loadError.retryable ? retry : undefined} />
           )}
           {venues !== null && venues.length === 0 && (
-            <p className="event-venue-finder__hint">There are no active venues to check.</p>
+            <EmptyState
+              message="There are no active venues to check."
+              nextStep="Venues appear here once Venue Staff add them to the catalogue."
+            />
           )}
           {venues !== null && venues.length > 0 && (
             <div className="event-venue-finder__other-row">
@@ -321,13 +336,14 @@ function OtherVenueCheck({ disabled, onCheck }) {
                   </option>
                 ))}
               </select>
-              <button
-                type="button"
+              <Button
+                variant="secondary"
+                ref={disabled || !selected ? undefined : checkRef}
                 disabled={disabled || !selected}
-                onClick={() => onCheck(selected)}
+                onClick={() => onCheck(selected, "other")}
               >
                 Check
-              </button>
+              </Button>
             </div>
           )}
         </div>
@@ -351,6 +367,8 @@ export default function EventVenueFinder({
   replacing,
   onStopReplacing,
   onReplacementRefused,
+  // Each result's and each panel's heading, one under the section the finder sits in.
+  headingLevel = 4,
 }) {
   // Lazy: the function runs on the first render only. See the header.
   const [seed] = useState(() => seedFromEvent(request));
@@ -387,6 +405,12 @@ export default function EventVenueFinder({
   const canCheck = Boolean(request?.id) && Boolean(userId) && request.assignedCoordinatorId === userId;
   const [checkingVenue, setCheckingVenue] = useState(null);
   const checkCount = useRef(0);
+
+  // Closing a panel puts focus back on the button that opened it for that
+  // venue, or on the results once that button is locked or gone. A panel
+  // opened from a check returns where the check was opened from.
+  const openPanel = checkingVenue?.key ?? requesting?.venue.id ?? null;
+  const { listHeadingRef, rowRef, returnFocusTo } = useReturnFocus(openPanel, loading);
 
   // SCRUM-266. Focus follows each new choice of booking to replace.
   const replacingNotice = useRef(null);
@@ -472,21 +496,34 @@ export default function EventVenueFinder({
     };
   }
 
-  function openCheck(venue) {
+  function openCheck(venue, returnTo) {
     checkCount.current += 1;
     setRequesting(null);
-    setCheckingVenue({ venue, requirements: currentRequirements(), key: checkCount.current });
+    setCheckingVenue({ venue, requirements: currentRequirements(), key: checkCount.current, returnTo });
   }
 
   function openRequest(venue) {
     setCheckingVenue(null);
-    setRequesting({ venue, suitability: undefined, requirements: currentRequirements() });
+    setRequesting({ venue, suitability: undefined, requirements: currentRequirements(), returnTo: `request:${venue.id}` });
   }
 
   function requestFromCheck(venue, result) {
-    const requirements = checkingVenue?.requirements;
+    // Called from the open check panel, so checkingVenue is set.
+    const { requirements, returnTo } = checkingVenue;
     setCheckingVenue(null);
-    setRequesting({ venue, suitability: result, requirements });
+    // A check opened on a result returns to that result's Request button.
+    const target = returnTo === "other" ? "other" : `request:${venue.id}`;
+    setRequesting({ venue, suitability: result, requirements, returnTo: target });
+  }
+
+  function closeCheck() {
+    returnFocusTo(checkingVenue?.returnTo);
+    setCheckingVenue(null);
+  }
+
+  function closeRequest() {
+    returnFocusTo(requesting?.returnTo);
+    setRequesting(null);
   }
 
   // ariaFor also takes the ids of any hints that describe the control.
@@ -517,9 +554,9 @@ export default function EventVenueFinder({
             Requesting a replacement for {replacing.venueName},{" "}
             {formatVenuePeriod(replacing.startsAt, replacing.endsAt)}
           </p>
-          <button type="button" onClick={onStopReplacing}>
+          <Button variant="secondary" onClick={onStopReplacing}>
             Stop replacing
-          </button>
+          </Button>
         </div>
       )}
       <form className="event-venue-finder" onSubmit={handleSearch} noValidate>
@@ -654,16 +691,13 @@ export default function EventVenueFinder({
         ))}
 
         <div className="event-venue-finder__actions">
-          <button type="submit" disabled={loading}>
+          <Button type="submit" disabled={loading}>
             {loading ? "Searching..." : "Search venues"}
-          </button>
+          </Button>
         </div>
 
-        {error && (
-          <p className="event-venue-finder__error" role="alert">
-            {error}
-          </p>
-        )}
+        {/* No Try again: the form keeps its values, so Search venues is the retry. */}
+        {error && <ErrorNotice message={error} />}
 
         {hasResults && !eligibility.eligible && (
           <p className="event-venue-finder__hint" role="status">
@@ -672,17 +706,19 @@ export default function EventVenueFinder({
         )}
 
         {hasResults && (
-          <ul className="event-venue-finder__results" aria-label="Matching venues">
+          <ul className="event-venue-finder__results" aria-label="Matching venues" ref={listHeadingRef} tabIndex={-1}>
             {results.map((venue) => (
               <li key={venue.id}>
                 <VenueResult
                   venue={venue}
                   headingId={`${idPrefix}-venue-${venue.id}`}
+                  headingLevel={headingLevel}
                   checkDisabled={!canCheck}
                   onCheck={openCheck}
                   requestDisabled={!eligibility.eligible || isLocked(venue.id)}
                   lockedReason={lockedReason(venue.id)}
                   onRequest={openRequest}
+                  rowRef={rowRef}
                 />
               </li>
             ))}
@@ -691,14 +727,17 @@ export default function EventVenueFinder({
 
         {/* status, not alert: an empty result is an answer, not a failure. */}
         {results !== null && results.length === 0 && !loading && (
-          <p className="event-venue-finder__no-match" role="status">
-            No venue matched your criteria. Adjust the criteria above and search again.
-          </p>
+          <div className="event-venue-finder__no-match" role="status">
+            <EmptyState
+              message="No venue matched your criteria."
+              nextStep="Adjust the criteria above and search again."
+            />
+          </div>
         )}
       </form>
 
       {/* Outside the search form: it has controls of its own (see the header). */}
-      <OtherVenueCheck disabled={!canCheck} onCheck={openCheck} />
+      <OtherVenueCheck disabled={!canCheck} onCheck={openCheck} checkRef={rowRef("other")} />
 
       {/* Beside the search form, not in it, like the request panel below. */}
       {checkingVenue && (
@@ -710,7 +749,8 @@ export default function EventVenueFinder({
           canRequest={eligibility.eligible && !isLocked(checkingVenue.venue.id)}
           requestBlockedReason={lockedReason(checkingVenue.venue.id) ?? undefined}
           onRequest={requestFromCheck}
-          onClose={() => setCheckingVenue(null)}
+          onClose={closeCheck}
+          headingLevel={headingLevel}
         />
       )}
 
@@ -733,7 +773,8 @@ export default function EventVenueFinder({
           }}
           replacesBookingId={replacing?.id}
           onReplacementRefused={onReplacementRefused}
-          onClose={() => setRequesting(null)}
+          onClose={closeRequest}
+          headingLevel={headingLevel}
         />
       )}
     </>

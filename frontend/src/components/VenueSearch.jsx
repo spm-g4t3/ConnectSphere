@@ -73,16 +73,23 @@
 
 import { useState, useCallback, useEffect, useId, useRef } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { deviceTimeZoneLabel } from "../services/datetimeFormat";
+import { deviceTimeZoneLabel, formatVenuePeriod } from "../services/datetimeFormat";
 import { toCalendarDateParam } from "../services/calendarRange";
-import { formatRange } from "../services/displayFormat";
-import { fieldErrorsFrom } from "../services/apiErrors";
+import { canRetryRead, fieldErrorsFrom } from "../services/apiErrors";
 import { normaliseRole } from "../auth/normaliseRole";
 import { searchActiveVenues } from "../services/venueService";
 import { toSearchWindow, validateSearchWindow } from "../services/venueSearchValidation";
 import { bookingRequestEligibility } from "../services/bookingRequestEligibility";
+import { VENUE_TONES } from "../services/venueStatusTones";
 import BookingRequestPanel from "./BookingRequestPanel";
 import { fieldErrorWiring } from "./fieldErrors";
+import Button from "./ui/Button";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import LoadingText from "./ui/LoadingText";
+import StatusBadge from "./ui/StatusBadge";
+import useFocusAfterRetry from "./useFocusAfterRetry";
+import useReturnFocus from "./useReturnFocus";
 
 /** The window's fields. A 400 naming anything else gets the generic message. */
 const DATE_FIELDS = ["startsAt", "endsAt"];
@@ -96,7 +103,11 @@ const RETIRED_SEARCH_ROLES = ["event_coordinator", "venue_staff"].map(normaliseR
 /** The query-string value that seeds the checkbox. */
 const INCLUDE_RETIRED_PARAM = "true";
 
-export default function VenueSearch({ role, userId, onRequestSubmitted } = {}) {
+/**
+ * @param {object} props
+ * @param {boolean} [props.asPage]  true at /venue-search, where the title is the page's h1
+ */
+export default function VenueSearch({ role, userId, onRequestSubmitted, asPage = false } = {}) {
   const [searchParams] = useSearchParams();
   const canIncludeRetired = RETIRED_SEARCH_ROLES.includes(normaliseRole(role));
   const location = useLocation();
@@ -140,6 +151,8 @@ export default function VenueSearch({ role, userId, onRequestSubmitted } = {}) {
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  // Whether searching again could go differently (canRetryRead).
+  const [retryable, setRetryable] = useState(false);
   const [searched, setSearched] = useState(false);
   // { field, message } lists: the browser's check, and a 400's date details[].
   const [fieldErrors, setFieldErrors] = useState([]);
@@ -201,12 +214,28 @@ export default function VenueSearch({ role, userId, onRequestSubmitted } = {}) {
       if (dateDetails.length > 0) {
         setServerFieldErrors(dateDetails);
       } else {
-        setError("Could not load venues. Please try again.");
+        setError("Could not load venues.");
+        setRetryable(canRetryRead(err));
       }
     } finally {
       setLoading(false);
     }
   }, [filters, canIncludeRetired]);
+
+  // Try again goes away as its search starts, so focus moves to the title.
+  const { headingRef, retry } = useFocusAfterRetry(handleSearch);
+  // Closing the request panel puts focus back on the row's button, or on the
+  // title once that button is locked.
+  const { listHeadingRef, rowRef, returnFocusTo } = useReturnFocus(requestingVenue?.id ?? null, loading);
+  function titleRef(node) {
+    headingRef.current = node;
+    listHeadingRef.current = node;
+  }
+  function closeRequest() {
+    returnFocusTo(requestingVenue?.id);
+    setRequestingVenue(null);
+  }
+  const Title = asPage ? "h1" : "h2";
 
   function updateDate(field, value) {
     setFilters({ ...filters, [field]: value });
@@ -275,16 +304,18 @@ export default function VenueSearch({ role, userId, onRequestSubmitted } = {}) {
 
   return (
     <div className="venue-search">
+      <Title ref={titleRef} tabIndex={-1}>
+        Find a venue
+      </Title>
       {context && (
         <div className="venue-search__context">
           {location.state?.returnToReview && (
-            <button
-              type="button"
-              className="venue-search__back"
+            <Button
+              variant="link"
               onClick={() => navigate("/review-queue", { state: location.state.returnToReview })}
             >
               Back to event review
-            </button>
+            </Button>
           )}
           <p>
             Finding a venue for <strong>{context.eventName}</strong>.
@@ -320,9 +351,9 @@ export default function VenueSearch({ role, userId, onRequestSubmitted } = {}) {
           value={filters.minCapacity}
           onChange={(e) => setFilters({ ...filters, minCapacity: e.target.value })}
         />
-        <button onClick={handleSearch} disabled={loading}>
+        <Button onClick={handleSearch} disabled={loading}>
           {loading ? "Searching..." : "Search venues"}
-        </button>
+        </Button>
       </div>
 
       <div className="venue-search__window">
@@ -353,9 +384,9 @@ export default function VenueSearch({ role, userId, onRequestSubmitted } = {}) {
           {renderFieldErrors("endsAt")}
         </div>
         {hasDates && (
-          <button type="button" onClick={clearDates} disabled={loading}>
+          <Button variant="secondary" onClick={clearDates} disabled={loading}>
             Clear dates
-          </button>
+          </Button>
         )}
       </div>
 
@@ -390,7 +421,9 @@ export default function VenueSearch({ role, userId, onRequestSubmitted } = {}) {
         Times are in your device's time zone ({deviceTimeZoneLabel()}).
       </p>
 
-      {error && <p className="venue-search__error">{error}</p>}
+      {loading && <LoadingText />}
+      {/* Hidden while a search runs, so Try again cannot start a second one. */}
+      {error && !loading && <ErrorNotice message={error} onRetry={retryable ? retry : undefined} />}
 
       {requestEvent && !eligibility.eligible && (
         <p className="venue-search__hint" role="status">
@@ -403,58 +436,70 @@ export default function VenueSearch({ role, userId, onRequestSubmitted } = {}) {
           key={requestingVenue.id}
           event={requestEvent}
           venue={requestingVenue}
+          headingLevel={asPage ? 2 : 3}
           // The venue the panel was opened for: a refusal names no venue.
           onSubmitted={(request) => {
             lockVenue(requestingVenue.id);
             onRequestSubmitted?.(request);
           }}
           onVenueAlreadyRequested={() => lockVenue(requestingVenue.id)}
-          onClose={() => setRequestingVenue(null)}
+          onClose={closeRequest}
         />
       )}
 
       {appliedWindow && (
         <p className="venue-search__window-note" role="status">
-          {`Venues booked or blocked between ${formatRange(appliedWindow.startsAt, appliedWindow.endsAt)} are not shown, including each venue's setup and turnaround.`}
+          {`Venues booked or blocked between ${formatVenuePeriod(appliedWindow.startsAt, appliedWindow.endsAt)} are not shown, including each venue's setup and turnaround.`}
         </p>
       )}
 
       <ul className="venue-search__results">
-        {results.map((venue) => (
-          <li key={venue.id}>
-            <strong>{venue.name}</strong>
-            {venue.retiredAt && <span className="venue-search__badge">Retired</span>}
-            {" "}— {venue.location}, seats up to {venue.maxCapacity}
-            <Link to={calendarHref(venue)} className="venue-search__calendar-link">
-              View calendar
-            </Link>
-            {requestEvent && !venue.retiredAt && (
-              <button
-                type="button"
-                className="venue-search__request"
-                aria-label={`Request this venue: ${venue.name}`}
-                disabled={!eligibility.eligible || requestedVenueIds.has(venue.id)}
-                aria-describedby={requestedVenueIds.has(venue.id) ? `${idPrefix}-requested-${venue.id}` : undefined}
-                onClick={() => setRequestingVenue(venue)}
-              >
-                Request this venue
-              </button>
-            )}
-            {requestEvent && !venue.retiredAt && requestedVenueIds.has(venue.id) && (
-              <p className="venue-search__hint" id={`${idPrefix}-requested-${venue.id}`}>
-                This event already has a request for this venue.
-              </p>
-            )}
-          </li>
-        ))}
-        {searched && !loading && results.length === 0 && (
-          <p>
-            {appliedIncludeRetired
-              ? "No venues match your search."
-              : "No active venues match your search."}
-          </p>
-        )}
+        {results.map((venue) => {
+          const locked = !eligibility.eligible || requestedVenueIds.has(venue.id);
+          return (
+            <li key={venue.id}>
+              <strong>{venue.name}</strong>
+              {venue.retiredAt && <StatusBadge tone={VENUE_TONES.retired}>Retired</StatusBadge>}
+              {" "}— {venue.location}, seats up to {venue.maxCapacity}
+              <Link to={calendarHref(venue)} className="venue-search__calendar-link">
+                View calendar
+              </Link>
+              {requestEvent && !venue.retiredAt && (
+                <Button
+                  variant="secondary"
+                  // A locked button cannot take focus, so it is not a place to return to.
+                  ref={locked ? undefined : rowRef(venue.id)}
+                  className="venue-search__request"
+                  aria-label={`Request this venue: ${venue.name}`}
+                  disabled={locked}
+                  aria-describedby={requestedVenueIds.has(venue.id) ? `${idPrefix}-requested-${venue.id}` : undefined}
+                  onClick={() => setRequestingVenue(venue)}
+                >
+                  Request this venue
+                </Button>
+              )}
+              {requestEvent && !venue.retiredAt && requestedVenueIds.has(venue.id) && (
+                <p className="venue-search__hint" id={`${idPrefix}-requested-${venue.id}`}>
+                  This event already has a request for this venue.
+                </p>
+              )}
+            </li>
+          );
+        })}
       </ul>
+      {/* status, not alert: an empty result is an answer, and focus stays in the form. */}
+      {searched && !loading && results.length === 0 && (
+        <div role="status">
+          <EmptyState
+            message={appliedIncludeRetired ? "No venues match your search." : "No active venues match your search."}
+            nextStep={
+              appliedIncludeRetired
+                ? "Try part of another name or location, or a lower minimum capacity."
+                : "Try part of another name or location, a lower minimum capacity or other dates."
+            }
+          />
+        </div>
+      )}
     </div>
   );
 }

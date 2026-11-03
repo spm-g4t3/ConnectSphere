@@ -27,7 +27,8 @@ const STATUS_MESSAGES = {
   404: "That event or venue no longer exists.",
 };
 
-const DEFAULT_MESSAGE = "Could not check this venue. Please try again.";
+// No "Please try again": Try again sits beside it, or the send checks again.
+const DEFAULT_MESSAGE = "Could not check this venue.";
 
 /**
  * The message for a failed check, for a code this build knows or a status.

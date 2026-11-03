@@ -66,8 +66,8 @@ describe("SCRUM486_AC6 an event's screen by its address", () => {
   // The 404 row left this table for SCRUM444_AC4_a_404_says_the_event_isnt_available_to_you.
   it.each([
     [403, "Only Event Coordinators and the Event Coordinator Lead can open an event here."],
-    [500, "This event request could not be loaded. Please try again."],
-    [undefined, "This event request could not be loaded. Please try again."],
+    [500, "This event request could not be loaded."],
+    [undefined, "This event request could not be loaded."],
   ])("SCRUM486_AC6_a_%s_loading_the_event_reads_%j", async (status, message) => {
     vi.mocked(getEventRequestForReview).mockRejectedValue(httpError(status));
     renderAt(`/event-requests/${ID}`);
@@ -109,7 +109,7 @@ describe("SCRUM486_AC6 an event's screen by its address", () => {
     vi.mocked(getEventRequestForReview).mockRejectedValue(httpError(500));
     renderAt(`/event-requests/${ID}`);
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("This event request could not be loaded. Please try again.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("This event request could not be loaded.");
   });
 
   it("SCRUM444_AC1_a_coordinator_it_is_not_assigned_to_never_reaches_the_decisions", async () => {

@@ -34,7 +34,6 @@ button { cursor: pointer; }
    one: cursor: wait is right for a login in flight, but a permanently
    disabled Edit is not-allowed, not a wait. */
 .dashboard button:disabled { cursor: not-allowed; opacity: 0.65; }
-.venue-search__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 0; padding: 8px 12px; }
 .auth-success { animation: auth-success-fade 3.5s ease-in-out forwards; background: #e8f7f1; border: 1px solid #b9e2d1; border-radius: 6px; color: #17684f; margin: 18px auto 0; max-width: 1080px; padding: 10px 14px; }
 @keyframes auth-success-fade {
   0%, 100% { opacity: 0; transform: translateY(-6px); }
@@ -42,7 +41,7 @@ button { cursor: pointer; }
 }
 .login-form, .placeholder-page, .dashboard, .venue-search { margin: 0 auto; max-width: 1080px; padding: clamp(42px, 8vw, 88px) 24px; }
 .login-form { background: var(--paper); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); margin-top: 9vh; max-width: 440px; padding: 38px; }
-.login-form h1, .placeholder-page h1, .dashboard h1 { color: var(--ink); font-size: clamp(2rem, 4vw, 3.25rem); letter-spacing: -0.05em; margin: 0 0 12px; }
+.login-form h1, .placeholder-page h1, .dashboard h1, .venue-search > h1 { color: var(--ink); font-size: clamp(2rem, 4vw, 3.25rem); letter-spacing: -0.05em; margin: 0 0 12px; }
 .login-form label { color: var(--muted); display: grid; font-size: 0.9rem; gap: 7px; margin: 20px 0; }
 .login-form input { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); padding: 12px; }
 .login-form input:focus { border-color: var(--teal); outline: 2px solid rgba(8, 127, 123, 0.16); }
@@ -142,10 +141,10 @@ button { cursor: pointer; }
 .my-event-requests { margin: 0 auto; max-width: 1080px; padding: 54px 24px; }
 .my-event-requests__header { align-items: center; display: flex; gap: 20px; justify-content: space-between; margin-bottom: 24px; }
 .my-event-requests__header h1 { color: var(--ink); font-size: 1.8rem; margin: 0; }
-.my-event-requests__header > button, .my-event-requests__item-actions button, .my-event-requests__back, .review-queue__back, .venue-search__back { background: var(--teal); border: 0; border-radius: 6px; color: white; padding: 10px 14px; }
+.my-event-requests__header > button, .my-event-requests__item-actions button, .my-event-requests__back { background: var(--teal); border: 0; border-radius: 6px; color: white; padding: 10px 14px; }
 .my-event-requests__header > button:hover, .my-event-requests__item-actions button:hover { background: var(--teal-dark); }
-.my-event-requests__back, .review-queue__back, .venue-search__back { background: transparent; border: 1px solid var(--line); color: var(--teal-dark); margin-bottom: 18px; }
-.my-event-requests__back:hover, .review-queue__back:hover, .venue-search__back:hover { background: #eef6f3; }
+.my-event-requests__back { background: transparent; border: 1px solid var(--line); color: var(--teal-dark); margin-bottom: 18px; }
+.my-event-requests__back:hover { background: #eef6f3; }
 .my-event-requests__list { display: grid; gap: 14px; list-style: none; margin: 0; padding: 0; }
 .my-event-requests__item { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 18px rgba(24, 61, 58, 0.05); display: block; padding: 20px; transition: background-color 0.8s ease, border-color 0.8s ease, box-shadow 0.8s ease; }
 /* SCRUM-172 (AC7): the event a notification was opened for. */
@@ -207,22 +206,82 @@ button { cursor: pointer; }
 .my-event-requests > .change-request-status-list { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 20px; }
 .my-event-requests > .change-request-status-list::before { content: "Change request history"; display: block; font-size: 1.1rem; font-weight: 700; margin-bottom: 4px; }
 .dashboard--coordinator > section { text-align: left; }
+.dashboard.dashboard--event-page { max-width: 1200px; }
 .dashboard--coordinator > section > ul { margin-top: 10px; }
-.dashboard--coordinator .coordinator-request-detail > section { border-top: 1px solid var(--line); margin-top: 18px; padding-top: 18px; }
-.dashboard--coordinator .coordinator-request-detail > section:first-of-type { border-top: 0; margin-top: 0; padding-top: 0; }
+.dashboard--coordinator .coordinator-request-detail__main > section,
+.dashboard--coordinator .coordinator-request-detail__main .ui-tabs__panel > section,
+.dashboard--coordinator .coordinator-request-detail__rail > section { border-top: 1px solid var(--color-line); margin-top: 18px; padding-top: 18px; }
+.dashboard--coordinator .coordinator-request-detail__main > section:first-child,
+.dashboard--coordinator .coordinator-request-detail__main .ui-tabs__panel > section:first-child,
+.dashboard--coordinator .coordinator-request-detail__rail > section:first-child { border-top: 0; margin-top: 0; padding-top: 0; }
+.coordinator-request-detail__main > .ui-tabs { margin-top: var(--space-5); }
 .dashboard--coordinator .coordinator-request-detail h3 { color: var(--teal-dark); font-size: 1rem; margin: 0 0 12px; }
-.dashboard--coordinator .coordinator-request-detail h2 { align-items: center; display: flex; flex-wrap: wrap; gap: 8px 12px; line-height: 1.25; }
-.dashboard--coordinator .coordinator-request-detail h2 .status-badge { margin-left: 0; }
-.dashboard--coordinator .coordinator-request-detail > p { line-height: 1.5; }
+.dashboard .coordinator-request-detail .coordinator-request-detail__title { line-height: 1.25; margin: 0 0 var(--space-2); overflow-wrap: anywhere; }
+.dashboard .coordinator-request-detail .coordinator-request-detail__badges { align-items: center; display: flex; flex-wrap: wrap; gap: var(--space-2); margin: 0 0 var(--space-2); }
+.dashboard .coordinator-request-detail .coordinator-request-detail__facts { color: var(--color-ink); margin: 0 0 var(--space-2); overflow-wrap: anywhere; }
+.dashboard--coordinator .coordinator-request-detail__header > p { line-height: 1.5; }
+/* The event screen sits in narrow dashboard cards and on its own wide page, so
+   it splits into main column and rail on its own width, not the viewport's. */
+.coordinator-request-detail { container-type: inline-size; }
+.coordinator-request-detail__body { display: grid; gap: var(--space-5); margin-top: var(--space-5); }
+.coordinator-request-detail__main, .coordinator-request-detail__rail { min-width: 0; }
+.coordinator-request-detail__rail { border-top: 1px solid var(--color-line); padding-top: var(--space-5); }
+@container (min-width: 900px) {
+  .coordinator-request-detail__body { align-items: start; grid-template-columns: minmax(0, 1fr) minmax(260px, 320px); }
+  .coordinator-request-detail__rail { border: 1px solid var(--color-line); border-radius: var(--radius-card); padding: var(--space-4); position: sticky; top: var(--space-4); }
+}
 .dashboard--coordinator .coordinator-request-detail li { line-height: 1.55; }
 .dashboard--coordinator .coordinator-request-detail li strong { color: var(--muted); display: block; margin-bottom: 3px; }
 .dashboard--coordinator .coordinator-request-detail li > span { display: block; overflow-wrap: anywhere; }
+.coordinator-request-detail__actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-3); }
+/* Outranks the main column's divider rules: the card draws its own border. */
+.dashboard--coordinator .coordinator-request-detail__main > section.coordinator-request-detail__next-step { background: var(--color-paper); border: 1px solid var(--color-line); border-radius: var(--radius-card); display: grid; gap: var(--space-3); margin-top: 0; padding: var(--space-4) var(--space-5); }
+.coordinator-request-detail__next-step > :is(h2, h3, h4, p) { margin: 0; }
+.coordinator-request-detail__next-step .coordinator-request-detail__waiting { display: grid; gap: var(--space-2); }
+.coordinator-decision { border: 0; display: grid; gap: var(--space-2); margin: 0; min-width: 0; padding: 0; }
+.coordinator-decision legend { color: var(--color-ink); font-weight: 700; margin-bottom: var(--space-1); padding: 0; }
+.coordinator-clarification .coordinator-decision__option { align-items: flex-start; border: 1px solid var(--color-line); border-radius: var(--radius-control); color: var(--color-ink); cursor: pointer; display: flex; gap: var(--space-3); padding: var(--space-3) var(--space-4); }
+.coordinator-clarification .coordinator-decision__option--selected { border-color: var(--color-accent); }
+.coordinator-decision__option input { accent-color: var(--color-accent); margin: var(--space-1) 0 0; }
+.coordinator-decision__text { display: grid; gap: var(--space-1); }
+.coordinator-decision__label { font-weight: 700; }
+.coordinator-decision__hint { color: var(--color-muted); font-size: var(--font-size-sm); }
+.coordinator-request-detail__stepper { display: grid; gap: var(--space-2); list-style: none; margin: 0 0 var(--space-4); padding: 0; }
+/* Row and start stated, so the .dashboard li rules neither stack each dot over
+   its label at phone width nor push the label to the far edge. */
+.coordinator-request-detail .coordinator-request-detail__stepper > li.coordinator-request-detail__step { align-items: center; color: var(--color-muted); display: flex; flex-direction: row; font-size: var(--font-size-md); gap: var(--space-2); justify-content: flex-start; padding: 0; }
+.coordinator-request-detail__step::before { border: 2px solid var(--color-line); border-radius: var(--radius-pill); box-sizing: border-box; content: ""; flex: none; height: 12px; width: 12px; }
+.coordinator-request-detail .coordinator-request-detail__stepper > li.coordinator-request-detail__step--done { color: var(--color-ink); }
+.coordinator-request-detail__step--done::before { background: var(--color-accent); border-color: var(--color-accent); }
+.coordinator-request-detail .coordinator-request-detail__stepper > li.coordinator-request-detail__step--current { color: var(--color-accent-dark); font-weight: 700; }
+.coordinator-request-detail__step--current::before { border-color: var(--color-accent); }
+/* One visible ring for every control and focused title on the coordinator's
+   screens, so keyboard users can always see where they are. */
+.dashboard--coordinator :is(a, button, input, select, textarea, summary, [tabindex]):focus-visible,
+.venue-search :is(a, button, input, select, textarea, [tabindex]):focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+/* Event and venue names can be one long word; they wrap inside a 360px screen. */
+.review-queue__title, .my-assigned-events__summary, .my-booking-requests__summary, .coordinator-attention__summary,
+.dashboard--coordinator .reassign-event > :is(h1, h2), .dashboard--coordinator .ui-confirm-dialog,
+.venue-search > h1, .venue-search__results li, .booking-request, .venue-suitability-panel { min-width: 0; overflow-wrap: anywhere; }
+/* At phone width every control on these screens is a 44px target, and a
+   dialog's buttons wrap instead of running past its edge. */
+@media (max-width: 720px) {
+  .dashboard--coordinator :is(.review-queue, .my-assigned-events, .my-booking-requests, .coordinator-attention, .coordinator-request-detail, .event-cancellation-page, .event-completion-page, .event-significant-change-page, .event-details-edit-page, .reassign-event, .ui-confirm-dialog) :is(button, select, summary, input:not([type="checkbox"], [type="radio"])) { min-height: 44px; }
+  .dashboard--coordinator .coordinator-request-detail p > a:only-child { align-items: center; display: inline-flex; min-height: 44px; }
+  .dashboard--coordinator :is(.event-cancellation-page, .event-significant-change-page, .coordinator-clarification__fields, .event-venue-finder__group, .booking-request__warning) label:has(> input:is([type="checkbox"], [type="radio"])) { align-items: center; display: flex; gap: var(--space-2); min-height: 44px; }
+  .dashboard--coordinator .ui-confirm-dialog .ui-confirm-dialog__actions { flex-wrap: wrap; }
+  /* Find a Venue is its own page, outside the coordinator's dashboard wrapper. */
+  .venue-search :is(button, select, input:not([type="checkbox"], [type="radio"])) { min-height: 44px; }
+  .venue-search :is(.venue-search__calendar-link, .venue-search__context > .ui-button--link) { align-items: center; display: inline-flex; min-height: 44px; }
+  .venue-search :is(.venue-search__retired, .booking-request__warning) label:has(> input[type="checkbox"]) { align-items: center; display: flex; gap: var(--space-2); min-height: 44px; }
+  .booking-request__details { grid-template-columns: 1fr; }
+}
 .dashboard--coordinator .coordinator-change-requests > li { display: block; }
 .dashboard--coordinator .coordinator-change-requests__actions { align-items: start; }
 /* The rule above makes every .dashboard p muted grey, which would render a
    failed retire in exactly the same voice as the empty-state text. Same
-   colour pair as .venue-search__error. */
-.dashboard .review-queue__error, .dashboard .unassigned-queue__error, .dashboard .venue-block-form__error, .dashboard .notification-inbox__row-error, .dashboard .venue-hold-form__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 6px 0 0; padding: 8px 12px; }
+   colour pair as .ui-error-notice. */
+.dashboard .unassigned-queue__error, .dashboard .venue-block-form__error, .dashboard .notification-inbox__row-error, .dashboard .venue-hold-form__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 6px 0 0; padding: 8px 12px; }
 /* NECESSARY, not cosmetic. .dashboard li above forces flex with
    justify-content: space-between, which on a checkbox row throws the box to
    one edge of the card and its label to the other with the whole width
@@ -417,9 +476,9 @@ button { cursor: pointer; }
 /* SCRUM-333. My events' status groups. Rows inherit `.dashboard li` (a flex
    row, details left and the Open button right); these only space the groups
    and lay out the left side. The finished groups are <details>, so their
-   heading is a <summary> styled to match the open groups' <h3>. */
+   heading is a <summary> styled to match the open groups' heading. */
 .my-assigned-events__group { margin-top: 20px; }
-.my-assigned-events__group h3, .my-assigned-events__group > summary { color: var(--ink); font-size: 0.95rem; font-weight: 700; margin: 0 0 4px; }
+.my-assigned-events__group > :is(h2, h3), .my-assigned-events__group > summary { color: var(--ink); font-size: 0.95rem; font-weight: 700; margin: 0 0 4px; }
 .my-assigned-events__group > summary { cursor: pointer; }
 .my-assigned-events__group > summary:hover { color: var(--teal-dark); }
 .my-assigned-events__count { color: var(--muted); font-weight: 400; }
@@ -477,13 +536,6 @@ button { cursor: pointer; }
 .dashboard--attendee .ui-error-notice { margin: 0 0 var(--space-3); }
 /* Event names can be one long word; wrap them inside a 360px screen. */
 .dashboard--attendee li, .dashboard--attendee .browse-event-details__success, .dashboard--attendee .ui-error-notice { overflow-wrap: anywhere; }
-.dashboard--coordinator .my-booking-requests button:disabled { cursor: not-allowed; opacity: 0.55; }
-.dashboard--coordinator .status--booking-pending { background: #fff6e5; color: #8a5a00; }
-.dashboard--coordinator .status--booking-conflicting { background: #fff0ee; color: #a43c32; }
-.dashboard--coordinator .status--booking-approved { background: #e8f7f1; color: #17684f; }
-.dashboard--coordinator .status--booking-flagged { background: #fff0ee; color: #a43c32; }
-.dashboard--coordinator .status--booking-rejected { background: #fff0ee; color: #a43c32; }
-.dashboard--coordinator .status--booking-withdrawn, .dashboard--coordinator .status--booking-cancelled, .dashboard--coordinator .status--booking-released, .dashboard--coordinator .status--booking-unknown { background: #eef2f1; color: var(--muted); }
 .clarification-overdue { color: #a43c32; font-weight: 700; }
 .my-assigned-events__needs-attention { background: #fff6e5; border-left: 3px solid #bb7a12; margin-top: 16px; padding: 12px; }
 .clarification-history { display: grid; gap: 10px; margin: 12px 0 0; }
@@ -538,9 +590,6 @@ button { cursor: pointer; }
 .coordinator-clarification__fields legend { color: var(--teal-dark); font-weight: 700; padding: 0 6px; }
 .coordinator-clarification__fields p { color: var(--muted); font-size: 0.86rem; margin: 0; }
 .coordinator-clarification__fields label { align-items: center; display: flex; gap: 8px; }
-.dashboard--coordinator .coordinator-request-detail__cancel { background: #a43c32; margin: 0 0 8px; }
-.dashboard--coordinator .coordinator-request-detail__cancel:hover { background: #842e27; }
-.dashboard--coordinator .coordinator-request-detail__complete { margin: 0 0 8px; }
 .coordinator-request-detail__complete-hint { color: var(--muted); font-size: 0.88rem; margin: 0 0 8px; }
 .coordinator-request-detail__completed-notice { color: #17684f; font-weight: 700; margin: 0 0 8px; }
 .coordinator-request-detail__closing-notes p { margin: 0 0 6px; overflow-wrap: anywhere; white-space: pre-wrap; }
@@ -554,8 +603,9 @@ button { cursor: pointer; }
 .coordinator-attention__meta { color: var(--muted); display: flex; flex-wrap: wrap; font-size: 0.85rem; gap: 4px 16px; }
 /* SCRUM-384: the Mark as completed panel, laid out as the cancellation panel is. */
 .event-completion-page { display: grid; gap: 18px; }
-.event-completion-page > h1 { color: var(--ink); font-size: clamp(1.8rem, 4vw, 2.7rem); letter-spacing: -0.04em; margin: 0; overflow-wrap: anywhere; }
-.event-completion-page__back { background: transparent !important; color: var(--teal-dark) !important; justify-self: start; padding: 6px 0 !important; text-decoration: underline; }
+.event-completion-page > :is(h1, h2) { color: var(--ink); font-size: clamp(1.8rem, 4vw, 2.7rem); letter-spacing: -0.04em; margin: 0; overflow-wrap: anywhere; }
+/* The page is a grid, which would stretch its Back link to the full width. */
+.event-completion-page > .ui-button, .event-cancellation-page > .ui-button, .event-significant-change-page > .ui-button, .event-details-edit-page > .ui-button { justify-self: start; }
 .event-completion-page__intro { margin: 0; }
 .event-completion { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); display: grid; gap: 18px; padding: clamp(20px, 4vw, 32px); }
 .event-completion form { display: grid; gap: 12px; }
@@ -564,22 +614,15 @@ button { cursor: pointer; }
 .event-completion textarea:focus { border-color: var(--teal); outline: 2px solid rgba(8, 127, 123, 0.16); }
 .event-completion__help { color: var(--muted); font-size: 0.86rem; margin: 0; }
 .event-completion__confirmation { display: grid; gap: 12px; }
-.event-completion__confirmation h2 { color: var(--teal-dark); margin: 0; }
 .event-completion__confirmation dl { margin: 0; }
 .event-completion__confirmation dt { color: var(--muted); font-size: 0.8rem; font-weight: 700; margin-bottom: 4px; }
 .event-completion__notes-preview { background: #f7faf9; border-left: 3px solid var(--teal); margin: 0; overflow-wrap: anywhere; padding: 10px 12px; white-space: pre-wrap; }
-.event-completion__actions { display: flex; flex-wrap: wrap; gap: 10px; }
-.event-completion__secondary { background: transparent !important; color: var(--teal-dark) !important; text-decoration: underline; }
 /* SCRUM-489: the safety check submission panel. A table, not a list, so
-   .dashboard li's spread-out flex row never reaches it. The badge's word carries
-   the meaning; the colours are the approved and action-required pairs above. */
+   .dashboard li's spread-out flex row never reaches it. */
 .safety-check-submission__checklist { border-collapse: collapse; margin: 4px 0 12px; width: 100%; }
 .safety-check-submission__checklist caption { color: var(--muted); font-size: 0.86rem; font-weight: 700; padding-bottom: 6px; text-align: left; }
 .safety-check-submission__checklist th, .safety-check-submission__checklist td { border-bottom: 1px solid var(--line); overflow-wrap: anywhere; padding: 8px; text-align: left; vertical-align: top; }
 .safety-check-submission__checklist thead th { color: var(--muted); font-size: 0.8rem; font-weight: 700; }
-.safety-check-submission__badge { border-radius: 999px; display: inline-block; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; padding: 3px 10px; text-transform: uppercase; white-space: nowrap; }
-.safety-check-submission__badge--met { background: #e8f7f1; color: #17684f; }
-.safety-check-submission__badge--outstanding { background: #fff0ee; color: #a43c32; }
 .safety-check-submission form { display: grid; gap: 8px; }
 .safety-check-submission__confirmation label { align-items: flex-start; display: flex; gap: 9px; }
 .safety-check-submission__confirmation p, .safety-check-submission__confirmation blockquote { margin: 4px 0; }
@@ -589,8 +632,7 @@ button { cursor: pointer; }
 .safety-check-submission__counter { font-variant-numeric: tabular-nums; }
 .safety-check-submission form > button { justify-self: start; margin-top: 6px; }
 .event-cancellation-page { display: grid; gap: 18px; }
-.event-cancellation-page > h1 { color: var(--ink); font-size: clamp(1.8rem, 4vw, 2.7rem); letter-spacing: -0.04em; margin: 0; overflow-wrap: anywhere; }
-.event-cancellation-page__back { background: transparent !important; color: var(--teal-dark) !important; justify-self: start; padding: 6px 0 !important; text-decoration: underline; }
+.event-cancellation-page > :is(h1, h2) { color: var(--ink); font-size: clamp(1.8rem, 4vw, 2.7rem); letter-spacing: -0.04em; margin: 0; overflow-wrap: anywhere; }
 .event-cancellation-page__intro { margin: 0; }
 .event-cancellation { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); display: grid; gap: 18px; padding: clamp(20px, 4vw, 32px); }
 .event-cancellation form { display: grid; gap: 16px; }
@@ -602,8 +644,8 @@ button { cursor: pointer; }
 .event-cancellation fieldset label, .event-cancellation__confirmation label { align-items: flex-start; color: var(--ink); display: flex; gap: 9px; }
 .event-cancellation input[type="radio"], .event-cancellation input[type="checkbox"] { flex: 0 0 auto; margin-top: 4px; }
 .event-cancellation__impact { border-top: 1px solid var(--line); display: grid; gap: 10px; padding-top: 18px; }
-.event-cancellation__impact h3 { color: var(--teal-dark); margin: 0; }
-.event-cancellation__impact h4 { margin: 0 0 6px; }
+.event-cancellation__impact > :is(h3, h4) { color: var(--teal-dark); margin: 0; }
+.event-cancellation__impact section > :is(h4, h5) { margin: 0 0 6px; }
 .event-cancellation__impact section ul { margin: 0; padding-left: 22px; }
 .event-cancellation__impact section li { line-height: 1.5; }
 .event-cancellation__impact p { color: var(--muted); font-size: 0.9rem; line-height: 1.5; margin: 0; }
@@ -612,7 +654,7 @@ button { cursor: pointer; }
 .event-cancellation dt { color: var(--muted); font-weight: 700; }
 .event-cancellation dd { margin: 0; overflow-wrap: anywhere; }
 .event-significant-change-page { display: grid; gap: 18px; }
-.event-significant-change-page > h1 { color: var(--ink); font-size: clamp(1.8rem, 4vw, 2.7rem); letter-spacing: -0.04em; margin: 0; overflow-wrap: anywhere; }
+.event-significant-change-page > :is(h1, h2) { color: var(--ink); font-size: clamp(1.8rem, 4vw, 2.7rem); letter-spacing: -0.04em; margin: 0; overflow-wrap: anywhere; }
 .event-significant-change { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); display: grid; gap: 18px; padding: clamp(20px, 4vw, 32px); }
 .event-significant-change form { display: grid; gap: 16px; }
 .event-significant-change form > label { color: var(--muted); display: grid; gap: 7px; }
@@ -621,7 +663,7 @@ button { cursor: pointer; }
 .event-significant-change__equipment { align-items: flex-start; color: var(--ink) !important; display: flex !important; gap: 9px; }
 .event-significant-change__equipment input { flex: 0 0 auto; margin-top: 4px; }
 .event-significant-change__impact, .event-significant-change__confirmation { border-top: 1px solid var(--line); display: grid; gap: 10px; padding-top: 18px; }
-.event-significant-change__impact h2 { color: var(--teal-dark); margin: 0; }
+.event-significant-change__impact > :is(h2, h3) { color: var(--teal-dark); margin: 0; }
 .event-significant-change__impact { gap: 16px; }
 .event-significant-change__stats { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
 .event-significant-change__stat { background: #f4f8f7; border: 1px solid var(--line); border-radius: 8px; display: grid; gap: 2px; padding: 12px 14px; }
@@ -629,7 +671,7 @@ button { cursor: pointer; }
 .event-significant-change__stat span { color: var(--muted); font-size: 0.85rem; }
 .event-significant-change__notice { background: #fff7e6; border: 1px solid #f0d9a8; border-radius: 8px; color: var(--ink); margin: 0; padding: 10px 14px; }
 .event-significant-change__group { display: grid; gap: 8px; }
-.event-significant-change__group h3 { color: var(--ink); font-size: 1rem; margin: 0; }
+.event-significant-change__group > :is(h3, h4) { color: var(--ink); font-size: 1rem; margin: 0; }
 .event-significant-change__group ul { display: grid; gap: 8px; list-style: none; margin: 0; padding: 0; }
 .event-significant-change__group li { border: 1px solid var(--line); border-radius: 8px; display: grid; gap: 2px; padding: 10px 14px; }
 .event-significant-change__item-name { color: var(--ink); font-weight: 600; }
@@ -639,7 +681,7 @@ button { cursor: pointer; }
 
 /* SCRUM-387: the coordinator's direct edit, laid out as the significant change page. */
 .event-details-edit-page { display: grid; gap: 18px; }
-.event-details-edit-page > h1 { color: var(--ink); font-size: clamp(1.8rem, 4vw, 2.7rem); letter-spacing: -0.04em; margin: 0; overflow-wrap: anywhere; }
+.event-details-edit-page > :is(h1, h2) { color: var(--ink); font-size: clamp(1.8rem, 4vw, 2.7rem); letter-spacing: -0.04em; margin: 0; overflow-wrap: anywhere; }
 .event-details-edit { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); display: grid; gap: 18px; padding: clamp(20px, 4vw, 32px); }
 .event-details-edit form { display: grid; gap: 16px; }
 .event-details-edit__field { display: grid; gap: 6px; }
@@ -668,7 +710,6 @@ button { cursor: pointer; }
 .event-change-history__state[role="alert"] { color: #a43c32; }
 .event-significant-change__confirmation label { align-items: flex-start; color: var(--ink); display: flex; gap: 9px; }
 .event-significant-change__confirmation input { flex: 0 0 auto; margin-top: 4px; }
-.dashboard--coordinator .coordinator-request-detail__significant-change { margin: 0 0 8px; }
 /* An organiser with no name on record is shown by id, which must read as an
    identifier, not prose. The same treatment venue history gives its uuids. */
 .dashboard--coordinator .my-assigned-events code { background: #eef2f1; border-radius: 4px; color: var(--muted); font-size: 0.78rem; padding: 2px 6px; }
@@ -712,10 +753,10 @@ button { cursor: pointer; }
    teal. */
 .dashboard--coordinator .coordinator-reassign { margin-top: 14px; }
 .dashboard--coordinator .coordinator-reassign__notice { background: #e8f7f1; border-radius: 6px; color: #17684f; margin: 14px 0 0; padding: 8px 12px; }
-.dashboard--coordinator .reassign-event h2 { margin-bottom: 8px; }
+.dashboard--coordinator .reassign-event > :is(h1, h2) { margin-bottom: 8px; }
 .dashboard--coordinator .reassign-event__form { display: grid; gap: 14px; margin-top: 16px; max-width: 560px; }
-.dashboard--coordinator .reassign-event__form label { color: var(--muted); display: grid; gap: 7px; }
-.dashboard--coordinator .reassign-event__form select, .dashboard--coordinator .reassign-event__form textarea { background: white; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; padding: 10px 12px; }
+.dashboard--coordinator .reassign-event__form label { color: var(--muted); display: grid; gap: 7px; min-width: 0; }
+.dashboard--coordinator .reassign-event__form select, .dashboard--coordinator .reassign-event__form textarea { background: white; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; min-width: 0; padding: 10px 12px; }
 .dashboard--coordinator .reassign-event__form textarea { min-height: 96px; resize: vertical; }
 .dashboard--coordinator .reassign-event__form select:focus, .dashboard--coordinator .reassign-event__form textarea:focus { border-color: var(--teal); outline: 2px solid rgba(8, 127, 123, 0.16); }
 .dashboard--coordinator .reassign-event__hint { font-size: 0.84rem; margin: -6px 0 0; }
@@ -740,7 +781,7 @@ button { cursor: pointer; }
 .unassigned-queue__actions { display: flex; flex-wrap: wrap; gap: 8px; }
 /* The waiting count beside the title reads as a note, not part of the name. */
 .unassigned-queue__count { color: var(--color-muted); font-weight: 400; }
-.dashboard--coordinator-lead > section > .ui-button--link { margin-bottom: var(--space-3); }
+.dashboard--coordinator-lead > section > .ui-button--link, .dashboard--coordinator > section > .ui-button--link { margin-bottom: var(--space-3); }
 /* One visible ring for every control and focused title on the Lead's screens,
    so keyboard users can always see where they are. */
 .dashboard--coordinator-lead :is(a, button, input, select, textarea, [tabindex]):focus-visible,
@@ -840,7 +881,7 @@ button { cursor: pointer; }
    than as "you arrived here from somewhere". */
 .venue-search__context { background: var(--paper); border: 1px solid var(--line); border-left: 3px solid var(--teal); border-radius: 8px; margin-bottom: 18px; padding: 12px 16px; }
 .venue-search__context p { color: var(--muted); margin: 4px 0; }
-.venue-search__context .venue-search__back { margin: 0 0 10px; }
+.venue-search__context > .ui-button--link { margin: 0 0 var(--space-2); }
 .venue-search__filters { align-items: end; display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr) minmax(160px, 220px) auto; }
 .venue-search__filters input, .venue-search__window input { border: 1px solid var(--line); border-radius: 6px; min-width: 0; padding: 10px 12px; }
 /* SCRUM-130: the optional date window sits on its own row under the filter
@@ -852,13 +893,13 @@ button { cursor: pointer; }
 .venue-search__field-error { color: #a43c32; font-size: 0.84rem; list-style: none; margin: 6px 0 0; padding: 0; }
 .venue-search__retired { margin-top: 12px; }
 .venue-search__retired label { align-items: center; color: var(--muted); display: inline-flex; font-size: 0.9rem; gap: 8px; }
-.venue-search__badge { margin-left: 10px; }
+.venue-search__results .ui-status-badge { margin-left: var(--space-2); }
 .venue-search__hint, .venue-search__window-note { color: var(--muted); font-size: 0.84rem; margin: 8px 0; }
 /* SCRUM-254: "Request this venue" and the request panel it opens. */
 .venue-search__request { margin-left: 12px; }
 .venue-search__request:disabled, .booking-request button:disabled { cursor: not-allowed; opacity: 0.55; }
 .booking-request { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; margin: 18px 0; padding: 14px 16px; }
-.booking-request h3 { margin: 0 0 10px; }
+.booking-request > :is(h2, h3, h4) { margin: 0 0 10px; }
 .booking-request button { background: var(--teal); border: 0; border-radius: 6px; color: white; padding: 10px 16px; }
 .booking-request__details { display: grid; gap: 6px 16px; grid-template-columns: minmax(140px, 220px) minmax(0, 1fr); margin: 0 0 14px; }
 .booking-request__details dt { color: var(--muted); font-size: 0.9rem; }
@@ -867,9 +908,9 @@ button { cursor: pointer; }
 .booking-request__notes textarea { border: 1px solid var(--line); border-radius: 6px; font: inherit; padding: 10px 12px; }
 .booking-request__field-error { color: #a43c32; font-size: 0.84rem; list-style: none; margin: 6px 0 0; padding: 0; }
 .booking-request__warning { background: #fff6e5; border-left: 3px solid #8a5a00; border-radius: 8px; margin: 14px 0; padding: 12px 14px; }
-.booking-request__warning h4 { color: #8a5a00; margin: 0 0 8px; }
+.booking-request__warning > :is(h3, h4, h5) { color: #8a5a00; margin: 0 0 8px; }
 .booking-request__warning label { align-items: flex-start; display: flex; gap: 8px; }
-.booking-request__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 12px 0 0; padding: 8px 12px; }
+.booking-request .ui-error-notice, .venue-search .ui-error-notice { margin-top: var(--space-3); }
 .booking-request__conflicts { list-style: none; margin: 10px 0 0; padding: 0; }
 .booking-request__conflicts li { border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 6px 12px; padding: 8px 0; }
 /* SCRUM-484 (AC7). The setup/turnaround note on a block row takes a line of
@@ -928,14 +969,6 @@ button.event-registration-page__back { background: none; border: 0; cursor: poin
 .coordinator-clarification__amendments > summary { color: var(--teal-dark); cursor: pointer; font-size: 0.9rem; font-weight: 700; }
 .coordinator-clarification__amendments[open] { display: grid; gap: 10px; }
 .coordinator-review-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.coordinator-review-actions button { transition: background-color 140ms ease, box-shadow 140ms ease; }
-.coordinator-review-actions__approve { background: #17684f !important; }
-.coordinator-review-actions__approve:hover { background: #10533e !important; }
-.coordinator-review-actions__reject { background: #a43c32 !important; }
-.coordinator-review-actions__reject:hover { background: #842d26 !important; }
-.coordinator-review-actions__return { background: #8a5a00 !important; }
-.coordinator-review-actions__return:hover { background: #704800 !important; }
-.coordinator-review-actions button:focus-visible { outline: 3px solid rgba(23, 36, 43, 0.45); outline-offset: 2px; }
 .coordinator-change-requests li { border-top: 1px solid var(--line); padding: 12px 0; }
 .coordinator-change-requests li:first-child { border-top: 0; }
 .coordinator-change-requests p { color: var(--ink); margin: 6px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -999,7 +1032,6 @@ button.event-registration-page__back { background: none; border: 0; cursor: poin
 .venue-calendar__header { align-items: center; display: flex; flex-wrap: wrap; gap: 8px 14px; }
 .venue-calendar__header .eyebrow { flex-basis: 100%; }
 .venue-calendar__header h1 { color: var(--ink); font-size: clamp(1.8rem, 3.5vw, 2.6rem); letter-spacing: -0.04em; margin: 0; overflow-wrap: anywhere; }
-.venue-search__badge { background: #eef2f1; border-radius: 999px; color: var(--muted); font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; padding: 3px 10px; text-transform: uppercase; }
 .venue-calendar__toolbar { align-items: center; display: flex; flex-wrap: wrap; gap: 12px 24px; justify-content: space-between; margin: 24px 0 8px; }
 .venue-calendar__nav, .venue-calendar__views { display: flex; flex-wrap: wrap; gap: 6px; }
 .venue-calendar button:focus-visible { outline: 3px solid rgba(8, 127, 123, 0.35); outline-offset: 2px; }
@@ -1112,14 +1144,13 @@ button.event-registration-page__back { background: none; border: 0; cursor: poin
 .dashboard--coordinator .coordinator-request-detail .event-venue-finder__option { align-items: center; display: inline-flex; font-size: 0.9rem; gap: 8px; }
 .dashboard--coordinator .coordinator-request-detail .event-venue-finder__hint { color: var(--muted); font-size: 0.84rem; margin: 0; }
 .dashboard--coordinator .coordinator-request-detail .event-venue-finder__actions { display: flex; justify-content: flex-start; }
-.dashboard--coordinator .coordinator-request-detail .event-venue-finder__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 0; padding: 8px 12px; }
 .dashboard--coordinator .coordinator-request-detail .event-venue-finder__field-error { color: #a43c32; font-size: 0.84rem; list-style: none; margin: 0; padding: 0; }
 .dashboard--coordinator .coordinator-request-detail .event-venue-finder__field-error li { border-top: 0; display: block; padding: 0; }
 .dashboard--coordinator .coordinator-request-detail .event-venue-finder__no-match { color: var(--muted); font-size: 0.9rem; margin: 0; }
 .dashboard--coordinator .coordinator-request-detail .event-venue-finder__results { list-style: none; margin: 0; padding: 0; }
 .dashboard--coordinator .coordinator-request-detail .event-venue-finder__results li { border-top: 1px solid var(--line); display: block; padding: 8px 0; }
 .dashboard--coordinator .coordinator-request-detail .event-venue-finder__results li:first-child { border-top: 0; }
-.dashboard--coordinator .coordinator-request-detail .event-venue-finder__result h4 { font-size: 1rem; margin: 0 0 6px; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__result > :is(h3, h4) { font-size: 1rem; margin: 0 0 6px; }
 .dashboard--coordinator .coordinator-request-detail .event-venue-finder__result dl { display: grid; gap: 4px; margin: 0; }
 .dashboard--coordinator .coordinator-request-detail .event-venue-finder__result-row { display: grid; gap: 2px 16px; grid-template-columns: minmax(140px, 200px) minmax(0, 1fr); }
 .dashboard--coordinator .coordinator-request-detail .event-venue-finder__result dt { color: var(--muted); font-size: 0.86rem; font-weight: 700; }
@@ -1137,8 +1168,7 @@ button.event-registration-page__back { background: none; border: 0; cursor: poin
 .visually-hidden { border: 0; clip: rect(0 0 0 0); height: 1px; margin: -1px; overflow: hidden; padding: 0; position: absolute; white-space: nowrap; width: 1px; }
 .venue-suitability-panel__note { color: var(--muted); font-size: 0.9em; margin: 0 0 10px; }
 .venue-suitability-panel { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; margin: 18px 0; padding: 14px 16px; }
-.venue-suitability-panel h3 { margin: 0 0 10px; }
-.venue-suitability-panel__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 0; padding: 8px 12px; }
+.venue-suitability-panel > :is(h2, h3, h4) { margin: 0 0 10px; }
 .venue-suitability-panel__loading { color: var(--muted); margin: 0; }
 .venue-suitability-panel__actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
 .venue-suitability__verdict { border-radius: 6px; font-weight: 700; margin: 0 0 10px; padding: 8px 12px; }
@@ -1149,7 +1179,7 @@ button.event-registration-page__back { background: none; border: 0; cursor: poin
 .venue-suitability__criterion--met strong { color: #17684f; }
 .venue-suitability__criterion--unmet strong { color: #a43c32; }
 .venue-suitability__criterion-detail { overflow-wrap: anywhere; }
-.venue-suitability h4 { font-size: 0.95rem; margin: 0 0 6px; }
+.venue-suitability > :is(h4, h5, h6) { font-size: 0.95rem; margin: 0 0 6px; }
 .venue-suitability__checked { display: grid; gap: 4px; margin: 0; }
 .venue-suitability__checked-row { display: grid; gap: 2px 16px; grid-template-columns: minmax(140px, 200px) minmax(0, 1fr); }
 .venue-suitability__checked dt { color: var(--muted); font-size: 0.86rem; font-weight: 700; }
@@ -1207,7 +1237,7 @@ button.event-registration-page__back { background: none; border: 0; cursor: poin
   .assigned-events .my-assigned-events__summary { overflow-wrap: anywhere; }
 }
 /* The row title has no column gap, so the badge keeps the space the old per-screen badge had. */
-.assigned-events .my-assigned-events__title .ui-status-badge { margin-left: var(--space-2); }
+.my-assigned-events__title .ui-status-badge, .my-booking-requests__title .ui-status-badge, .review-queue__title .ui-status-badge { margin-left: var(--space-2); }
 
 /* SCRUM-258: Venue Staff's pending booking requests. Each card is a block, not
    the flex row .dashboard li makes it, and its toggle reads as a row rather

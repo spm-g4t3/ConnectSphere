@@ -10,6 +10,7 @@ import userEvent from "@testing-library/user-event";
 
 import EventCompletionPanel from "../../src/components/EventCompletionPanel.jsx";
 import { completeEventRequest } from "../../src/services/eventRequestService";
+import { stubDialogElement } from "../helpers/dialog.js";
 
 vi.mock("../../src/services/eventRequestService", () => ({
   completeEventRequest: vi.fn(),
@@ -31,6 +32,10 @@ const refusal = (status, data = {}) => Object.assign(new Error("request failed")
 const notesBox = () => screen.getByLabelText("Closing notes (optional)");
 const continueButton = () => screen.getByRole("button", { name: "Continue" });
 const confirmButton = () => screen.getByRole("button", { name: "Yes, mark as completed" });
+const CONFIRM_TITLE = "Mark IS212 Industry Night as completed?";
+
+// ConfirmDialog calls showModal and close, which jsdom lacks.
+stubDialogElement();
 
 function renderPanel(props = {}) {
   const onCompleted = vi.fn();
@@ -116,9 +121,7 @@ describe("SCRUM379 the confirmation step", () => {
 
     await user.click(continueButton());
 
-    expect(screen.getByRole("group", { name: "Confirm completion" })).toBeInTheDocument();
-    expect(screen.getByText(/This\s+cannot be undone/)).toBeInTheDocument();
-    expect(screen.queryByLabelText("Closing notes (optional)")).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: CONFIRM_TITLE })).toHaveTextContent("This cannot be undone.");
   });
 
   it("SCRUM379_AC2_the_summary_shows_the_notes_as_they_will_be_sent", async () => {
@@ -289,9 +292,12 @@ describe("SCRUM379 refusals", () => {
     await user.click(confirmButton());
     await screen.findByRole("alert");
 
-    expect(confirmButton()).toBeEnabled();
-    expect(screen.getByText("Keep these", { selector: "dd" })).toBeInTheDocument();
+    // The dialog closes so the error can be read; the notes wait in the box.
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(notesBox()).toHaveValue("Keep these");
 
+    await user.click(continueButton());
+    expect(screen.getByText("Keep these", { selector: "dd" })).toBeInTheDocument();
     await user.click(confirmButton());
 
     await waitFor(() => expect(onCompleted).toHaveBeenCalledTimes(1));
@@ -300,11 +306,11 @@ describe("SCRUM379 refusals", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("SCRUM379_AC1_going_back_clears_the_error", async () => {
+  it("SCRUM379_AC1_continuing_again_clears_the_error", async () => {
     const { user } = await failWith(refusal(500));
     await screen.findByRole("alert");
 
-    await user.click(screen.getByRole("button", { name: "Edit notes" }));
+    await user.click(continueButton());
 
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
@@ -367,7 +373,7 @@ describe("SCRUM379 the notes limit", () => {
 
     await user.click(continueButton());
 
-    expect(screen.queryByRole("group", { name: "Confirm completion" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(completeEventRequest).not.toHaveBeenCalled();
   });
 });

@@ -24,6 +24,7 @@ import {
   outcomeLabel,
 } from "../services/changeRequestDisplay";
 import { CancellationImpact } from "./EventCancellationPanel";
+import Button from "./ui/Button";
 
 // AC2: the statuses process_change_request (036) accepts a decision in.
 const PROCESSABLE_STATUSES = new Set([
@@ -75,12 +76,13 @@ function ImpactStat({ label, value }) {
   );
 }
 
-function SignificantImpact({ impact }) {
+function SignificantImpact({ impact, headingLevel }) {
+  const Heading = `h${headingLevel}`;
   const bookings = impact.venueBookings ?? [];
   const pending = impact.pendingBookingRequests ?? [];
   return (
     <div className="event-significant-change__impact" aria-label="Significant change impact preview">
-      <h4>What the significant part will affect</h4>
+      <Heading>What the significant part will affect</Heading>
       <div className="event-significant-change__stats">
         <ImpactStat label="Venue bookings to flag" value={bookings.length} />
         <ImpactStat label="Equipment reservations to flag" value={(impact.equipmentReservations ?? []).length} />
@@ -126,8 +128,10 @@ function ChangeRow({ row, changeClass }) {
  * @param {boolean} props.canProcess    the signed-in user holds the event
  * @param {() => void} [props.onProcessed]  re-read the event: fields and status may have changed
  * @param {(text: string) => void} [props.onEquipmentAccepted]  hand off to the equipment section
+ * @param {number} [props.headingLevel]  the section's heading level
  */
-export default function ChangeRequestReviewPanel({ eventRequest, canProcess, onProcessed, onEquipmentAccepted }) {
+export default function ChangeRequestReviewPanel({ eventRequest, canProcess, onProcessed, onEquipmentAccepted, headingLevel = 3 }) {
+  const Heading = `h${headingLevel}`;
   const [listed, setListed] = useState(null);
   const [version, setVersion] = useState(0);
   const [review, setReview] = useState(null);
@@ -296,7 +300,7 @@ export default function ChangeRequestReviewPanel({ eventRequest, canProcess, onP
         {preview.revertsEvent && (
           <p className="event-significant-change__notice">Accepting returns this event to Approved.</p>
         )}
-        {preview.impact && <SignificantImpact impact={preview.impact} />}
+        {preview.impact && <SignificantImpact impact={preview.impact} headingLevel={headingLevel + 1} />}
 
         {mode === "cancel" ? (
           <div className="change-request-review__cancel">
@@ -305,9 +309,9 @@ export default function ChangeRequestReviewPanel({ eventRequest, canProcess, onP
               Cancellation reason
               <textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)} />
             </label>
-            <button type="button" disabled={busy || !trimmed || tooLong} onClick={() => decide("approved", trimmed)}>
+            <Button variant="danger" disabled={busy || !trimmed || tooLong} onClick={() => decide("approved", trimmed)}>
               {busy ? "Cancelling..." : "Confirm cancellation"}
-            </button>
+            </Button>
           </div>
         ) : mode === "decline" ? (
           <div className="change-request-review__decline">
@@ -316,9 +320,9 @@ export default function ChangeRequestReviewPanel({ eventRequest, canProcess, onP
               <textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)} />
             </label>
             {tooLong && <p className="coordinator-clarification__error">The reason must be 2,000 characters or fewer.</p>}
-            <button type="button" disabled={busy || !trimmed || tooLong} onClick={() => decide("rejected", trimmed)}>
+            <Button disabled={busy || !trimmed || tooLong} onClick={() => decide("rejected", trimmed)}>
               {busy ? "Declining..." : "Confirm decline"}
-            </button>
+            </Button>
           </div>
         ) : (
           <div className="change-request-review__accept">
@@ -329,29 +333,28 @@ export default function ChangeRequestReviewPanel({ eventRequest, canProcess, onP
               </label>
             )}
             {tooLong && <p className="coordinator-clarification__error">The note must be 2,000 characters or fewer.</p>}
-            <button
-              type="button"
+            <Button
               disabled={busy || invalid.length > 0 || tooLong || (isOther && !trimmed)}
               onClick={() => (isCancellation ? openCancellation() : decide("approved", trimmed || undefined))}
             >
               {busy ? "Saving..." : "Accept"}
-            </button>
-            <button type="button" disabled={busy} onClick={() => { setMode("decline"); setNote(""); }}>
+            </Button>
+            <Button variant="secondary" disabled={busy} onClick={() => { setMode("decline"); setNote(""); }}>
               Decline
-            </button>
+            </Button>
           </div>
         )}
         {cardLines(review.group.id)}
-        <button type="button" className="change-request-review__close" onClick={closeReview}>
+        <Button variant="secondary" className="change-request-review__close" onClick={closeReview}>
           Close review
-        </button>
+        </Button>
       </div>
     );
   }
 
   return (
     <section className="change-request-review" aria-label="Organiser change requests">
-      <h3>Organiser change requests</h3>
+      <Heading>Organiser change requests</Heading>
       {listed?.id !== eventRequest.id && <p>Loading change requests...</p>}
       {listed?.id === eventRequest.id && listed.error && (
         <p className="coordinator-clarification__error" role="alert">{listed.error}</p>
@@ -385,7 +388,7 @@ export default function ChangeRequestReviewPanel({ eventRequest, canProcess, onP
               {review?.group.id !== group.id && cardLines(group.id)}
               {group.open && processable && review?.group.id !== group.id && (
                 <div className="coordinator-change-requests__actions">
-                  <button type="button" disabled={busy} onClick={() => loadPreview(group)}>Review</button>
+                  <Button disabled={busy} onClick={() => loadPreview(group)}>Review</Button>
                 </div>
               )}
             </li>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   applySignificantEventChange,
   previewSignificantEventChange,
@@ -7,7 +7,9 @@ import {
   toDatetimeLocalValue,
   toOffsetIsoString,
 } from "../services/datetimeFormat";
-import { formatTimestamp } from "../services/displayFormat";
+import { formatDateTimeRange } from "../services/displayFormat";
+import Button from "./ui/Button";
+import ErrorNotice from "./ui/ErrorNotice";
 
 function changedFields(eventRequest, fields, equipmentChange) {
   const changes = {};
@@ -48,11 +50,12 @@ function ImpactStat({ label, value }) {
   );
 }
 
-function ImpactList({ title, items, name }) {
+function ImpactList({ title, items, name, headingLevel }) {
   if (items.length === 0) return null;
+  const Heading = `h${headingLevel}`;
   return (
     <section className="event-significant-change__group">
-      <h3>{title}</h3>
+      <Heading>{title}</Heading>
       <ul>
         {items.map((item) => (
           <li key={item.id}>
@@ -64,12 +67,12 @@ function ImpactList({ title, items, name }) {
             </span>
             {item.startsAt && item.endsAt && (
               <span className="event-significant-change__item-detail">
-                {formatTimestamp(item.startsAt, "Not recorded")} – {formatTimestamp(item.endsAt, "Not recorded")}
+                {formatDateTimeRange(item.startsAt, item.endsAt, "Not recorded")}
               </span>
             )}
             {item.occupiedStartsAt && item.occupiedEndsAt && (
               <span className="event-significant-change__item-detail">
-                Occupied {formatTimestamp(item.occupiedStartsAt, "Not recorded")} – {formatTimestamp(item.occupiedEndsAt, "Not recorded")}
+                Occupied {formatDateTimeRange(item.occupiedStartsAt, item.occupiedEndsAt, "Not recorded")}
               </span>
             )}
           </li>
@@ -79,11 +82,19 @@ function ImpactList({ title, items, name }) {
   );
 }
 
+/**
+ * @param {object} props
+ * @param {number} [props.headingLevel]  the page title's level: 1 on the event's
+ *   own page, 2 inside a list whose title is the h1
+ */
 export default function SignificantEventChangePanel({
   eventRequest,
   onBack,
   onApplied,
+  headingLevel = 1,
 }) {
+  const Title = `h${headingLevel}`;
+  const ImpactHeading = `h${headingLevel + 1}`;
   const [fields, setFields] = useState(() => ({
     proposedStart: toDatetimeLocalValue(eventRequest.proposedStart),
     proposedEnd: toDatetimeLocalValue(eventRequest.proposedEnd),
@@ -99,6 +110,12 @@ export default function SignificantEventChangePanel({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  const headingRef = useRef(null);
+
+  // The button that opened this page has gone, so focus starts on its title.
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, []);
 
   function invalidatePreview(update) {
     update();
@@ -164,16 +181,12 @@ export default function SignificantEventChangePanel({
   return (
     <main className="event-significant-change-page">
       {onBack && (
-        <button
-          className="event-cancellation-page__back"
-          type="button"
-          onClick={onBack}
-        >
+        <Button variant="link" onClick={onBack}>
           Back to event
-        </button>
+        </Button>
       )}
       <p className="eyebrow">Coordinator action</p>
-      <h1>Significant change: {eventRequest.eventName}</h1>
+      <Title ref={headingRef} tabIndex={-1}>Significant change: {eventRequest.eventName}</Title>
       <p>Preview every affected arrangement before confirming. Nothing is automatically cancelled or un-booked.</p>
       <section className="event-significant-change">
         <form onSubmit={handlePreview}>
@@ -250,15 +263,15 @@ export default function SignificantEventChangePanel({
               onChange={(event) => invalidatePreview(() => setReason(event.target.value))}
             />
           </label>
-          <button type="submit" disabled={loading || saving}>
+          <Button type="submit" disabled={loading || saving}>
             {loading ? "Loading impact..." : impact ? "Refresh impact preview" : "Preview significant change"}
-          </button>
+          </Button>
         </form>
 
         {impact && (
           <>
             <div className="event-significant-change__impact" aria-label="Significant change impact preview">
-              <h2>What this change will affect</h2>
+              <ImpactHeading>What this change will affect</ImpactHeading>
               <div className="event-significant-change__stats">
                 <ImpactStat label="Venue bookings to flag" value={(impact.venueBookings ?? []).length} />
                 <ImpactStat label="Equipment reservations to flag" value={(impact.equipmentReservations ?? []).length} />
@@ -270,11 +283,13 @@ export default function SignificantEventChangePanel({
                 </p>
               )}
               <ImpactList
+                headingLevel={headingLevel + 2}
                 title="Venue bookings"
                 items={impact.venueBookings ?? []}
                 name={(item) => `${item.venueName || "Venue"}${item.venueLocation ? ` — ${item.venueLocation}` : ""}`}
               />
               <ImpactList
+                headingLevel={headingLevel + 2}
                 title="Equipment reservations"
                 items={impact.equipmentReservations ?? []}
                 name={(item) => `${item.equipmentName || "Equipment"} (quantity ${item.quantity})`}
@@ -282,6 +297,7 @@ export default function SignificantEventChangePanel({
               {(impact.pendingBookingRequests ?? []).length > 0 && (
                 <>
                   <ImpactList
+                    headingLevel={headingLevel + 2}
                     title="Pending venue requests still for the old time"
                     items={impact.pendingBookingRequests}
                     name={(item) => item.venueName || "Venue"}
@@ -309,17 +325,17 @@ export default function SignificantEventChangePanel({
                 />
                 I have reviewed this impact and confirm applying the significant change.
               </label>
-              <button
-                type="button"
+              <Button
                 onClick={handleApply}
                 disabled={!confirmed || saving || loading}
               >
                 {saving ? "Applying change..." : "Confirm significant change"}
-              </button>
+              </Button>
             </div>
           </>
         )}
-        {error && <p role="alert">{error}</p>}
+        {/* No Try again: the preview and the change are both resent from this form. */}
+        {error && <ErrorNotice message={error} />}
       </section>
     </main>
   );

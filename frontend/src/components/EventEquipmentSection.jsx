@@ -40,6 +40,7 @@ import {
 import { describeFlaggedLine } from "../services/equipmentFlagDisplay";
 import { SERVER_TEXT_MAX_LENGTH } from "../services/textLimits";
 import "./EventEquipmentSection.css";
+import Button from "./ui/Button";
 
 // Keyed by status code, as the panel's other tables are: the database's own
 // messages are written for developers.
@@ -123,8 +124,11 @@ function FlaggedReservations({ line }) {
  * @param {string}  props.requestId   the event request's id
  * @param {string}  props.status      the event's current status, e.g. "approved"
  * @param {boolean} props.canEdit     true for the event's assigned coordinator
+ * @param {number}  [props.headingLevel]  the section's heading level
  */
-export default function EventEquipmentSection({ requestId, status, canEdit }) {
+export default function EventEquipmentSection({ requestId, status, canEdit, headingLevel = 3 }) {
+  const Heading = `h${headingLevel}`;
+  const SubHeading = `h${headingLevel + 1}`;
   const [equipment, setEquipment] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
@@ -329,12 +333,12 @@ export default function EventEquipmentSection({ requestId, status, canEdit }) {
 
   return (
     <section className="event-equipment">
-      <h3>
+      <Heading>
         Equipment needed
         {request && (
           <span className="event-equipment__status">{request.statusLabel}</span>
         )}
-      </h3>
+      </Heading>
 
       {request?.status === "cannot_be_fully_arranged" && (
         <p className="event-equipment__alert" role="status">
@@ -391,12 +395,12 @@ export default function EventEquipmentSection({ requestId, status, canEdit }) {
                     </p>
                   )}
                   <div className="event-equipment__actions">
-                    <button type="submit" disabled={busy}>
+                    <Button type="submit" disabled={busy}>
                       {busy ? "Saving..." : "Save changes"}
-                    </button>
-                    <button type="button" disabled={busy} onClick={cancelEdit}>
+                    </Button>
+                    <Button variant="secondary" disabled={busy} onClick={cancelEdit}>
                       Cancel
-                    </button>
+                    </Button>
                   </div>
                 </form>
               ) : (
@@ -423,22 +427,22 @@ export default function EventEquipmentSection({ requestId, status, canEdit }) {
                   )}
                   {editable && removingId !== line.id && (
                     <div className="event-equipment__actions">
-                      <button
-                        type="button"
+                      <Button
+                        variant="secondary"
                         aria-label={`Edit ${line.name}`}
                         disabled={busy}
                         onClick={() => startEdit(line)}
                       >
                         Edit
-                      </button>
-                      <button
-                        type="button"
+                      </Button>
+                      <Button
+                        variant="secondary"
                         aria-label={`Remove ${line.name}`}
                         disabled={busy}
                         onClick={() => askToRemove(line)}
                       >
                         Remove
-                      </button>
+                      </Button>
                     </div>
                   )}
                   {editable && removingId === line.id && (
@@ -454,11 +458,11 @@ export default function EventEquipmentSection({ requestId, status, canEdit }) {
                         </p>
                       )}
                       <div className="event-equipment__actions">
-                        <button type="button" disabled={busy} onClick={() => handleRemove(line)}>
+                        <Button disabled={busy} onClick={() => handleRemove(line)}>
                           {busy ? "Removing..." : "Yes, remove"}
-                        </button>
-                        <button
-                          type="button"
+                        </Button>
+                        <Button
+                          variant="secondary"
                           disabled={busy}
                           onClick={() => {
                             setRemovingId(null);
@@ -466,7 +470,7 @@ export default function EventEquipmentSection({ requestId, status, canEdit }) {
                           }}
                         >
                           Keep it
-                        </button>
+                        </Button>
                       </div>
                     </div>
                   )}
@@ -487,7 +491,7 @@ export default function EventEquipmentSection({ requestId, status, canEdit }) {
 
       {editable && (
         <form className="event-equipment__form event-equipment__add" noValidate onSubmit={handleAdd}>
-          <h4>Add equipment</h4>
+          <SubHeading>Add equipment</SubHeading>
           {typesError && (
             <p className="coordinator-clarification__error" role="status">
               {typesError}
@@ -537,9 +541,9 @@ export default function EventEquipmentSection({ requestId, status, canEdit }) {
             </p>
           )}
           <div className="event-equipment__actions">
-            <button type="submit" disabled={busy || choosable.length === 0}>
+            <Button type="submit" disabled={busy || choosable.length === 0}>
               {busy ? "Adding..." : "Add equipment"}
-            </button>
+            </Button>
           </div>
         </form>
       )}

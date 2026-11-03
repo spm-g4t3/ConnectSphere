@@ -1,12 +1,13 @@
 // NeedsAttentionBadge.jsx
 //
 // Beside an event's status: the server sets needsAttention while a confirmed
-// event has a flagged booking. Styled as an action-required status so every
-// screen that colours statuses colours it too. A missing field reads as false.
+// event has a flagged booking. Danger, the tone of an action-required status,
+// so it reads like one. A missing field reads as false.
 
-import { statusClassName } from "../services/eventRequestStatusDisplay";
+import StatusBadge from "./ui/StatusBadge";
 
 export default function NeedsAttentionBadge({ event }) {
   if (event?.needsAttention !== true) return null;
-  return <span className={`status-badge ${statusClassName("ACTION_REQUIRED")}`}>Needs attention</span>;
+  // The space keeps it apart from the status badge it follows inline.
+  return <>{" "}<StatusBadge tone="danger">Needs attention</StatusBadge></>;
 }

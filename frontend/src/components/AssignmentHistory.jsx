@@ -146,8 +146,10 @@ function HistoryEntry({ entry, currentUserId }) {
  * @param {string|null} [props.currentCoordinatorId]  who holds the request now,
  *        from the request itself; null means nobody (waiting for the Lead).
  *        Left out, the newest history entry is taken as current.
+ * @param {number} [props.headingLevel]  its heading's level, one under the section it sits in
  */
-export default function AssignmentHistory({ eventRequestId, view, currentCoordinatorId }) {
+export default function AssignmentHistory({ eventRequestId, view, currentCoordinatorId, headingLevel = 4 }) {
+  const Heading = `h${headingLevel}`;
   const { user } = useAuth();
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -222,7 +224,7 @@ export default function AssignmentHistory({ eventRequestId, view, currentCoordin
           : "Not assigned yet"}
       </p>
 
-      <h4>Assignment history</h4>
+      <Heading>Assignment history</Heading>
       {entries.length === 0 ? (
         // Not "one is assigned on submission": a request cancelled while still
         // a draft also has no history, and will never be submitted.

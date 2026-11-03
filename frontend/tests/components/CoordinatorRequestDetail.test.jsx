@@ -64,6 +64,8 @@ import { getEventVenueSuitability } from "../../src/services/venueSuitabilitySer
 import { cancelFlaggedBooking, getEventFlaggedBookings } from "../../src/services/flaggedBookingService";
 import { httpError } from "../helpers/async.js";
 import { sgTime } from "../helpers/singaporeTime.js";
+import { chooseDecision, decide } from "../helpers/coordinatorDecision.js";
+import { openTab, openTabNow } from "../helpers/eventTabs.js";
 
 vi.mock("../../src/auth/AuthContext", () => ({
   useAuth: vi.fn(),
@@ -239,11 +241,15 @@ function renderAsLead(request) {
   );
 }
 
-/** The decision section: the one whose heading names what can happen next. */
-const ACTION_BUTTONS = ["Start review", "Approve request", "Reject request", "Return for amendment"];
+/** The review actions: Start review, then the decision's three choices and its submit. */
+const ACTION_BUTTONS = ["Start review", "Submit decision"];
+const DECISION_RADIOS = ["Approve", "Reject", "Return for amendment"];
 
 function actionButtonsShown() {
-  return ACTION_BUTTONS.filter((name) => screen.queryByRole("button", { name }));
+  return [
+    ...ACTION_BUTTONS.filter((name) => screen.queryByRole("button", { name })),
+    ...DECISION_RADIOS.filter((name) => screen.queryByRole("radio", { name })),
+  ];
 }
 
 beforeEach(() => {
@@ -280,8 +286,9 @@ describe("SCRUM-375 coordinator cancellation page", () => {
 
     expect(screen.getByRole("heading", { name: "Cancel IS212 Industry Night" })).toBeInTheDocument();
     expect(screen.getByText(/Review the arrangements this will affect before confirming/)).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "The request" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Find a venue" })).not.toBeInTheDocument();
+    // Hidden too: the event's tabs are gone, not just closed.
+    expect(screen.queryByRole("heading", { name: "The request", hidden: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Find a venue", hidden: true })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Back to event" })).toBeInTheDocument();
   });
 });
@@ -342,7 +349,8 @@ describe("SCRUM-347 reject an approved event", () => {
 
 describe("SCRUM20_AC2 the event view holds the venue search", () => {
   it("SCRUM20_AC2_find_a_venue_renders_the_form_prefilled_from_the_event", async () => {
-    renderDetail();
+    const { user } = renderDetail();
+    await openTab(user, "Venues");
 
     expect(screen.getByRole("heading", { name: "Find a venue" })).toBeInTheDocument();
     expect(inFinder.date()).toHaveValue("2026-11-11");
@@ -370,6 +378,7 @@ describe("SCRUM20_AC2 the event view holds the venue search", () => {
 
   it("SCRUM20_AC2_browse_all_venues_links_to_venue_search_without_filters", async () => {
     const { user } = renderDetail();
+    await openTab(user, "Venues");
 
     const link = within(finderSection()).getByRole("link", { name: "Browse all venues" });
     expect(link).toHaveAttribute("href", "/venue-search");
@@ -381,6 +390,7 @@ describe("SCRUM20_AC2 the event view holds the venue search", () => {
   it("SCRUM20_AC2_searching_stays_on_the_event_view", async () => {
     vi.mocked(findVenuesForEvent).mockResolvedValue([{ id: "v1", name: "Hall A" }]);
     const { user } = renderDetail();
+    await openTab(user, "Venues");
 
     await user.click(within(finderSection()).getByRole("button", { name: "Search venues" }));
 
@@ -394,6 +404,7 @@ describe("SCRUM20_AC2 the event view holds the venue search", () => {
 
   it("SCRUM20_AC2_an_event_with_no_attendance_leaves_the_field_empty", () => {
     renderDetail({ ...EVENT, expectedAttendance: null });
+    openTabNow("Venues");
 
     expect(inFinder.attendance()).toHaveValue(null);
     // The Requirements list still says so in words.
@@ -404,9 +415,12 @@ describe("SCRUM20_AC2 the event view holds the venue search", () => {
 describe("SCRUM20_AC2 re-seeding when the event changes", () => {
   it("SCRUM20_AC2_a_different_event_reseeds_the_form", () => {
     const { rerenderWith } = renderDetail();
+    openTabNow("Venues");
     fireEvent.change(inFinder.attendance(), { target: { value: "150" } });
 
     rerenderWith({ ...EVENT, id: "e2", eventName: "Gala", expectedAttendance: 30 });
+    // Another event opens on its own default tab.
+    openTabNow("Venues");
 
     expect(inFinder.attendance()).toHaveValue(30);
   });
@@ -415,6 +429,7 @@ describe("SCRUM20_AC2 re-seeding when the event changes", () => {
     // An approved change request moved the attendance: the edit is dropped
     // rather than shown as if it were the event's figure.
     const { rerenderWith } = renderDetail();
+    openTabNow("Venues");
     fireEvent.change(inFinder.attendance(), { target: { value: "150" } });
     fireEvent.change(inFinder.location(), { target: { value: "Level 2" } });
 
@@ -426,6 +441,7 @@ describe("SCRUM20_AC2 re-seeding when the event changes", () => {
 
   it("SCRUM20_AC2_a_changed_start_reseeds_the_form", () => {
     const { rerenderWith } = renderDetail();
+    openTabNow("Venues");
     fireEvent.change(inFinder.attendance(), { target: { value: "150" } });
 
     const movedStart = "2026-11-11T11:00:00+08:00";
@@ -437,6 +453,7 @@ describe("SCRUM20_AC2 re-seeding when the event changes", () => {
 
   it("SCRUM20_AC2_a_changed_end_reseeds_the_form", () => {
     const { rerenderWith } = renderDetail();
+    openTabNow("Venues");
     fireEvent.change(inFinder.attendance(), { target: { value: "150" } });
 
     const movedEnd = "2026-11-11T11:30:00+08:00";
@@ -450,6 +467,7 @@ describe("SCRUM20_AC2 re-seeding when the event changes", () => {
     // The parent refetches after a change request is processed; if the event's
     // period and attendance did not move, the coordinator's edits stay.
     const { rerenderWith } = renderDetail();
+    openTabNow("Venues");
     fireEvent.change(inFinder.attendance(), { target: { value: "150" } });
     fireEvent.change(inFinder.location(), { target: { value: "Level 2" } });
     fireEvent.change(inFinder.date(), { target: { value: "2026-11-12" } });
@@ -484,7 +502,7 @@ describe("SCRUM19_AC1 starting the review", () => {
 
     expect(startEventReview).toHaveBeenCalledWith(REQUEST_ID);
     // The panel stays open on the updated request, with the next step in place.
-    expect(await screen.findByRole("button", { name: "Approve request" })).toBeInTheDocument();
+    expect(await screen.findByRole("radio", { name: "Approve" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Start review" })).not.toBeInTheDocument();
   });
 
@@ -554,8 +572,8 @@ describe("SCRUM19 deciding a request under review", () => {
   it("SCRUM19_AC7_under_review_offers_approve_reject_and_return", async () => {
     renderAs(ASSIGNED, underReview());
 
-    await screen.findByRole("button", { name: "Approve request" });
-    expect(actionButtonsShown()).toEqual(["Approve request", "Reject request", "Return for amendment"]);
+    await screen.findByRole("radio", { name: "Approve" });
+    expect(actionButtonsShown()).toEqual(["Submit decision", "Approve", "Reject", "Return for amendment"]);
   });
 
   it("SCRUM19_AC7_approving_sends_the_decision_and_shows_it_read_only", async () => {
@@ -571,7 +589,7 @@ describe("SCRUM19 deciding a request under review", () => {
     renderAs(ASSIGNED, underReview());
 
     await user.type(await screen.findByLabelText("Note for the Organiser"), "Approved as submitted.");
-    await user.click(screen.getByRole("button", { name: "Approve request" }));
+    await decide(user, "Approve request");
 
     expect(decideEventRequest).toHaveBeenCalledWith(REQUEST_ID, {
       decision: "approved",
@@ -591,7 +609,7 @@ describe("SCRUM19 deciding a request under review", () => {
     const user = userEvent.setup();
     renderAs(ASSIGNED, underReview());
 
-    await user.click(await screen.findByRole("button", { name: "Reject request" }));
+    await decide(user, "Reject request");
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Add a reason before rejecting this request.");
     expect(decideEventRequest).not.toHaveBeenCalled();
@@ -609,7 +627,7 @@ describe("SCRUM19 deciding a request under review", () => {
     renderAs(ASSIGNED, underReview());
 
     await user.type(await screen.findByLabelText("Note for the Organiser"), "Venue capacity cannot meet the expected attendance.");
-    await user.click(screen.getByRole("button", { name: "Reject request" }));
+    await decide(user, "Reject request");
 
     expect(decideEventRequest).toHaveBeenCalledWith(REQUEST_ID, {
       decision: "rejected",
@@ -626,7 +644,7 @@ describe("SCRUM19 deciding a request under review", () => {
     const user = userEvent.setup();
     renderAs(ASSIGNED, eventRequest({ status: "under_review", proposedStart: past() }));
 
-    await user.click(await screen.findByRole("button", { name: "Approve request" }));
+    await decide(user, "Approve request");
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(/start date has passed/i);
@@ -640,7 +658,7 @@ describe("SCRUM19 deciding a request under review", () => {
     const user = userEvent.setup();
     renderAs(ASSIGNED, underReview());
 
-    await user.click(await screen.findByRole("button", { name: "Approve request" }));
+    await decide(user, "Approve request");
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(/changed since you opened it/i);
@@ -652,7 +670,7 @@ describe("SCRUM19 deciding a request under review", () => {
     const user = userEvent.setup();
     renderAs(ASSIGNED, underReview());
 
-    await user.click(await screen.findByRole("button", { name: "Approve request" }));
+    await decide(user, "Approve request");
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/no longer assigned to you/i);
   });
@@ -663,7 +681,7 @@ describe("SCRUM19 deciding a request under review", () => {
     renderAs(ASSIGNED, underReview());
 
     await user.type(await screen.findByLabelText("Note for the Organiser"), "Please confirm numbers.");
-    await user.click(screen.getByRole("button", { name: "Return for amendment" }));
+    await decide(user, "Return for amendment");
 
     // SCRUM-162 added the reply-by date and the fields to amend, which the
     // screen sends as the third and fourth arguments. Neither is chosen here,
@@ -682,6 +700,8 @@ describe("SCRUM19 deciding a request under review", () => {
       vi.useFakeTimers({ toFake: ["Date"] });
       vi.setSystemTime(new Date("2026-10-20T23:30:00Z"));
       renderAs(ASSIGNED, underReview());
+      // The date is sent only with a return for amendment, so it shows once that is chosen.
+      await chooseDecision(userEvent.setup(), "Return for amendment");
 
       expect(await screen.findByLabelText("Optional reply-by date")).toHaveAttribute("min", "2026-10-22");
     });
@@ -701,7 +721,7 @@ describe("SCRUM19 deciding a request under review", () => {
     const user = userEvent.setup();
     renderAs(ASSIGNED, underReview());
     await user.type(await screen.findByLabelText("Note for the Organiser"), "Please confirm numbers.");
-    await user.click(screen.getByRole("button", { name: "Return for amendment" }));
+    await decide(user, "Return for amendment");
     return screen.findByRole("alert");
   }
 
@@ -809,8 +829,8 @@ describe("SCRUM19 statuses with nothing to decide", () => {
       decidedAt: "2026-01-15T09:00:00+08:00",
     }));
 
-    const heading = screen.getByRole("heading", { name: new RegExp(`IS212 Industry Night\\s*${label}`) });
-    expect(within(heading).getByText(label)).toHaveClass("status-badge");
+    const header = screen.getByRole("heading", { level: 2, name: "IS212 Industry Night" }).closest("header");
+    expect(within(header).getByText(label)).toHaveClass("ui-status-badge");
     expect(screen.getByText(description)).toBeInTheDocument();
     if (status === "safety_approved") {
       expect(screen.getByText("Safety approval complete").closest(".safety-approval-notice"))
@@ -852,6 +872,7 @@ describe("SCRUM254 requesting a venue from the event view", () => {
   const PERIOD = { proposedStart: START_ISO, proposedEnd: END_ISO };
 
   async function searchInFinder(user) {
+    await openTab(user, "Venues");
     await user.click(within(finderSection()).getByRole("button", { name: "Search venues" }));
     return within(finderSection()).findByRole("button", { name: "Request this venue: Hall A" });
   }
@@ -871,7 +892,7 @@ describe("SCRUM254 requesting a venue from the event view", () => {
     renderAs(ASSIGNED, eventRequest({ ...PERIOD, status: "under_review", reviewingCoordinatorId: ASSIGNED }));
 
     await user.type(await screen.findByLabelText("Note for the Organiser"), "Approved.");
-    await user.click(screen.getByRole("button", { name: "Approve request" }));
+    await decide(user, "Approve request");
     await screen.findByText("Outcome");
 
     expect(await searchInFinder(user)).toBeEnabled();
@@ -1302,7 +1323,7 @@ describe("SCRUM266 flagged bookings on the event view", () => {
 
   const flaggedSection = () => screen.queryByRole("heading", { name: "Flagged bookings" })?.closest("section") ?? null;
   const finder = () => screen.getByRole("heading", { name: "Find a venue" }).closest("section");
-  const header = () => screen.getByRole("heading", { level: 2 });
+  const header = () => screen.getByRole("heading", { level: 2 }).closest("header");
   const replaceButton = async () =>
     within((await screen.findByRole("heading", { name: "Flagged bookings" })).closest("section")).getByRole("button", {
       name: "Find a replacement venue",

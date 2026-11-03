@@ -4,10 +4,15 @@
 // arrangements cannot be met. The outstanding lines come from the confirmation
 // readiness check (N07); the coordinator decides, nothing rejects on its own.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getEventReadiness, rejectApprovedEvent } from "../services/eventRequestService";
 import ReadinessChecklist from "./ReadinessChecklist";
-import { formatTimestamp } from "../services/displayFormat";
+import { formatDateTime } from "../services/displayFormat";
+// Generic despite its name: a 400, 403 or 404 answers the same if read again.
+import { canRetryEquipmentRead } from "../services/equipmentErrors";
+import Button from "./ui/Button";
+import ErrorNotice from "./ui/ErrorNotice";
+import LoadingText from "./ui/LoadingText";
 
 const ERROR_MESSAGES = {
   403: "Only the coordinator assigned to this event can reject it.",
@@ -22,14 +27,31 @@ function rejectionErrorMessage(error) {
   return ERROR_MESSAGES[status] ?? "The event could not be rejected. No changes have been made; try again.";
 }
 
-export default function EventRejectionPanel({ eventRequest, onRejected, onBack, onCancelInstead }) {
+/**
+ * @param {object} props
+ * @param {number} [props.headingLevel]  the page title's level: 1 on the event's
+ *   own page, 2 inside a list whose title is the h1
+ */
+export default function EventRejectionPanel({ eventRequest, onRejected, onBack, onCancelInstead, headingLevel = 1 }) {
+  const Title = `h${headingLevel}`;
+  const SectionHeading = `h${headingLevel + 1}`;
   const [readiness, setReadiness] = useState(null);
   const [readError, setReadError] = useState(null);
+  // Bumped by Try again to read the outstanding arrangements again.
+  const [readVersion, setReadVersion] = useState(0);
   const [reason, setReason] = useState("");
   const [rejecting, setRejecting] = useState(false);
   const [error, setError] = useState(null);
 
   const approved = eventRequest.status === "approved";
+  const rejected = eventRequest.status === "rejected";
+  const headingRef = useRef(null);
+
+  // The opener has gone, and on success so has the reject button, so focus
+  // starts on the title each time the page changes.
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, [rejected]);
 
   useEffect(() => {
     if (!approved) return undefined;
@@ -40,32 +62,38 @@ export default function EventRejectionPanel({ eventRequest, onRejected, onBack, 
       })
       .catch((requestError) => {
         if (!cancelled) {
-          setReadError(ERROR_MESSAGES[requestError?.response?.status]
-            ?? "The outstanding arrangements could not be loaded. Please try again.");
+          setReadError({
+            message: ERROR_MESSAGES[requestError?.response?.status]
+              ?? "The outstanding arrangements could not be loaded.",
+            retryable: canRetryEquipmentRead(requestError),
+          });
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [eventRequest.id, approved]);
+  }, [eventRequest.id, approved, readVersion]);
 
-  const back = onBack && (
-    <button className="event-cancellation-page__back" type="button" onClick={onBack}>Back to event</button>
-  );
+  function readAgain() {
+    setReadError(null);
+    setReadVersion((version) => version + 1);
+  }
 
-  if (eventRequest.status === "rejected") {
+  const back = onBack && <Button variant="link" onClick={onBack}>Back to event</Button>;
+
+  if (rejected) {
     return (
       <main className="event-cancellation-page">
         {back}
         <p className="eyebrow">Rejection recorded</p>
-        <h1>{eventRequest.eventName}</h1>
+        <Title ref={headingRef} tabIndex={-1}>{eventRequest.eventName}</Title>
         <section className="event-cancellation">
-          <h2>Event rejected</h2>
+          <SectionHeading>Event rejected</SectionHeading>
           <dl>
             <dt>Reason</dt>
             <dd>{eventRequest.decisionNote || "No reason recorded."}</dd>
             <dt>Rejected on</dt>
-            <dd>{formatTimestamp(eventRequest.decidedAt, "Not recorded")}</dd>
+            <dd>{formatDateTime(eventRequest.decidedAt, "Not recorded")}</dd>
           </dl>
           <p>Its venue bookings, holds and equipment have been released. The organiser can revise and resubmit it.</p>
         </section>
@@ -99,15 +127,17 @@ export default function EventRejectionPanel({ eventRequest, onRejected, onBack, 
     <main className="event-cancellation-page">
       {back}
       <p className="eyebrow">Coordinator action</p>
-      <h1>Reject {eventRequest.eventName}</h1>
+      <Title ref={headingRef} tabIndex={-1}>Reject {eventRequest.eventName}</Title>
       <p className="event-cancellation-page__intro">
         Reject this event if its essential arrangements cannot be met. Its venue
         bookings, holds and equipment are released straight away, and the
         organiser can revise and resubmit it.
       </p>
       <section className="event-cancellation">
-        {!readiness && !readError && <p role="status">Loading the outstanding arrangements...</p>}
-        {readError && <p role="alert">{readError}</p>}
+        {!readiness && !readError && <LoadingText />}
+        {readError && (
+          <ErrorNotice message={readError.message} onRetry={readError.retryable ? readAgain : undefined} />
+        )}
         {readiness && (outstanding.length > 0
           ? <ReadinessChecklist caption="Still outstanding" items={outstanding} />
           : <p>Every essential arrangement is currently met.</p>)}
@@ -125,13 +155,13 @@ export default function EventRejectionPanel({ eventRequest, onRejected, onBack, 
               rows={3}
             />
           </label>
-          <button type="submit" disabled={rejecting || !reason.trim()}>
+          <Button type="submit" variant="danger" disabled={rejecting || !reason.trim()}>
             {rejecting ? "Rejecting..." : "Reject event"}
-          </button>
+          </Button>
         </form>
-        {error && <p role="alert">{error.message}</p>}
+        {error && <ErrorNotice message={error.message} />}
         {error?.cancelInstead && onCancelInstead && (
-          <button type="button" onClick={onCancelInstead}>Cancel event instead</button>
+          <Button variant="secondary" onClick={onCancelInstead}>Cancel event instead</Button>
         )}
       </section>
     </main>

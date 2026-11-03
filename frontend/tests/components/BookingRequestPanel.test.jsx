@@ -1155,7 +1155,7 @@ describe("SCRUM-525 editing attendance rechecks the venue", () => {
     await setAttendance(user, "80");
 
     // While checking: no verdict, no box, no send.
-    expect(screen.getByRole("status")).toHaveTextContent("Checking Hall A for 80 people…");
+    expect(screen.getByRole("status")).toHaveTextContent("Checking Hall A for 80 people...");
     expect(confirmBox()).not.toBeInTheDocument();
     expect(screen.queryByText(warningText)).not.toBeInTheDocument();
     expect(submit()).toBeDisabled();
