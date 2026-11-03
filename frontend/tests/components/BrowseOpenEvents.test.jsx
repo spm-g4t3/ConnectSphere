@@ -81,9 +81,7 @@ describe("SCRUM495_AC3 what each row shows", () => {
 
     const row = within(await screen.findByRole("list")).getByRole("listitem");
     expect(within(row).getByRole("link", { name: "Open Day" })).toBeInTheDocument();
-    expect(row).toHaveTextContent("2026-10-25");
-    expect(row).toHaveTextContent("Starts 09:00");
-    expect(row).toHaveTextContent("Ends 11:30");
+    expect(row).toHaveTextContent("25 Oct 2026, 9:00 am – 11:30 am");
     expect(row).toHaveTextContent("12 places left");
   });
 
@@ -151,7 +149,7 @@ describe("SCRUM495_AC3 what each row shows", () => {
     renderPage();
 
     const row = within(await screen.findByRole("list")).getByRole("listitem");
-    expect(row).toHaveTextContent("2026-10-27");
+    expect(row).toHaveTextContent("25 Oct 2026, 6:00 pm – 27 Oct 2026, 6:00 pm");
   });
 
   it("SCRUM495_AC3_shows_a_nameless_event_as_an_unnamed_event", async () => {
@@ -163,14 +161,17 @@ describe("SCRUM495_AC3 what each row shows", () => {
   });
 
   it("SCRUM495_AC3_falls_back_to_plain_words_for_a_missing_or_unreadable_date_or_time", async () => {
-    vi.mocked(getOpenEvents).mockResolvedValue([event({ startsAt: null, endsAt: "later" })]);
+    vi.mocked(getOpenEvents).mockResolvedValue([
+      event({ id: "e1", eventName: "No start", startsAt: null, endsAt: "later" }),
+      event({ id: "e2", eventName: "No end", endsAt: "later" }),
+    ]);
 
     renderPage();
 
-    const row = within(await screen.findByRole("list")).getByRole("listitem");
-    expect(row).toHaveTextContent("Date to be confirmed");
-    expect(row).toHaveTextContent("Starts Not set");
-    expect(row).toHaveTextContent("Ends Not set");
+    await screen.findByRole("list");
+    expect(rowFor("No start")).toHaveTextContent("Date to be confirmed");
+    expect(rowFor("No end")).toHaveTextContent("25 Oct 2026, 9:00 am – Not set");
+    expect(screen.getByRole("list")).not.toHaveTextContent("later");
   });
 });
 

@@ -438,11 +438,14 @@ button { cursor: pointer; }
 .my-booking-requests__confirm { align-items: center; display: flex; flex-wrap: wrap; gap: 8px 10px; }
 .my-booking-requests__confirm span { color: var(--muted); font-size: 0.9rem; }
 .my-booking-requests__notice { background: #e8f7f1; border-radius: 6px; color: #17684f; margin: 6px 0 0; padding: 8px 12px; }
-.dashboard--attendee__browse-link { background: var(--teal); border-radius: 6px; color: white; display: inline-block; padding: 10px 16px; text-decoration: none; }
-.dashboard--attendee__browse-link:hover { background: var(--teal-dark); }
+/* ui.css styles a <button>; these let a router Link carry the same classes. */
+.dashboard--attendee a.ui-button { display: inline-block; }
+.dashboard--attendee a.ui-button--primary { text-decoration: none; }
+/* Plain in-text links match the event-name links instead of browser blue;
+   link-styled buttons keep their own colours from ui.css. */
+.dashboard--attendee a:not(.ui-button) { color: var(--color-accent-dark); }
 .browse-open-events__row { padding-block: 10px; }
 .browse-open-events__summary { display: grid; gap: 2px; min-width: 0; }
-.browse-open-events__meta > span { white-space: nowrap; }
 .browse-open-events__meta > span:last-child { flex-basis: 100%; font-size: 0.75rem; font-style: italic; opacity: 0.8; white-space: normal; }
 .browse-event-details__facts > div { background: #f5f9f7; border: 1px solid #e5eeea; border-radius: 7px; padding: 8px 12px; }
 .browse-event-details__facts { gap: 8px 12px !important; margin-bottom: 12px !important; }
@@ -451,31 +454,29 @@ button { cursor: pointer; }
 .browse-open-events__title { align-items: center; display: flex; flex-wrap: wrap; gap: 6px 10px; }
 .browse-open-events__title a { color: var(--teal-dark); overflow-wrap: anywhere; }
 .browse-open-events__meta { color: var(--muted); display: flex; flex-wrap: wrap; font-size: 0.85rem; gap: 4px 16px; }
-.browse-open-events__badge { border-radius: 999px; display: inline-block; flex: 0 0 auto; font-size: 0.72rem; font-weight: 700; line-height: 1.3; padding: 4px 10px; text-transform: uppercase; }
-.browse-open-events__badge--registered { background: #e8f7f1; color: #17684f; }
-.browse-open-events__badge--waitlisted { background: #fff5e0; color: #7a4f00; }
-.browse-open-events__availability { color: var(--teal-dark); flex: 0 0 auto; font-size: 0.9rem; font-weight: 700; }
-.browse-open-events__availability--full { color: #a43c32; }
-.browse-open-events__error { align-items: center; background: #fff0ee; border-radius: 6px; color: #a43c32; display: flex; flex-wrap: wrap; gap: 8px 12px; justify-content: space-between; padding: 8px 12px; }
-.dashboard .browse-open-events__error p { color: #a43c32; margin: 0; }
+.browse-open-events .ui-status-badge { flex: 0 0 auto; }
 /* SCRUM-495. One open event. Its facts are a definition list, not .dashboard li
    rows, and the description keeps the organiser's line breaks. */
 .browse-event-details__facts { display: grid; gap: 10px 24px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); margin: 0 0 18px; }
 .browse-event-details__facts dt { color: var(--muted); font-size: 0.86rem; font-weight: 700; }
 .browse-event-details__facts dd { align-items: center; color: var(--ink); display: flex; flex-wrap: wrap; gap: 6px 10px; margin: 2px 0 0; overflow-wrap: anywhere; }
-.dashboard .browse-event-details h3 { color: var(--teal-dark); font-size: 1rem; margin: 0 0 8px; }
+.dashboard .browse-event-details__about-heading { margin: 0 0 var(--space-2); }
 .browse-event-details__description { color: var(--ink) !important; overflow-wrap: anywhere; white-space: pre-wrap; }
 .attendee-event-information__location { white-space: pre-wrap; }
 .attendee-event-information__message { white-space: pre-wrap; }
 .browse-event-details__register { align-items: center; display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 18px 0; }
 .browse-event-details__register p { margin: 0; }
-.browse-event-details button:disabled { cursor: not-allowed; opacity: 0.55; }
-.browse-open-events__notice, .browse-event-details__notice { align-items: center; background: #fff6e5; border-radius: 6px; color: #8a5a00; display: flex; flex-wrap: wrap; gap: 8px 12px; justify-content: space-between; margin: 0 0 12px; padding: 8px 12px; }
-.dashboard .browse-open-events__notice p, .dashboard .browse-event-details__notice p { color: #8a5a00; margin: 0; }
-.browse-event-details__success { background: #e8f7f1; border-radius: 6px; margin: 0 0 12px; padding: 8px 12px; }
-.dashboard .browse-event-details__success p { color: #17684f; margin: 0; }
-.browse-event-details__unavailable, .browse-event-details__error { background: #fff0ee; border-radius: 6px; color: #a43c32; display: flex; flex-wrap: wrap; gap: 8px 12px; justify-content: space-between; margin: 0 0 12px; padding: 8px 12px; }
-.dashboard .browse-event-details__unavailable p, .dashboard .browse-event-details__error p { color: #a43c32; margin: 0; }
+/* The attendee screens' "showing as last loaded" warning, with its Try again. */
+.browse-open-events__notice { align-items: center; background: var(--color-warning-soft); border-radius: var(--radius-control); color: var(--color-warning); display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-3); justify-content: space-between; margin: 0 0 var(--space-3); padding: var(--space-2) var(--space-3); }
+.dashboard .browse-open-events__notice p { color: var(--color-warning); margin: 0; }
+.browse-event-details__success { background: var(--color-success-soft); border-radius: var(--radius-control); margin: 0 0 var(--space-3); padding: var(--space-2) var(--space-3); }
+.dashboard .browse-event-details__success p { color: var(--color-success); margin: 0; }
+/* One clear ring for every attendee control, links styled as buttons included,
+   and for the notices that take focus after an action. */
+.dashboard--attendee :is(a, button, [tabindex="-1"]):focus-visible { outline: 3px solid var(--color-accent); outline-offset: 2px; }
+.dashboard--attendee .ui-error-notice { margin: 0 0 var(--space-3); }
+/* Event names can be one long word; wrap them inside a 360px screen. */
+.dashboard--attendee li, .dashboard--attendee .browse-event-details__success, .dashboard--attendee .ui-error-notice { overflow-wrap: anywhere; }
 .dashboard--coordinator .my-booking-requests button:disabled { cursor: not-allowed; opacity: 0.55; }
 .dashboard--coordinator .status--booking-pending { background: #fff6e5; color: #8a5a00; }
 .dashboard--coordinator .status--booking-conflicting { background: #fff0ee; color: #a43c32; }

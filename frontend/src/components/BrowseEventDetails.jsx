@@ -13,12 +13,11 @@ import OpenEventAvailability, { RegisteredBadge, WaitlistedBadge } from "./OpenE
 import { BROWSE_OPEN_EVENTS_PATH } from "../services/openEventRoutes";
 import { REGISTERED_EVENTS_PATH } from "../services/attendeeEventRoutes";
 import { REGISTRATION_STATUS } from "../services/registrationStatus";
-import {
-  EVENT_TIME_NOTE,
-  formatEventDate,
-  formatEventEndTime,
-  formatEventStartTime,
-} from "../services/openEventDisplay";
+import { EVENT_TIME_NOTE, formatEventWhen } from "../services/openEventDisplay";
+import Button from "./ui/Button";
+import ErrorNotice from "./ui/ErrorNotice";
+import LoadingText from "./ui/LoadingText";
+import useFocusAfterRetry from "./useFocusAfterRetry";
 
 const LOAD_ERROR_MESSAGES = {
   403: "Only Attendees can browse open events.",
@@ -31,7 +30,7 @@ const NOT_OPEN_MESSAGE = "This event is not open for registration.";
 function BackLink() {
   return (
     <p>
-      <Link to={BROWSE_OPEN_EVENTS_PATH}>Back to open events</Link>
+      <Link className="ui-button ui-button--link" to={BROWSE_OPEN_EVENTS_PATH}>Back to open events</Link>
     </p>
   );
 }
@@ -40,9 +39,9 @@ function RegisterAction({ event, isRegistered, onRegister, onJoinWaitlist, regis
   if (isRegistered) {
     return (
       <div className="browse-event-details__register">
-        <button type="button" disabled>
+        <Button disabled>
           Already registered
-        </button>
+        </Button>
       </div>
     );
   }
@@ -50,9 +49,9 @@ function RegisterAction({ event, isRegistered, onRegister, onJoinWaitlist, regis
   if (event.waitlistPosition != null) {
     return (
       <div className="browse-event-details__register">
-        <button type="button" disabled>
+        <Button disabled>
           On the waiting list
-        </button>
+        </Button>
         <p>
           You are number {event.waitlistPosition} on the waiting list.{" "}
           <Link to={REGISTERED_EVENTS_PATH}>Manage it from your registrations</Link>.
@@ -64,9 +63,9 @@ function RegisterAction({ event, isRegistered, onRegister, onJoinWaitlist, regis
   if (event.isFull && event.canJoinWaitlist && onJoinWaitlist) {
     return (
       <div className="browse-event-details__register">
-        <button type="button" onClick={onJoinClick} disabled={registering || stale}>
+        <Button onClick={onJoinClick} disabled={registering || stale}>
           {registering ? "Joining..." : "Join waiting list"}
-        </button>
+        </Button>
         <p>
           This event is full. If a place opens while registration is open, the first person
           waiting is registered and notified.
@@ -79,9 +78,9 @@ function RegisterAction({ event, isRegistered, onRegister, onJoinWaitlist, regis
   if (event.isFull || !event.canRegister) {
     return (
       <div className="browse-event-details__register">
-        <button type="button" disabled>
+        <Button disabled>
           Register
-        </button>
+        </Button>
         <p>{event.isFull ? "This event is full." : "Registration is not available for this event."}</p>
       </div>
     );
@@ -89,9 +88,9 @@ function RegisterAction({ event, isRegistered, onRegister, onJoinWaitlist, regis
 
   return (
     <div className="browse-event-details__register">
-      <button type="button" onClick={onClick} disabled={!onRegister || registering || stale}>
+      <Button onClick={onClick} disabled={!onRegister || registering || stale}>
         {registering ? "Registering..." : "Register"}
-      </button>
+      </Button>
       {!onRegister && <p>Registering for events is not available yet.</p>}
       {onRegister && stale && <p>Registration is paused until this event can be checked again.</p>}
     </div>
@@ -127,6 +126,17 @@ export default function BrowseEventDetails({ onRegister, onJoinWaitlist }) {
   const isRegistered = event?.isRegistered || registeredEventId === eventId;
   const sending = useRef(false);
   const currentEventId = useRef(eventId);
+  // The Register or Join button had focus and is disabled while the attempt
+  // runs (and often after it), so focus moves to whatever reports the outcome.
+  const [outcomeFocusRequest, setOutcomeFocusRequest] = useState(0);
+  const noticeRef = useRef(null);
+  const registerErrorRef = useRef(null);
+  const notOpenRef = useRef(null);
+
+  useEffect(() => {
+    if (!outcomeFocusRequest) return;
+    (noticeRef.current ?? registerErrorRef.current ?? notOpenRef.current)?.focus();
+  }, [outcomeFocusRequest]);
 
   useEffect(() => {
     currentEventId.current = eventId;
@@ -156,6 +166,8 @@ export default function BrowseEventDetails({ onRegister, onJoinWaitlist }) {
     }
   }, [refreshEvent]);
   useRefetchOnReturn(refreshUnlessRegistering);
+
+  const { headingRef, retry } = useFocusAfterRetry(refreshUnlessRegistering);
   async function handleRegister() {
     if (!onRegister || sending.current || !event || isRegistered) return;
     sending.current = true;
@@ -204,6 +216,7 @@ export default function BrowseEventDetails({ onRegister, onJoinWaitlist }) {
     // Overtaken by another read (the reader moved on): this attempt's outcome
     // belongs to a page that is no longer shown.
     if (fresh.kind === "superseded") return;
+    setOutcomeFocusRequest((count) => count + 1);
 
     if (registered || failureMessage) return;
     if (fresh.kind === "ok" && fresh.data.isRegistered) {
@@ -251,9 +264,10 @@ export default function BrowseEventDetails({ onRegister, onJoinWaitlist }) {
     }
 
     setAvailabilityInvalidated(true);
-    await refreshEvent();
+    const fresh = await refreshEvent();
     sending.current = false;
     setRegistering(false);
+    if (fresh.kind !== "superseded") setOutcomeFocusRequest((count) => count + 1);
   }
 
   return (
@@ -261,39 +275,38 @@ export default function BrowseEventDetails({ onRegister, onJoinWaitlist }) {
       <h1>{event ? event.eventName || "Unnamed event" : "Event details"}</h1>
 
       <section className="browse-event-details" aria-labelledby="browse-event-details-heading">
-        <h2 id="browse-event-details-heading">Event details</h2>
+        <h2 ref={headingRef} tabIndex={-1} id="browse-event-details-heading">Event details</h2>
 
-        {loading && <p role="status">Loading...</p>}
+        {loading && <LoadingText />}
 
+        {/* Final for this event, so there is nothing to try again. */}
         {!loading && notOpen && !registerError && (
-          <div className="browse-event-details__unavailable" role="alert">
-            <p>{NOT_OPEN_MESSAGE}</p>
+          <div ref={notOpenRef} tabIndex={-1}>
+            <ErrorNotice message={NOT_OPEN_MESSAGE} />
           </div>
         )}
 
         {/* Outside the details: the reload after registering can find the event
             closed, and the attendee must still be told they are registered. */}
         {notice && (
-          <div className="browse-event-details__success" role="status">
+          <div ref={noticeRef} tabIndex={-1} className="browse-event-details__success" role="status">
             <p>{notice}</p>
           </div>
         )}
 
         {!loading && error && (
-          <div className="browse-event-details__error" role="alert">
-            <p>{error}</p>
-            <button type="button" onClick={refreshUnlessRegistering}>
-              Try again
-            </button>
-          </div>
+          <ErrorNotice
+            message={error}
+            onRetry={retry}
+          />
         )}
 
         {refreshFailed && (
-          <div className="browse-event-details__notice" role="status">
+          <div className="browse-open-events__notice" role="status">
             <p>Could not refresh this event. Showing the details as last loaded.</p>
-            <button type="button" onClick={refreshUnlessRegistering} disabled={registering}>
+            <Button variant="secondary" onClick={retry} disabled={registering}>
               Try again
-            </button>
+            </Button>
           </div>
         )}
 
@@ -301,19 +314,9 @@ export default function BrowseEventDetails({ onRegister, onJoinWaitlist }) {
           <>
             <dl className="browse-event-details__facts">
               <div>
-                <dt>Date</dt>
-                <dd>{formatEventDate(event.startsAt)}</dd>
-              </div>
-              <div>
-                <dt>Starts</dt>
+                <dt>When</dt>
                 <dd>
-                  {formatEventStartTime(event.startsAt)} {EVENT_TIME_NOTE}
-                </dd>
-              </div>
-              <div>
-                <dt>Ends</dt>
-                <dd>
-                  {formatEventEndTime(event.startsAt, event.endsAt)} {EVENT_TIME_NOTE}
+                  {formatEventWhen(event.startsAt, event.endsAt)} {EVENT_TIME_NOTE}
                 </dd>
               </div>
               <div>
@@ -332,7 +335,7 @@ export default function BrowseEventDetails({ onRegister, onJoinWaitlist }) {
               </div>
             </dl>
 
-            <h3>About this event</h3>
+            <h2 className="browse-event-details__about-heading">About this event</h2>
             <p className="browse-event-details__description">
               {event.description || "The organiser has not added a description."}
             </p>
@@ -350,9 +353,10 @@ export default function BrowseEventDetails({ onRegister, onJoinWaitlist }) {
           </>
         )}
 
+        {/* The Register or Join button is the retry, as for any form error. */}
         {registerError && registerError !== error && (
-          <div className="browse-event-details__error" role="alert">
-            <p>{registerError}</p>
+          <div ref={registerErrorRef} tabIndex={-1}>
+            <ErrorNotice message={registerError} />
           </div>
         )}
 

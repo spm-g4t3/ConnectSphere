@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import AttendeeEventInformation from "../../src/components/AttendeeEventInformation";
 import { getAttendeeEvent, withdrawRegistration } from "../../src/services/attendeeEventService";
 import { deferred, httpError } from "../helpers/async.js";
+import { stubDialogElement } from "../helpers/dialog.js";
 
 vi.mock("../../src/services/attendeeEventService", () => ({
   getAttendeeEvent: vi.fn(), withdrawRegistration: vi.fn(),
@@ -30,6 +31,8 @@ async function openConfirmation(user) {
   await user.click(await screen.findByRole("button", { name: "Withdraw registration" }));
   return screen.getByRole("button", { name: "Confirm withdrawal" });
 }
+
+stubDialogElement();
 
 beforeEach(() => {
   vi.mocked(getAttendeeEvent).mockReset().mockResolvedValue(event);

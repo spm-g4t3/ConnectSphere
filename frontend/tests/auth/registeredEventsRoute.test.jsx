@@ -40,7 +40,7 @@ describe("SCRUM-51 mocked API response sequences (not lifecycle RPC integration)
     expect(screen.queryByRole("heading", { name: "Venues" })).not.toBeInTheDocument();
     expect(document.querySelector(".browse-event-details__facts")).toBeNull();
     expect(screen.queryByText("Hall e1")).not.toBeInTheDocument();
-    expect(screen.queryByText("2026-10-25")).not.toBeInTheDocument();
+    expect(screen.queryByText(/25 Oct 2026/)).not.toBeInTheDocument();
   }
 
   it("SCRUM24_AC2_AC3_unavailable_contract_does_not_describe_cancelled_events_as_awaiting_confirmation", async () => {
@@ -77,7 +77,7 @@ describe("SCRUM-51 mocked API response sequences (not lifecycle RPC integration)
     await act(async () => reconfirmedRead.resolve(latest()));
     expect(screen.getByText("Latest confirmed hall")).toBeInTheDocument();
     expect(screen.getByText("Latest location")).toBeInTheDocument();
-    expect(screen.getByText("2030-05-06")).toBeInTheDocument();
+    expect(screen.getByText(/6 May 2030, 9:00 am – 11:00 am/)).toBeInTheDocument();
     expect(screen.queryByText("Hall e1")).not.toBeInTheDocument();
     expect(getAttendeeEvent).toHaveBeenCalledTimes(3);
     expect(vi.mocked(getAttendeeEvent).mock.calls).toEqual([["e1"], ["e1"], ["e1"]]);
@@ -103,7 +103,10 @@ describe("SCRUM-51 mocked API response sequences (not lifecycle RPC integration)
     expect(screen.queryByText("Event details are not currently confirmed.")).not.toBeInTheDocument();
     expectArrangementsHidden();
 
-    if (status !== 404) {
+    // Not found is the answer, and an expired session needs signing in, so neither offers a retry.
+    if (status === 404 || status === 401) {
+      expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+    } else {
       const retry = deferred();
       vi.mocked(getAttendeeEvent).mockReturnValueOnce(retry.promise);
       await userEvent.click(screen.getByRole("button", { name: "Try again" }));
@@ -177,10 +180,9 @@ describe("SCRUM-24 reachable attendee information", () => {
     expect(window.location.pathname).toBe("/registered-events/e1");
     expect(getRegisteredEvents).toHaveBeenCalledWith();
     expect(getAttendeeEvent).toHaveBeenCalledWith("e1");
-    expect(screen.getByText("2026-10-25")).toBeInTheDocument();
-    expect(screen.getByText("23:30")).toBeInTheDocument();
-    expect(screen.getByText("2026-10-26 00:30")).toBeInTheDocument();
-    expect(screen.getByText("(Singapore time)")).toBeInTheDocument();
+    // Past midnight in Singapore, so the end carries its own date.
+    expect(screen.getByText("When").nextElementSibling)
+      .toHaveTextContent("25 Oct 2026, 11:30 pm – 26 Oct 2026, 12:30 am (Singapore time)");
     expect(screen.getByText("Hall e1")).toBeInTheDocument();
     expect(screen.getByText("Building B")).toBeInTheDocument();
     expect(getOpenEvents).not.toHaveBeenCalled();
@@ -218,7 +220,7 @@ describe("SCRUM-24 reachable attendee information", () => {
     const pending = deferred();
     vi.mocked(getRegisteredEvents).mockReturnValueOnce(pending.promise);
     renderAt("/registered-events");
-    expect(screen.getByRole("status")).toHaveTextContent("Loading...");
+    expect(within(screen.getByRole("region", { name: "Registered" })).getByRole("status")).toHaveTextContent("Loading...");
     await act(async () => pending.resolve([]));
     expect(screen.getByText("You have no active event registrations.")).toBeInTheDocument();
     vi.mocked(getRegisteredEvents).mockResolvedValue([{ eventRequestId: "e2", eventName: null }]);
@@ -226,7 +228,8 @@ describe("SCRUM-24 reachable attendee information", () => {
     expect(await screen.findByRole("link", { name: "Unnamed event" })).toHaveAttribute("href", "/registered-events/e2");
   });
 
-  it.each([401, 403, 500, 503, undefined])(
+  // A 401 offers no retry (SCRUM589_AC4 covers it).
+  it.each([403, 500, 503, undefined])(
     "SCRUM24_AC1_list_failures_are_accessible_safe_and_retryable_%s", async status => {
       vi.mocked(getRegisteredEvents).mockRejectedValueOnce(failure(status));
       renderAt("/registered-events");
@@ -237,7 +240,7 @@ describe("SCRUM-24 reachable attendee information", () => {
     },
   );
 
-  it.each([401, 403, 500, 503, undefined])(
+  it.each([403, 500, 503, undefined])(
     "SCRUM24_AC2_detail_failures_never_show_arrangements_and_can_retry_%s", async status => {
       vi.mocked(getAttendeeEvent).mockRejectedValueOnce(failure(status));
       renderAt("/registered-events/e1");
@@ -400,9 +403,11 @@ describe("SCRUM-24 reachable attendee information", () => {
     await screen.findByText("Registered event");
     vi.mocked(getRegisteredEvents).mockRejectedValueOnce(failure(500));
     fireEvent.focus(window);
-    expect(await screen.findByRole("alert")).toHaveTextContent(/as last loaded/);
+    // A warning beside the last-loaded list, not an alert: the list is still usable.
+    expect((await screen.findByText(/as last loaded/)).closest("[role='status']")).not.toBeNull();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Try again" }));
-    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText(/as last loaded/)).not.toBeInTheDocument());
   });
 
   it("SCRUM24_AC7_event_route_changes_clear_old_data_before_the_next_reply", async () => {

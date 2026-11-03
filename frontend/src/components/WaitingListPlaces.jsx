@@ -1,8 +1,14 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getWaitlist, leaveWaitlist } from "../services/attendeeEventService";
 import useOpenEventRead from "./useOpenEventRead";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 import { WaitlistedBadge } from "./OpenEventAvailability";
+import Button from "./ui/Button";
+import ConfirmDialog from "./ui/ConfirmDialog";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import LoadingText from "./ui/LoadingText";
+import useFocusAfterRetry from "./useFocusAfterRetry";
 
 const MESSAGES = {
   403: "Only Attendees can view waiting lists.",
@@ -28,6 +34,17 @@ function WaitingListPlace({ place, onLeft, onPromoted }) {
   const [submitting, setSubmitting] = useState(false);
   const [failure, setFailure] = useState(null);
   const sending = useRef(false);
+  const leaveButtonRef = useRef(null);
+  const refocusLeave = useRef(false);
+
+  // The dialog has gone from the page by the time this runs, so focus returns
+  // to Leave waiting list instead of the page body. A successful leave sends it
+  // to the page's notice instead, as this row is about to disappear.
+  useEffect(() => {
+    if (confirming || submitting || !refocusLeave.current) return;
+    refocusLeave.current = false;
+    leaveButtonRef.current?.focus();
+  }, [confirming, submitting]);
 
   async function handleLeave() {
     if (sending.current) return;
@@ -38,12 +55,15 @@ function WaitingListPlace({ place, onLeft, onPromoted }) {
       await leaveWaitlist(place.registrationId);
       onLeft(place);
     } catch (err) {
+      refocusLeave.current = true;
       setFailure(leaveFailureMessage(err));
-      setConfirming(false);
       // Promoted: the registrations list gains the event. This list is left as
       // it is, so the explanation stays on screen until the next refresh.
       if (err?.response?.data?.code === "ALREADY_REGISTERED") onPromoted?.();
     } finally {
+      // Closed either way: on success the re-read removes this row, so the
+      // dialog must not stay open offering to leave again meanwhile.
+      setConfirming(false);
       sending.current = false;
       setSubmitting(false);
     }
@@ -57,22 +77,26 @@ function WaitingListPlace({ place, onLeft, onPromoted }) {
       {place.placesOffered === false && (
         <p>Registration for this event is closed, so no places are being offered. You keep your place in the queue.</p>
       )}
-      {failure && <p className="browse-open-events__error" role="alert">{failure}</p>}
-      {confirming ? (
-        <div className="event-venue-bookings__actions">
-          <p>Leave the waiting list? You will lose your place in the queue.</p>
-          <button type="button" disabled={submitting} onClick={handleLeave}>
-            {submitting ? "Leaving..." : "Confirm leaving"}
-          </button>
-          <button type="button" disabled={submitting} onClick={() => setConfirming(false)}>
-            Keep my place
-          </button>
-        </div>
-      ) : (
-        <button type="button" onClick={() => setConfirming(true)}>
-          Leave waiting list
-        </button>
-      )}
+      {/* Leave waiting list stays on screen, so it is the retry. */}
+      {failure && <ErrorNotice message={failure} />}
+      <Button ref={leaveButtonRef} variant="danger" onClick={() => setConfirming(true)}>
+        Leave waiting list
+      </Button>
+      <ConfirmDialog
+        open={confirming}
+        title="Leave the waiting list?"
+        confirmLabel={submitting ? "Leaving..." : "Confirm leaving"}
+        cancelLabel="Keep my place"
+        danger
+        busy={submitting}
+        onConfirm={handleLeave}
+        onCancel={() => {
+          refocusLeave.current = true;
+          setConfirming(false);
+        }}
+      >
+        You will lose your place in the queue.
+      </ConfirmDialog>
     </li>
   );
 }
@@ -89,23 +113,38 @@ export default function WaitingListPlaces({ onChanged }) {
   });
   const places = data ?? [];
   const [notice, setNotice] = useState(null);
+  // Counted rather than keyed on the text, so leaving a second event with the
+  // same name still moves focus.
+  const [noticeFocusRequest, setNoticeFocusRequest] = useState(0);
+  const noticeRef = useRef(null);
   useRefetchOnReturn(load);
+
+  // The Leave button that had focus goes with its row, so focus moves to the notice.
+  useEffect(() => {
+    if (noticeFocusRequest) noticeRef.current?.focus();
+  }, [noticeFocusRequest]);
+
+  const { headingRef, retry } = useFocusAfterRetry(load);
 
   function handleLeft(place) {
     setNotice(`You have left the waiting list for ${place.eventName || "this event"}.`);
+    setNoticeFocusRequest((count) => count + 1);
     load();
     onChanged?.();
   }
 
   return (
-    <section aria-labelledby="waiting-lists-heading">
-      <h2 id="waiting-lists-heading">Waiting lists</h2>
-      {notice && <p className="browse-event-details__success" role="status">{notice}</p>}
-      {loading && <p>Loading waiting lists...</p>}
-      {(error || refreshFailed) && (
-        <div className="browse-open-events__error" role="alert">
-          <p>{error || "Could not refresh your waiting lists. Showing them as last loaded."}</p>
-          <button type="button" onClick={load}>Try again</button>
+    <section className="waiting-list-places" aria-labelledby="waiting-lists-heading">
+      <h2 ref={headingRef} tabIndex={-1} id="waiting-lists-heading">Waiting lists</h2>
+      {notice && (
+        <p ref={noticeRef} tabIndex={-1} className="browse-event-details__success" role="status">{notice}</p>
+      )}
+      {loading && <LoadingText />}
+      {error && <ErrorNotice message={error} onRetry={retry} />}
+      {refreshFailed && (
+        <div className="browse-open-events__notice" role="status">
+          <p>Could not refresh your waiting lists. Showing them as last loaded.</p>
+          <Button variant="secondary" onClick={retry}>Try again</Button>
         </div>
       )}
       {!loading && !error && (
@@ -120,7 +159,12 @@ export default function WaitingListPlaces({ onChanged }) {
               />
             ))}
           </ul>
-        ) : <p>You are not on any waiting lists.</p>
+        ) : (
+          <EmptyState
+            message="You are not on any waiting lists."
+            nextStep="When an event is full, you can join its waiting list from the event's page."
+          />
+        )
       )}
     </section>
   );
