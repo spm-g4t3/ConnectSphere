@@ -160,6 +160,58 @@ describe('SCRUM36 registration submission endpoint', () => {
 });
 
 describe('SCRUM494 registration settings endpoint', () => {
+  // The event read answers with `event`; each count read answers with `count`.
+  const settingsDb = (event, count = 0) => {
+    const eventQuery = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: event, error: null }),
+    };
+    const countQuery = {
+      eq: vi.fn().mockReturnThis(),
+      then: (resolve, reject) => Promise.resolve({ count, error: null }).then(resolve, reject),
+    };
+    return {
+      eventQuery,
+      rpc: vi.fn(),
+      from: vi.fn((table) => (table === 'event_requests' ? eventQuery : { select: () => countQuery })),
+    };
+  };
+  const ownEvent = {
+    id: EVENT, organiser_id: ME, event_name: 'Open Day', status: 'confirmed',
+    proposed_start: '2030-01-01T12:00:00Z', registration_enabled: true,
+    registration_opens_at: '2029-12-01T00:00:00Z', registration_closes_at: '2029-12-31T00:00:00Z',
+    registration_capacity: 50, registration_withdrawal_deadline: null, registration_waitlist_enabled: true,
+  };
+
+  it('SCRUM494_AC3_the_organiser_reads_their_event_settings_with_active_counts', async () => {
+    const db = settingsDb(ownEvent, 3);
+    const res = await request(app(db, ROLE.EVENT_ORGANISER)).get(`/api/registration/events/${EVENT}/settings`)
+      .set('Authorization', 'Bearer valid-token');
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      id: EVENT, eventName: 'Open Day', status: 'confirmed',
+      settings: { enabled: true, capacity: 50, waitlistEnabled: true, registeredCount: 3, waitlistCount: 3 },
+    });
+    expect(db.eventQuery.eq).toHaveBeenCalledWith('id', EVENT);
+  });
+
+  it('SCRUM494_AC3_another_organisers_event_settings_are_refused_with_403', async () => {
+    const db = settingsDb({ ...ownEvent, organiser_id: '55555555-5555-4555-8555-555555555555' });
+    const res = await request(app(db, ROLE.EVENT_ORGANISER)).get(`/api/registration/events/${EVENT}/settings`)
+      .set('Authorization', 'Bearer valid-token');
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe('Only the Event Organiser who created this event can view its registration settings.');
+  });
+
+  it('SCRUM494_AC3_an_attendee_cannot_read_settings_and_nothing_is_queried', async () => {
+    const db = settingsDb(ownEvent);
+    const res = await request(app(db)).get(`/api/registration/events/${EVENT}/settings`)
+      .set('Authorization', 'Bearer valid-token');
+    expect(res.status).toBe(403);
+    expect(db.from).not.toHaveBeenCalled();
+  });
+
   it('SCRUM494_AC2_answers_400_for_a_time_without_an_offset', async () => {
     const db = client();
     const res = await request(app(db, ROLE.EVENT_ORGANISER)).put(`/api/registration/events/${EVENT}/settings`)

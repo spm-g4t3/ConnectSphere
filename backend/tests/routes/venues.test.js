@@ -220,6 +220,15 @@ describe('AC2: only an authorised change is accepted, and it reaches the search'
     expect(rpc).not.toHaveBeenCalled();
   });
 
+  it('SCRUM15_AC2_a_change_with_no_body_is_400_and_writes_nothing', async () => {
+    // express.json leaves req.body undefined when nothing is sent; it is read as an empty change.
+    const res = await request(appWith()).patch(`/api/venues/${VENUE_ID}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Invalid venue details -- no changes supplied');
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
   it('SCRUM15_AC2_refuses_an_unauthenticated_change', async () => {
     const res = await request(appWith(signedOut))
       .patch(`/api/venues/${VENUE_ID}`)

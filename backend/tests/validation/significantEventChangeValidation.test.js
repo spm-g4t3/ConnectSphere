@@ -51,6 +51,30 @@ describe('SCRUM-395 significant-change validation', () => {
     }, CURRENT, { now: NOW })).toThrow(/unsupported field/i);
   });
 
+  it('SCRUM395_AC2_names_every_unsupported_field_at_once', () => {
+    // Name and purpose lock at confirmation; a significant change cannot carry them.
+    expect(() => validateSignificantEventChange({
+      eventName: 'Renamed',
+      purpose: 'Other',
+    }, CURRENT, { now: NOW })).toThrow(
+      'Invalid significant event change -- unsupported fields: eventName, purpose',
+    );
+  });
+
+  it('SCRUM395_AC2_null_clears_optional_requirement_text', () => {
+    expect(validateSignificantEventChange({
+      accessibilityRequirements: null,
+    }, CURRENT, { now: NOW })).toEqual({ accessibilityRequirements: null });
+  });
+
+  it.each([['yes'], [1], [null]])('SCRUM395_AC5_refuses_equipmentChange_of_%j', (equipmentChange) => {
+    expect(() => validateSignificantEventChange({
+      equipmentChange,
+    }, CURRENT, { now: NOW })).toThrow(
+      'Invalid significant event change -- equipmentChange must be true or false',
+    );
+  });
+
   it('SCRUM395_AC5_allows_a_reasoned_equipment_change_without_editing_lines', () => {
     expect(validateSignificantEventChange({
       equipmentChange: true,
