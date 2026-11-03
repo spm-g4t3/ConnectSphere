@@ -25,7 +25,7 @@ export async function errorFrom(promise) {
 // expects is still recorded, so a stray call fails an assertion, not a TypeError.
 const CHAIN_METHODS = [
   'select', 'insert', 'update', 'delete',
-  'eq', 'neq', 'is', 'in', 'ilike', 'gt', 'gte', 'lt', 'lte', 'not', 'order', 'limit',
+  'eq', 'neq', 'is', 'in', 'ilike', 'or', 'gt', 'gte', 'lt', 'lte', 'not', 'order', 'limit',
 ];
 
 function recordingBuilder(settle) {

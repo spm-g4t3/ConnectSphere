@@ -310,9 +310,9 @@ export function providesAll(venueCodes, requested) {
  * SCRUM-141: the venue's location contains the requested text, ignoring case.
  *
  * The same meaning as the old /search's ilike '%...%' (venueService
- * searchVenues), so "orchard" finds "Orchard Road" in both searches. Only
- * the meaning: ilike treats % and _ as wildcards, and this treats them as
- * the characters they are, which is what someone typing them means.
+ * searchVenues), so "orchard" finds "Orchard Road" in both searches. Both
+ * treat % and _ as the characters they are, which is what someone typing
+ * them means: here by includes(), there by escaping them (SCRUM-592).
  *
  * toLowerCase rather than toLocaleLowerCase: the locale variant depends on
  * the server's locale (a Turkish one lowercases 'I' to a dotless 'ı'), so

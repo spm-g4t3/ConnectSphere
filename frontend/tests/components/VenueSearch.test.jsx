@@ -17,6 +17,9 @@
 // SCRUM-185 (for SCRUM-178 AC1) adds "Include retired venues": shown by role,
 // exclusive with the date window, seeded from ?includeRetired=true, and
 // retired rows linking to the calendar on the week they retired.
+//
+// SCRUM-592: the text box is "Venue name or location" and sends q, seeded from
+// ?q=. Tests that only typed into the box or carried its value now use q.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
@@ -122,26 +125,26 @@ describe("VenueSearch existing behaviour", () => {
     expect(screen.queryByText(EMPTY_STATE)).not.toBeInTheDocument();
   });
 
-  it("a dateless search sends exactly location and minCapacity, with no date keys", async () => {
+  it("SCRUM592_AC1_a_dateless_search_sends_exactly_q_and_minCapacity_with_no_date_keys", async () => {
     const { user } = renderSearch();
-    await user.type(screen.getByPlaceholderText("Location"), "Level");
+    await user.type(screen.getByPlaceholderText("Venue name or location"), "Level");
     await user.type(screen.getByPlaceholderText("Min capacity"), "50");
     await user.click(searchButton());
 
     expect(searchActiveVenues).toHaveBeenCalledTimes(1);
     const payload = searchActiveVenues.mock.calls[0][0];
-    expect(payload).toStrictEqual({ location: "Level", minCapacity: 50 });
-    expect(Object.keys(payload).sort()).toEqual(["location", "minCapacity"]);
+    expect(payload).toStrictEqual({ q: "Level", minCapacity: 50 });
+    expect(Object.keys(payload).sort()).toEqual(["minCapacity", "q"]);
     expect(await screen.findByText("Hall A")).toBeInTheDocument();
   });
 
-  it("a search with nothing filled in sends undefined location and minCapacity only", async () => {
+  it("SCRUM592_AC3_a_search_with_nothing_filled_in_sends_undefined_q_and_minCapacity_only", async () => {
     const { user } = renderSearch();
     await user.click(searchButton());
 
     const payload = searchActiveVenues.mock.calls[0][0];
-    expect(Object.keys(payload).sort()).toEqual(["location", "minCapacity"]);
-    expect(payload).toStrictEqual({ location: undefined, minCapacity: undefined });
+    expect(Object.keys(payload).sort()).toEqual(["minCapacity", "q"]);
+    expect(payload).toStrictEqual({ q: undefined, minCapacity: undefined });
   });
 
   it("?minCapacity seeds the field and searches once on mount", async () => {
@@ -150,21 +153,42 @@ describe("VenueSearch existing behaviour", () => {
     expect(await screen.findByText("Hall A")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Min capacity")).toHaveValue(120);
     expect(searchActiveVenues).toHaveBeenCalledTimes(1);
-    expect(searchActiveVenues.mock.calls[0][0]).toStrictEqual({ location: undefined, minCapacity: 120 });
+    expect(searchActiveVenues.mock.calls[0][0]).toStrictEqual({ q: undefined, minCapacity: 120 });
 
     // Typing changes handleSearch's identity; the auto-search must not re-fire.
-    await user.type(screen.getByPlaceholderText("Location"), "Lev");
+    await user.type(screen.getByPlaceholderText("Venue name or location"), "Lev");
     setFrom(START_ISO);
     expect(searchActiveVenues).toHaveBeenCalledTimes(1);
   });
 
-  it("?location seeds the field and searches once on mount", async () => {
-    renderSearch({ path: "/venue-search?location=Level" });
+  it("SCRUM592_AC1_q_in_the_url_seeds_the_box_and_searches_once_on_mount", async () => {
+    renderSearch({ path: "/venue-search?q=hall" });
 
     expect(await screen.findByText("Hall A")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Location")).toHaveValue("Level");
+    expect(screen.getByPlaceholderText("Venue name or location")).toHaveValue("hall");
     expect(searchActiveVenues).toHaveBeenCalledTimes(1);
-    expect(searchActiveVenues.mock.calls[0][0]).toStrictEqual({ location: "Level", minCapacity: undefined });
+    expect(searchActiveVenues.mock.calls[0][0]).toStrictEqual({ q: "hall", minCapacity: undefined });
+  });
+
+  it("SCRUM592_AC1_location_in_the_url_neither_seeds_nor_searches", async () => {
+    // Nothing links here with ?location= any more, and the page no longer sends it.
+    renderSearch({ path: "/venue-search?location=Level" });
+    await Promise.resolve();
+    expect(searchActiveVenues).not.toHaveBeenCalled();
+    expect(screen.getByPlaceholderText("Venue name or location")).toHaveValue("");
+  });
+
+  it("SCRUM592_AC4_the_box_says_it_searches_the_venue_name_or_location", () => {
+    renderSearch();
+    expect(screen.getByPlaceholderText("Venue name or location")).toHaveAttribute("type", "text");
+    expect(screen.queryByPlaceholderText("Location")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM592_AC4_the_box_has_an_accessible_name", () => {
+    // A placeholder alone is not a name; a screen reader needs the label.
+    renderSearch();
+    expect(screen.getByRole("textbox", { name: "Venue name or location" })).toBeInTheDocument();
+    expect(screen.getByRole("spinbutton", { name: "Min capacity" })).toBeInTheDocument();
   });
 
   it("dates are not read from the URL", async () => {
@@ -281,7 +305,7 @@ describe("VenueSearch date window (SCRUM-130)", () => {
 
   it("SCRUM17_AC2_sends_the_window_as_offset_ISO_naming_the_entered_instants", async () => {
     const { user } = renderSearch();
-    await user.type(screen.getByPlaceholderText("Location"), "Level");
+    await user.type(screen.getByPlaceholderText("Venue name or location"), "Level");
     await user.type(screen.getByPlaceholderText("Min capacity"), "50");
     setFrom(START_ISO);
     setTo(END_ISO);
@@ -289,8 +313,8 @@ describe("VenueSearch date window (SCRUM-130)", () => {
 
     expect(searchActiveVenues).toHaveBeenCalledTimes(1);
     const payload = searchActiveVenues.mock.calls[0][0];
-    expect(Object.keys(payload).sort()).toEqual(["endsAt", "location", "minCapacity", "startsAt"]);
-    expect(payload.location).toBe("Level");
+    expect(Object.keys(payload).sort()).toEqual(["endsAt", "minCapacity", "q", "startsAt"]);
+    expect(payload.q).toBe("Level");
     expect(payload.minCapacity).toBe(50);
     expect(payload.startsAt).toMatch(OFFSET_SUFFIX);
     expect(payload.endsAt).toMatch(OFFSET_SUFFIX);
@@ -593,7 +617,7 @@ describe("VenueSearch date window (SCRUM-130)", () => {
 
     it("SCRUM17_AC2_resets_both_dates_and_their_errors_without_searching", async () => {
       const { user } = renderSearch();
-      await user.type(screen.getByPlaceholderText("Location"), "Level");
+      await user.type(screen.getByPlaceholderText("Venue name or location"), "Level");
       setFrom(START_ISO);
       await user.click(searchButton());
       expect(screen.getByText("is required when a start is given")).toBeInTheDocument();
@@ -603,7 +627,7 @@ describe("VenueSearch date window (SCRUM-130)", () => {
       expect(searchActiveVenues).not.toHaveBeenCalled();
       expect(fromInput()).toHaveValue("");
       expect(toInput()).toHaveValue("");
-      expect(screen.getByPlaceholderText("Location")).toHaveValue("Level");
+      expect(screen.getByPlaceholderText("Venue name or location")).toHaveValue("Level");
       expect(screen.queryByText("is required when a start is given")).not.toBeInTheDocument();
       expect(toInput()).not.toHaveAttribute("aria-invalid");
       expect(toInput()).not.toHaveAttribute("aria-describedby");
@@ -641,7 +665,7 @@ describe("VenueSearch date window (SCRUM-130)", () => {
       await user.click(searchButton());
       await waitFor(() => expect(searchActiveVenues).toHaveBeenCalledTimes(2));
       const payload = searchActiveVenues.mock.calls[1][0];
-      expect(Object.keys(payload).sort()).toEqual(["location", "minCapacity"]);
+      expect(Object.keys(payload).sort()).toEqual(["minCapacity", "q"]);
       await waitFor(() => expect(note()).toBeNull());
     });
   });
@@ -840,13 +864,13 @@ describe("SCRUM178_AC1 VenueSearch include retired venues (SCRUM-185)", () => {
   describe("the request", () => {
     it("SCRUM178_AC1_ticking_and_searching_sends_includeRetired_true_and_no_dates", async () => {
       const { user } = renderSearch({ role: COORDINATOR });
-      await user.type(screen.getByPlaceholderText("Location"), "Block");
+      await user.type(screen.getByPlaceholderText("Venue name or location"), "Block");
       await user.click(checkbox());
       await user.click(searchButton());
 
       expect(searchActiveVenues).toHaveBeenCalledTimes(1);
       const payload = searchActiveVenues.mock.calls[0][0];
-      expect(payload).toStrictEqual({ location: "Block", minCapacity: undefined, includeRetired: true });
+      expect(payload).toStrictEqual({ q: "Block", minCapacity: undefined, includeRetired: true });
       expect(payload).not.toHaveProperty("startsAt");
       expect(payload).not.toHaveProperty("endsAt");
     });
@@ -856,7 +880,7 @@ describe("SCRUM178_AC1 VenueSearch include retired venues (SCRUM-185)", () => {
       await user.click(checkbox());
       await user.click(searchButton());
       expect(searchActiveVenues.mock.calls[0][0]).toStrictEqual({
-        location: undefined,
+        q: undefined,
         minCapacity: undefined,
         includeRetired: true,
       });
@@ -866,7 +890,7 @@ describe("SCRUM178_AC1 VenueSearch include retired venues (SCRUM-185)", () => {
       const { user } = renderSearch({ role: COORDINATOR });
       await user.click(searchButton());
       const payload = searchActiveVenues.mock.calls[0][0];
-      expect(Object.keys(payload).sort()).toEqual(["location", "minCapacity"]);
+      expect(Object.keys(payload).sort()).toEqual(["minCapacity", "q"]);
     });
 
     it("SCRUM178_AC1_unticking_again_sends_no_flag", async () => {
@@ -888,7 +912,7 @@ describe("SCRUM178_AC1 VenueSearch include retired venues (SCRUM-185)", () => {
     });
 
     it("SCRUM178_AC1_ticking_the_box_after_a_url_auto_search_does_not_search_again", async () => {
-      const { user } = renderSearch({ path: "/venue-search?location=Level", role: COORDINATOR });
+      const { user } = renderSearch({ path: "/venue-search?q=Level", role: COORDINATOR });
       await screen.findByText("Hall A");
       expect(searchActiveVenues).toHaveBeenCalledTimes(1);
 
@@ -899,7 +923,7 @@ describe("SCRUM178_AC1 VenueSearch include retired venues (SCRUM-185)", () => {
       await user.click(searchButton());
       await waitFor(() => expect(searchActiveVenues).toHaveBeenCalledTimes(2));
       expect(searchActiveVenues.mock.calls[1][0]).toStrictEqual({
-        location: "Level",
+        q: "Level",
         minCapacity: undefined,
         includeRetired: true,
       });
@@ -979,25 +1003,25 @@ describe("SCRUM178_AC1 VenueSearch include retired venues (SCRUM-185)", () => {
       expect(fromInput()).toBeDisabled();
       expect(searchActiveVenues).toHaveBeenCalledTimes(1);
       expect(searchActiveVenues.mock.calls[0][0]).toStrictEqual({
-        location: undefined,
+        q: undefined,
         minCapacity: undefined,
         includeRetired: true,
       });
 
       // Changing the filters changes handleSearch; the auto-search stays one-off.
-      await user.type(screen.getByPlaceholderText("Location"), "Blo");
+      await user.type(screen.getByPlaceholderText("Venue name or location"), "Blo");
       await user.click(checkbox());
       await user.click(checkbox());
       expect(searchActiveVenues).toHaveBeenCalledTimes(1);
     });
 
     it("SCRUM178_AC1_pre_ticks_the_box_for_venue_staff_alongside_other_url_filters", async () => {
-      renderSearch({ path: "/venue-search?location=Block&includeRetired=true", role: STAFF });
+      renderSearch({ path: "/venue-search?q=Block&includeRetired=true", role: STAFF });
       await screen.findByText("Hall A");
       expect(checkbox()).toBeChecked();
       expect(searchActiveVenues).toHaveBeenCalledTimes(1);
       expect(searchActiveVenues.mock.calls[0][0]).toStrictEqual({
-        location: "Block",
+        q: "Block",
         minCapacity: undefined,
         includeRetired: true,
       });
@@ -1018,11 +1042,11 @@ describe("SCRUM178_AC1 VenueSearch include retired venues (SCRUM-185)", () => {
     });
 
     it("SCRUM178_AC1_an_organisers_url_search_never_carries_the_flag", async () => {
-      renderSearch({ path: "/venue-search?location=Level&includeRetired=true", role: "event_organiser" });
+      renderSearch({ path: "/venue-search?q=Level&includeRetired=true", role: "event_organiser" });
       await screen.findByText("Hall A");
       expect(searchActiveVenues).toHaveBeenCalledTimes(1);
       const payload = searchActiveVenues.mock.calls[0][0];
-      expect(payload).toStrictEqual({ location: "Level", minCapacity: undefined });
+      expect(payload).toStrictEqual({ q: "Level", minCapacity: undefined });
       expect(payload).not.toHaveProperty("includeRetired");
     });
   });

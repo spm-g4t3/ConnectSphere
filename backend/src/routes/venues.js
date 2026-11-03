@@ -119,6 +119,12 @@ const errorMiddleware = createErrorMiddleware('venues route');
 function parseSearchFilters(query) {
   const filters = {};
 
+  // SCRUM-592: the search box's text, passed through as sent like location;
+  // a repeated ?q= arrives as an array and is the validator's 400.
+  if (query.q !== undefined) {
+    filters.q = query.q;
+  }
+
   if (query.location !== undefined) {
     filters.location = query.location;
   }
@@ -332,7 +338,12 @@ export function createVenueRouter({
    * (gateRetiredSearch above); 'false' or absent is the ordinary search. It
    * cannot be combined with a date window -- a retired venue cannot be booked.
    *
-   * Statuses: 200; 400 for a bad capacity, a one-sided, malformed or
+   * SCRUM-592: ?q= is the search box's text, matched against the venue's name
+   * or location, ignoring case, every character literally (searchVenues).
+   * ?location= stays location only, as SCRUM-111 defined it.
+   *
+   * Statuses: 200; 400 for a q that is not text (a repeated ?q=), a bad
+   * capacity, a one-sided, malformed or
    * reversed window, an includeRetired other than true/false, or
    * includeRetired with a window; 401; 403 for includeRetired unless Venue
    * Staff or an Event Coordinator; 500.

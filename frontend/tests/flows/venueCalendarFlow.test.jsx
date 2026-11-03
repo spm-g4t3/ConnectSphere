@@ -266,7 +266,7 @@ describe("SCRUM178_AC1_AC2_AC4 venue calendar flow (SCRUM-184)", () => {
   it("SCRUM178_AC1_AC2_AC4_coordinator_opens_calendar_from_venue_search_and_navigates", async () => {
     const user = userEvent.setup();
     signIn("event_coordinator");
-    renderAppAt("/venue-search?location=Level");
+    renderAppAt("/venue-search?q=Level");
 
     // ---- 1. AC1: from a search result to the calendar -----------------------
     const result = (await screen.findByText("Hall A")).closest("li");

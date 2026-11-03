@@ -430,6 +430,39 @@ describe('venue search filters', () => {
 
 
 // ---------------------------------------------------------------------------
+// SCRUM-592: q, the search box's text, shaped like location.
+// ---------------------------------------------------------------------------
+describe('SCRUM592 a venue search may carry search text', () => {
+  it('SCRUM592_AC1_trims_q_and_keeps_it_beside_location_and_capacity', () => {
+    expect(validateSearchFilters({ q: '  Meeting room ', location: ' Singapore ', minCapacity: 40 }))
+      .toEqual({ q: 'Meeting room', location: 'Singapore', minCapacity: 40 });
+  });
+
+  it('SCRUM592_AC2_keeps_every_character_of_q_for_the_service_to_escape', () => {
+    expect(validateSearchFilters({ q: String.raw`50%_"x\.,():` })).toEqual({ q: String.raw`50%_"x\.,():` });
+  });
+
+  it.each([
+    ['an_empty_string', ''],
+    ['whitespace_only', '   '],
+    ['null', null],
+    ['undefined', undefined],
+  ])('SCRUM592_AC3_drops_a_q_that_is_%s_rather_than_failing_the_search', (_label, value) => {
+    expect(validateSearchFilters({ q: value })).toEqual({});
+  });
+
+  it.each([
+    ['an_array', ['a', 'b']], // what Express makes of a repeated ?q=
+    ['a_number', 42],
+  ])('SCRUM592_AC2_rejects_a_q_that_is_%s_naming_q', (_label, value) => {
+    const err = errorFrom(() => validateSearchFilters({ q: value }));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([{ field: 'q', message: 'must be text' }]);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
 // SCRUM-130 (SCRUM-17 AC2): the optional date window on a venue search.
 // ---------------------------------------------------------------------------
 describe('SCRUM17_AC2 a venue search may carry a date window', () => {

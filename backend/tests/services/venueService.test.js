@@ -1595,6 +1595,149 @@ describe('SCRUM178_AC1 a search can include retired venues when asked', () => {
 
 
 // ---------------------------------------------------------------------------
+// SCRUM-592: the search box's text, q, matches the name or the location.
+// These prove the filter string sent; how PostgREST reads it is proved
+// against the real project by scripts/check-venue-search-text.js.
+// ---------------------------------------------------------------------------
+describe('SCRUM592 the search text matches a venue name or location', () => {
+  const MEETING_OR = 'name.ilike."%meeting%",location.ilike."%meeting%"';
+
+  it('SCRUM592_AC1_q_filters_name_or_location_in_one_or_and_never_location_alone', async () => {
+    const query = givenSearchReturns([]);
+
+    await searchVenues({ q: 'meeting' });
+
+    expect(query.allArgs('or')).toEqual([[MEETING_OR]]);
+    expect(query.called('ilike')).toBe(false);
+    expect(query.args('is')).toEqual(['retired_at', null]);
+    expect(query.args('order')).toEqual(['name']);
+  });
+
+  it('SCRUM592_AC1_q_is_trimmed_and_its_case_is_left_to_ilike', async () => {
+    const query = givenSearchReturns([]);
+
+    await searchVenues({ q: '  MEETING ROOM ' });
+
+    expect(query.args('or')).toEqual(['name.ilike."%MEETING ROOM%",location.ilike."%MEETING ROOM%"']);
+  });
+
+  it('SCRUM592_AC2_q_is_escaped_for_LIKE_and_for_the_or_list', async () => {
+    const query = givenSearchReturns([]);
+
+    await searchVenues({ q: String.raw`50%_"x\.` });
+
+    const value = String.raw`"%50\\%\\_\"x\\\\.%"`;
+    expect(query.args('or')).toEqual([`name.ilike.${value},location.ilike.${value}`]);
+  });
+
+  it('SCRUM592_AC2_location_is_escaped_for_LIKE_too', async () => {
+    const query = givenSearchReturns([]);
+
+    await searchVenues({ location: '50%_\\' });
+
+    expect(query.args('ilike')).toEqual(['location', String.raw`%50\%\_\\%`]);
+  });
+
+  it('SCRUM592_AC3_q_location_and_minCapacity_all_apply', async () => {
+    const query = givenSearchReturns([]);
+
+    await searchVenues({ q: 'meeting', location: 'Singapore', minCapacity: 200 });
+
+    expect(query.args('or')).toEqual([MEETING_OR]);
+    expect(query.args('ilike')).toEqual(['location', '%Singapore%']);
+    expect(query.args('gte')).toEqual(['max_capacity', 200]);
+  });
+
+  it.each([
+    ['an_empty_string', ''],
+    ['whitespace_only', '   '],
+    ['null', null],
+  ])('SCRUM592_AC3_q_that_is_%s_sends_exactly_the_default_query', async (_label, q) => {
+    const plain = givenSearchReturns([]);
+    await searchVenues();
+    const blank = givenSearchReturns([]);
+    await searchVenues({ q });
+
+    expect(blank.called('or')).toBe(false);
+    expect(blank.calls).toEqual(plain.calls);
+  });
+
+  it('SCRUM592_AC3_a_dated_search_asks_availability_only_about_the_venues_q_matched', async () => {
+    const MATCHED = 'c0ffee00-0000-4000-8000-000000000592';
+    const query = givenSearchReturns([
+      { id: MATCHED, name: 'Meeting room', location: 'Singapore', max_capacity: 200 },
+    ]);
+    rpc.mockResolvedValue({ data: [{ venue_id: MATCHED }], error: null });
+
+    const result = await searchVenues({
+      q: 'meeting',
+      startsAt: '2026-10-01T10:00:00+08:00',
+      endsAt: '2026-10-01T12:00:00+08:00',
+    });
+
+    expect(query.args('or')).toEqual([MEETING_OR]);
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc.mock.calls[0][0]).toBe('available_venue_ids');
+    expect(rpc.mock.calls[0][1].p_venue_ids).toEqual([MATCHED]);
+    expect(result.map((venue) => venue.name)).toEqual(['Meeting room']);
+  });
+
+  it('SCRUM592_AC2_an_asterisk_matches_only_venues_that_contain_one', async () => {
+    // PostgREST reads * as %, so the database answers every venue (D3).
+    givenSearchReturns([
+      { id: VENUE_ID, name: 'Room 3*', location: 'Level 3', max_capacity: 40 },
+      { id: 'c0ffee00-0000-4000-8000-000000000001', name: 'Hall A', location: 'Level 2', max_capacity: 80 },
+    ]);
+
+    const result = await searchVenues({ q: '*' });
+
+    expect(result.map((venue) => venue.name)).toEqual(['Room 3*']);
+  });
+
+  it('SCRUM592_AC2_rows_the_database_over_matched_are_dropped_before_availability', async () => {
+    const MATCHED = 'c0ffee00-0000-4000-8000-000000000592';
+    const OVER = 'c0ffee00-0000-4000-8000-000000000593';
+    givenSearchReturns([
+      { id: OVER, name: 'Hall A', location: 'Level 2', max_capacity: 80 },
+      { id: MATCHED, name: 'Store *1', location: 'Level 1', max_capacity: 20 },
+    ]);
+    rpc.mockResolvedValue({ data: [{ venue_id: MATCHED }, { venue_id: OVER }], error: null });
+
+    const result = await searchVenues({
+      q: '*',
+      startsAt: '2026-10-01T10:00:00+08:00',
+      endsAt: '2026-10-01T12:00:00+08:00',
+    });
+
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc.mock.calls[0][1].p_venue_ids).toEqual([MATCHED]);
+    expect(result.map((venue) => venue.id)).toEqual([MATCHED]);
+  });
+
+  it('SCRUM592_AC3_q_with_includeRetired_keeps_the_retired_branch', async () => {
+    const query = givenSearchReturns([]);
+
+    await searchVenues({ q: 'meeting', includeRetired: 'true' });
+
+    expect(query.args('select')).toEqual(['id, name, location, max_capacity, retired_at']);
+    expect(query.called('is')).toBe(false);
+    expect(query.args('or')).toEqual([MEETING_OR]);
+  });
+
+  it.each([
+    ['an_array', ['a', 'b']], // what Express makes of a repeated ?q=
+    ['a_number', 42],
+  ])('SCRUM592_AC2_q_that_is_%s_is_refused_before_any_network_call', async (_label, q) => {
+    const err = await errorFromAsync(() => searchVenues({ q }));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([{ field: 'q', message: 'must be text' }]);
+    expect(from).not.toHaveBeenCalled();
+  });
+});
+
+
+// ---------------------------------------------------------------------------
 // SCRUM-186: the turnaround between events
 // ---------------------------------------------------------------------------
 describe('SCRUM186 turnaround is written by create and update and read by id', () => {
