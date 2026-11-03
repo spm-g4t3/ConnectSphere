@@ -8,7 +8,6 @@ import { render, screen, within } from "@testing-library/react";
 
 import EventChangeHistory from "../../src/components/EventChangeHistory.jsx";
 import { getEventChangeHistory } from "../../src/services/eventRequestService";
-import { formatMediumTimestamp, formatTimestamp } from "../../src/services/displayFormat.js";
 import { deferred } from "../helpers/async.js";
 
 vi.mock("../../src/services/eventRequestService", () => ({
@@ -43,7 +42,7 @@ describe("SCRUM-387 the change history", () => {
     expect(within(item).getByText("Purpose")).toBeInTheDocument();
     expect(within(item).getByText("Edited")).toBeInTheDocument();
     expect(item).toHaveTextContent("Networking → Alumni networking");
-    expect(item).toHaveTextContent(`Priya Nair, ${formatMediumTimestamp("2026-10-21T03:00:00Z")}`);
+    expect(item).toHaveTextContent("Priya Nair, 21 Oct 2026, 11:00 am");
     expect(item).toHaveTextContent("Reason: Organiser asked by email");
     expect(getEventChangeHistory).toHaveBeenCalledWith("e1");
   });
@@ -74,7 +73,7 @@ describe("SCRUM-387 the change history", () => {
 
     await screen.findAllByRole("listitem");
     const [start, attendance, description, equipment, odd] = items();
-    expect(start).toHaveTextContent(`${formatTimestamp("2026-12-01T09:00:00Z")} → ${formatTimestamp("2026-12-02T09:00:00Z")}`);
+    expect(start).toHaveTextContent("1 Dec 2026, 5:00 pm → 2 Dec 2026, 5:00 pm");
     expect(within(start).getByText("Significant change")).toBeInTheDocument();
     expect(attendance).toHaveTextContent("100 → 150");
     expect(description).toHaveTextContent("Not specified → Not specified");
@@ -122,7 +121,7 @@ describe("SCRUM-387 the change history", () => {
     vi.mocked(getEventChangeHistory).mockReturnValue(pending.promise);
 
     render(<EventChangeHistory eventRequestId="e1" />);
-    expect(screen.getByText("Loading change history...")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(/^Loading\.\.\.$/);
 
     pending.resolve([]);
     expect(await screen.findByText("No changes have been recorded.")).toBeInTheDocument();

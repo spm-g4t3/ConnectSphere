@@ -63,7 +63,6 @@ import { createBookingRequest, getMyBookingRequests } from "../../src/services/b
 import { getEventVenueSuitability } from "../../src/services/venueSuitabilityService";
 import { cancelFlaggedBooking, getEventFlaggedBookings } from "../../src/services/flaggedBookingService";
 import { httpError } from "../helpers/async.js";
-import { sgTime } from "../helpers/singaporeTime.js";
 import { chooseDecision, decide } from "../helpers/coordinatorDecision.js";
 import { openTab, openTabNow } from "../helpers/eventTabs.js";
 
@@ -805,7 +804,7 @@ describe("SCRUM19 statuses with nothing to decide", () => {
     const record = (await screen.findByText("Outcome")).closest("dl");
     expect(within(record).getByText("Rejected")).toBeInTheDocument();
     expect(within(record).getByText("The venue is unavailable that week.")).toBeInTheDocument();
-    expect(within(record).getByText(sgTime("2026-01-15T09:00:00+08:00"))).toBeInTheDocument();
+    expect(within(record).getByText("15 Jan 2026, 9:00 am")).toBeInTheDocument();
     if (userId === ASSIGNED) {
       expect(within(record).getByText("You")).toBeInTheDocument();
     } else {

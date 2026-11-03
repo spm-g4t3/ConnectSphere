@@ -62,19 +62,27 @@ describe("SCRUM363 organiser confirmed arrangements", () => {
     const pending = deferred();
     vi.mocked(getConfirmedArrangements).mockReturnValue(pending.promise);
     await open();
-    expect(screen.getByRole("status")).toHaveTextContent("Loading confirmed arrangements");
+    expect(screen.getByRole("status")).toHaveTextContent(/^Loading\.\.\.$/);
     await act(async () => pending.resolve(arrangements()));
     expect(screen.getByRole("region")).toBeInTheDocument();
   });
 
+  it("SCRUM363_AC7_HTTP_500_has_an_accessible_retryable_error", async () => {
+    vi.mocked(getConfirmedArrangements).mockRejectedValueOnce({ response: { status: 500 } });
+    await open();
+    expect(await screen.findByRole("alert")).toHaveTextContent(/could not be loaded/);
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByRole("region")).toBeInTheDocument();
+  });
+
+  // Reading again gets the same refusal, so the standard offers no Try again.
   it.each([
-    [403, /event's organiser/], [404, /no longer available/], [500, /could not be loaded/],
-  ])("SCRUM363_AC7_HTTP_%s_has_an_accessible_retryable_error", async (status, message) => {
+    [403, /event's organiser/], [404, /no longer available/],
+  ])("SCRUM363_AC7_HTTP_%s_has_an_accessible_error_without_try_again", async (status, message) => {
     vi.mocked(getConfirmedArrangements).mockRejectedValueOnce({ response: { status } });
     await open();
     expect(await screen.findByRole("alert")).toHaveTextContent(message);
-    await userEvent.click(screen.getByRole("button", { name: "Retry arrangements" }));
-    expect(await screen.findByRole("region")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
   });
 
   it.each([null, { eventRequestId: ID, status: null }, { eventRequestId: ID, status: "confirmed", venues: null }, { eventRequestId: ID, status: "confirmed", venues: [], equipment: null }])(
@@ -91,7 +99,7 @@ describe("SCRUM363 organiser confirmed arrangements", () => {
     await screen.findByText("Hall A — Level 1");
     vi.mocked(getConfirmedArrangements).mockResolvedValueOnce(arrangements({ status: "approved", statusDisplay: { label: "Planning", group: "APPROVED", description: "Planning again." }, venues: [], equipment: [] }));
     fireEvent.focus(window);
-    expect(await screen.findByRole("status")).toHaveTextContent("now Planning");
+    expect(await screen.findByText(/now Planning/)).toHaveAttribute("role", "status");
     expect(screen.queryByText("Hall A — Level 1")).not.toBeInTheDocument();
     vi.mocked(getConfirmedArrangements).mockResolvedValue(arrangements({ startsAt: "2026-12-01T02:00:00Z", endsAt: "2026-12-01T04:00:00Z", venues: [{ bookingId: "b3", name: "New hall", location: "New location" }], equipment: [{ lineId: "l3", name: "Projector", quantity: 5 }] }));
     fireEvent.focus(window);

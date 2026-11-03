@@ -9,41 +9,48 @@
 
 import { getChangeRequests } from "../services/changeRequestService";
 import { useEffect, useState, useCallback } from "react";
-import { formatTimestamp } from "../services/displayFormat";
+import { formatDateTime } from "../services/displayFormat";
+import { canRetryRead } from "../services/apiErrors";
 import { changeFieldLabel, groupChangeRequests, outcomeLabel } from "../services/changeRequestDisplay";
+import StatusBadge from "./ui/StatusBadge";
+import LoadingText from "./ui/LoadingText";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import useFocusAfterRetry from "./useFocusAfterRetry";
 
 const POLL_INTERVAL_MS = 15000;
 
-// The three states a change request moves through.
+// The three states a change request moves through. Processed stays neutral:
+// the outcome badge beside it carries the approved or rejected colour.
 const STATUS_CONFIG = {
-  outstanding: { label: "Outstanding", className: "status--outstanding" },
-  in_progress: { label: "In Progress", className: "status--in-progress" },
-  processed: { label: "Processed", className: "status--processed" },
+  outstanding: { label: "Outstanding", tone: "warning" },
+  in_progress: { label: "In Progress", tone: "info" },
+  processed: { label: "Processed", tone: "neutral" },
 };
 
 // The label comes from outcomeLabel, shared with the coordinator's panel; only the
 // look is chosen here. An outcome not listed is styled as a plain closure.
-const DECISION_CLASSES = {
-  approved: "change-request-outcome--approved",
-  rejected: "change-request-outcome--rejected",
+const DECISION_TONES = {
+  approved: "success",
+  rejected: "danger",
   // Closed by the system when the whole event was, not decided on their own.
-  event_rejected: "change-request-outcome--rejected",
-  event_cancelled: "change-request-outcome--rejected",
-  event_completed: "change-request-outcome--closed",
+  event_rejected: "danger",
+  event_cancelled: "danger",
+  event_completed: "neutral",
 };
 
 function useChangeRequests(eventRequestId) {
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState(null); // { message, retryable }
 
   const fetchRequests = useCallback(async () => {
     try {
       const data = await getChangeRequests(eventRequestId);
       setRequests(data);
       setError(null);
-    } catch {
-      setError("Could not load your change requests.");
+    } catch (err) {
+      setError({ message: "Could not load your change requests.", retryable: canRetryRead(err) });
     } finally {
       setLoading(false);
     }
@@ -55,29 +62,43 @@ function useChangeRequests(eventRequestId) {
     return () => clearInterval(interval);
   }, [fetchRequests]);
 
-  return { requests, loading, error };
+  // The first load and the poll keep the list on screen; only Try again shows Loading.
+  const reload = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    return fetchRequests();
+  }, [fetchRequests]);
+
+  return { requests, loading, error, reload };
 }
 
 export default function ChangeRequestStatusList({ eventRequestId }) {
-  const { requests, loading, error } = useChangeRequests(eventRequestId);
+  const { requests, loading, error, reload } = useChangeRequests(eventRequestId);
+  const { headingRef, retry } = useFocusAfterRetry(reload);
 
-  if (loading) {
-    return <p>Loading change requests...</p>;
-  }
+  // Every state renders in this box, so focus has somewhere to land after Try again.
+  const box = (content) => <div ref={headingRef} tabIndex={-1}>{content}</div>;
+
+  if (loading) return box(<LoadingText />);
 
   if (error) {
-    return <p className="change-request-status__error">{error}</p>;
+    return box(<ErrorNotice message={error.message} onRetry={error.retryable ? retry : undefined} />);
   }
 
   if (requests.length === 0) {
-    return <p>You haven't requested any changes for this event.</p>;
+    return box(
+      <EmptyState
+        message="You haven't requested any changes for this event."
+        nextStep="Use the form above to request one."
+      />,
+    );
   }
 
-  return (
+  return box(
     <ul className="change-request-status-list">
       {groupChangeRequests(requests).map((group) => {
         const status = group.rows[0].status;
-        const config = STATUS_CONFIG[status] || { label: status, className: "status--unknown" };
+        const config = STATUS_CONFIG[status] || { label: status, tone: "neutral" };
         const outcome = outcomeLabel(group.decision);
 
         return (
@@ -94,13 +115,11 @@ export default function ChangeRequestStatusList({ eventRequestId }) {
               <p className="change-request-status-list__note"><strong>Your note:</strong> {group.organiserNote}</p>
             )}
             <div className="change-request-status-list__statuses">
-              <span className={`change-request-status-list__badge ${config.className}`}>
-                {config.label}
-              </span>
+              <StatusBadge tone={config.tone}>{config.label}</StatusBadge>
               {outcome && (
-                <span className={`change-request-status-list__badge ${DECISION_CLASSES[group.decision] ?? "change-request-outcome--closed"}`}>
+                <StatusBadge tone={DECISION_TONES[group.decision] ?? "neutral"}>
                   Outcome: {outcome}
-                </span>
+                </StatusBadge>
               )}
             </div>
             {group.decisionNotes && (
@@ -109,12 +128,12 @@ export default function ChangeRequestStatusList({ eventRequestId }) {
               </p>
             )}
             <span className="change-request-status-list__date">
-              Requested {formatTimestamp(group.createdAt, "on an unrecorded date")}
-              {group.processedAt && `; processed ${formatTimestamp(group.processedAt, "on an unrecorded date")}`}
+              Requested {formatDateTime(group.createdAt, "on an unrecorded date")}
+              {group.processedAt && `; processed ${formatDateTime(group.processedAt, "on an unrecorded date")}`}
             </span>
           </li>
         );
       })}
-    </ul>
+    </ul>,
   );
 }

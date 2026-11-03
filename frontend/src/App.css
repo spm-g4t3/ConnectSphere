@@ -103,73 +103,61 @@ button { cursor: pointer; }
 .dashboard li button { font-size: 0.84rem; padding: 7px 11px; }
 .dashboard p { color: var(--muted); }
 .dashboard > section > ul > li { align-items: center; }
-.dashboard--organiser__create-event { background: var(--teal); border-radius: 6px; color: white; display: inline-block; padding: 10px 16px; text-decoration: none; }
-.dashboard--organiser__create-event:hover { background: var(--teal-dark); }
 /* SCRUM-181. The "View calendar" links are router Links, so no button rule
    reaches them; these give them the action-row button look (the small
    size of .dashboard li button), as the create-event link above does. */
 .venue-catalogue__calendar-link, .venue-search__calendar-link { background: var(--teal); border-radius: 6px; color: white; display: inline-block; font-size: 0.84rem; padding: 7px 11px; text-decoration: none; }
 .venue-catalogue__calendar-link:hover, .venue-search__calendar-link:hover { background: var(--teal-dark); }
 .venue-search__calendar-link { margin-left: 12px; }
-.dashboard--organiser .status-badge { border-radius: 999px; display: inline-block; flex: 0 0 auto; font-size: 0.72rem; font-weight: 700; line-height: 1.3; padding: 4px 10px; text-transform: uppercase; }
-.dashboard--organiser .status--draft { background: #eef2f1; color: #42545a; }
-.dashboard--organiser .status--awaiting-review { background: #fff6e5; color: #8a5a00; }
-.dashboard--organiser .status--under-review { background: #e9f1fb; color: #2b5285; }
-.dashboard--organiser .status--action-required { background: #fff0ee; color: #a43c32; }
-.dashboard--organiser .status--approved { background: #e8f7f1; color: #17684f; }
-.dashboard--organiser .status--confirmed { background: #e2f2ee; color: #075c5a; }
-.dashboard--organiser .status--completed { background: #e8edf0; color: #42545a; }
-.dashboard--organiser .status--rejected { background: #fff0ee; color: #a43c32; }
-.dashboard--organiser .status--cancelled, .dashboard--organiser .status--unknown, .dashboard--organiser .status--unavailable { background: #eef2f1; color: var(--muted); }
+/* Router Links wearing Button classes: no button rule makes them a box. */
+.dashboard--organiser a.ui-button, .my-event-requests a.ui-button, .registration-events-list a.ui-button { display: inline-block; }
+.dashboard--organiser a.ui-button--primary, .my-event-requests a.ui-button--secondary, .registration-events-list a.ui-button--secondary { text-decoration: none; }
 .dashboard--organiser .dashboard--organiser__event-row { align-items: flex-start; display: block; }
-.dashboard--organiser__event-summary { align-items: center; display: flex; flex-wrap: wrap; gap: 8px 12px; min-width: 0; }
-.dashboard--organiser__event-date { color: var(--muted); font-size: 0.85rem; }
-.dashboard--organiser__event-details > summary { align-items: center; cursor: pointer; display: flex; flex-wrap: wrap; gap: 8px 16px; justify-content: space-between; list-style-position: inside; }
-.dashboard--organiser__event-details > summary:hover { color: var(--teal-dark); }
-.dashboard--organiser__event-details dl { display: grid; gap: 7px 16px; grid-template-columns: minmax(150px, 220px) minmax(0, 1fr); margin: 14px 0; }
-.dashboard--organiser__event-details dt { color: var(--muted); font-size: 0.86rem; font-weight: 700; }
-.dashboard--organiser__event-details dd { color: var(--ink); margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
-.dashboard--organiser__manage-event { color: var(--teal-dark); display: inline-block; font-size: 0.88rem; font-weight: 700; margin-top: 4px; text-decoration: none; }
-.dashboard--organiser__manage-event:hover { text-decoration: underline; }
-.dashboard--organiser__clarification { background: #fff6e5; border-left: 3px solid #bb7a12; color: #61440d !important; margin: 12px 0; padding: 10px 12px; white-space: pre-wrap; }
-.dashboard--organiser .dashboard--organiser__deadline-row { align-items: flex-start; display: grid; gap: 8px 18px; grid-template-columns: minmax(0, 1fr) auto; }
+.dashboard--organiser__event-summary { align-items: center; display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-3); min-width: 0; }
+.dashboard--organiser__event-date { color: var(--color-muted); font-size: var(--font-size-sm); }
+.dashboard--organiser__event-details > summary { align-items: center; cursor: pointer; display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); justify-content: space-between; list-style-position: inside; }
+.dashboard--organiser__event-details > summary:hover { color: var(--color-accent-dark); }
+.dashboard--organiser__event-details dl { display: grid; gap: 7px var(--space-4); grid-template-columns: minmax(150px, 220px) minmax(0, 1fr); margin: 14px 0; }
+.dashboard--organiser__event-details dt { color: var(--color-muted); font-size: var(--font-size-sm); font-weight: 700; }
+.dashboard--organiser__event-details dd { color: var(--color-ink); margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.dashboard--organiser__event-details > .ui-button--link { margin-top: var(--space-1); }
+.dashboard--organiser__clarification { background: var(--color-warning-soft); border-left: 3px solid #bb7a12; color: #61440d !important; margin: var(--space-3) 0; padding: 10px var(--space-3); white-space: pre-wrap; }
+.dashboard--organiser .dashboard--organiser__deadline-row { align-items: flex-start; display: grid; gap: var(--space-2) 18px; grid-template-columns: minmax(0, 1fr) auto; }
 .dashboard--organiser__deadline-row p { margin: 6px 0 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 .dashboard--organiser__deadline-meta { align-items: flex-end; display: flex; flex-direction: column; gap: 5px; text-align: right; }
-.deadline-tag { background: #fff6e5; border-radius: 4px; color: #8a5a00; font-size: 0.75rem; font-weight: 700; padding: 4px 7px; }
-.dashboard--organiser__deadline-row .dashboard--organiser__manage-event { grid-column: 1 / -1; }
-.dashboard--organiser__error { background: #fff0ee; border-radius: 6px; color: #a43c32 !important; padding: 10px 12px; }
-.my-event-requests { margin: 0 auto; max-width: 1080px; padding: 54px 24px; }
-.my-event-requests__header { align-items: center; display: flex; gap: 20px; justify-content: space-between; margin-bottom: 24px; }
-.my-event-requests__header h1 { color: var(--ink); font-size: 1.8rem; margin: 0; }
-.my-event-requests__header > button, .my-event-requests__item-actions button, .my-event-requests__back { background: var(--teal); border: 0; border-radius: 6px; color: white; padding: 10px 14px; }
-.my-event-requests__header > button:hover, .my-event-requests__item-actions button:hover { background: var(--teal-dark); }
-.my-event-requests__back { background: transparent; border: 1px solid var(--line); color: var(--teal-dark); margin-bottom: 18px; }
-.my-event-requests__back:hover { background: #eef6f3; }
+.dashboard--organiser__deadline-row > .ui-button { grid-column: 1 / -1; justify-self: start; }
+/* One clear ring for every Organiser control and focused title, so keyboard
+   users can always see where they are. */
+.dashboard--organiser :is(a, button, input, select, textarea, summary, [tabindex]):focus-visible,
+.my-event-requests :is(a, button, input, select, textarea, summary, [tabindex]):focus-visible,
+.event-registration-page :is(a, button, input, select, textarea, summary, [tabindex]):focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+/* Event names, notes and references can be one long word; wrap them inside a 360px screen. */
+.dashboard--organiser, .my-event-requests, .event-registration-page { overflow-wrap: anywhere; }
+.my-event-requests { margin: 0 auto; max-width: 1080px; padding: 54px var(--space-5); }
+.my-event-requests > .ui-button--link { margin-bottom: 18px; }
+.my-event-requests__header { align-items: center; display: flex; gap: 20px; justify-content: space-between; margin-bottom: var(--space-5); }
+.my-event-requests__header h1 { color: var(--color-ink); font-size: 1.8rem; margin: 0; }
 .my-event-requests__list { display: grid; gap: 14px; list-style: none; margin: 0; padding: 0; }
-.my-event-requests__item { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 18px rgba(24, 61, 58, 0.05); display: block; padding: 20px; transition: background-color 0.8s ease, border-color 0.8s ease, box-shadow 0.8s ease; }
+.my-event-requests__item { background: var(--color-paper); border: 1px solid var(--color-line); border-radius: var(--radius-card); box-shadow: 0 6px 18px rgba(24, 61, 58, 0.05); display: block; padding: 20px; transition: background-color 0.8s ease, border-color 0.8s ease, box-shadow 0.8s ease; }
 /* SCRUM-172 (AC7): the event a notification was opened for. */
 /* A row opened from a link pulses while the page glides to it, then fades back
    when MyEventRequests drops the class (FOCUS_HIGHLIGHT_MS). */
-.my-event-requests__item--focused { animation: focused-row-pulse 1.2s ease-in-out 0.4s 2; background-color: #eef8f7; border-color: var(--teal); box-shadow: 0 0 0 3px rgba(8, 127, 123, 0.22); }
+.my-event-requests__item--focused { animation: focused-row-pulse 1.2s ease-in-out 0.4s 2; background-color: #eef8f7; border-color: var(--color-accent); box-shadow: 0 0 0 3px rgba(8, 127, 123, 0.22); }
 @keyframes focused-row-pulse {
   50% { box-shadow: 0 0 0 7px rgba(8, 127, 123, 0.12); }
 }
 @media (prefers-reduced-motion: reduce) {
   .my-event-requests__item, .my-event-requests__item--focused { animation: none; transition: none; }
 }
-.my-event-requests__item-main { align-items: center; display: flex; flex-wrap: wrap; gap: 8px 14px; }
+.my-event-requests__item-main { align-items: center; display: flex; flex-wrap: wrap; gap: var(--space-2) 14px; }
 .my-event-requests__item-description { line-height: 1.5; margin: 10px 0; }
 /* SCRUM-486 (SCRUM-520). Where a submitted request stands with its
    coordinator, directly under the status description it qualifies: the
    summary teal of the page's other secondary lines, pulled up under the
    description as the reassign hint is under its field. */
-.my-event-requests__assignment { color: var(--teal-dark); font-size: 0.9rem; margin: -6px 0 10px; }
-.my-event-requests__item-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
-.my-event-requests__item-actions button { font-size: 0.88rem; }
-.my-event-requests__registration-link { align-items: center; background: #eef6f3; border: 1px solid #b9d8d0; border-radius: 6px; color: var(--teal-dark); display: inline-flex; font-size: 0.88rem; font-weight: 700; padding: 9px 13px; text-decoration: none; }
-.my-event-requests__registration-link:hover { background: #dff0ea; }
-.my-event-requests__error { background: #fff0ee; border-radius: 6px; color: #a43c32; padding: 10px 12px; }
-.event-request-form, .change-request-form { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; display: grid; gap: 18px; margin: 0 0 24px; padding: 24px; }
+.my-event-requests__assignment { color: var(--color-accent-dark); font-size: var(--font-size-md); margin: -6px 0 10px; }
+.my-event-requests__item-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: 14px; }
+.event-request-form, .change-request-form { background: var(--color-paper); border: 1px solid var(--color-line); border-radius: var(--radius-card); display: grid; gap: 18px; margin: 0 0 var(--space-5); padding: var(--space-5); }
 /* SCRUM-355. A revision keeps the rejection it answers beside the form on a
    wide screen, and above it on a narrow one. A draft never rejected has no
    aside, so the form keeps the full width. */
@@ -178,10 +166,10 @@ button { cursor: pointer; }
   .my-event-requests__revision:has(> .decision-history) { grid-template-columns: minmax(0, 1fr) minmax(260px, 340px); }
   .my-event-requests__revision > .decision-history { grid-column: 2; grid-row: 1; position: sticky; top: 16px; }
 }
-/* The red of a rejection, as .my-event-requests__error; the coordinator's
+/* The red of a rejection, as an error notice; the coordinator's
    resubmission mark is amber, a thing to note rather than a failure. */
 .decision-history { background: var(--paper); border: 1px solid var(--line); border-left: 3px solid #a43c32; border-radius: 8px; display: grid; gap: 10px; margin: 0 0 24px; min-width: 0; padding: 16px 18px; }
-.decision-history h3 { color: var(--ink); font-size: 0.95rem; margin: 4px 0 0; }
+.decision-history h2, .decision-history h3 { color: var(--ink); font-size: 0.95rem; margin: 4px 0 0; }
 .decision-history .decision-history__reason { background: #fff0ee; border-radius: 6px; display: grid; gap: 4px; padding: 10px 12px; }
 .decision-history .decision-history__reason strong { color: #a43c32; font-size: 0.86rem; }
 .decision-history .decision-history__reason p { color: var(--ink); margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
@@ -191,20 +179,20 @@ button { cursor: pointer; }
 .decision-history__list li { border-left: 2px solid var(--line); color: var(--muted); font-size: 0.86rem; padding: 2px 0 2px 12px; }
 .decision-history__list li strong { color: var(--ink); }
 .decision-history .decision-history__list p { color: var(--ink); margin: 4px 0 0; overflow-wrap: anywhere; white-space: pre-wrap; }
-.decision-history__state { color: #a43c32; font-size: 0.88rem; margin: 10px 0; }
-.event-request-form h1, .change-request-form h2 { color: var(--ink); margin: 0; }
-.event-request-form > label, .change-request-form > label { color: var(--muted); display: grid; gap: 7px; line-height: 1.4; }
-.event-request-form input, .event-request-form textarea, .change-request-form input, .change-request-form textarea, .change-request-form select { background: white; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; min-width: 0; padding: 10px 12px; width: 100%; }
-.event-request-form input:focus, .event-request-form textarea:focus, .change-request-form input:focus, .change-request-form textarea:focus, .change-request-form select:focus { border-color: var(--teal); outline: 2px solid rgba(8, 127, 123, 0.16); }
-.event-request-form__row { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.event-request-form__row label { color: var(--muted); display: grid; gap: 7px; }
+.event-request-form h1 { color: var(--color-ink); margin: 0; }
+.event-request-form > label, .change-request-form > label { color: var(--color-muted); display: grid; gap: 7px; line-height: 1.4; }
+.event-request-form input, .event-request-form textarea, .change-request-form input, .change-request-form textarea, .change-request-form select { background: var(--color-paper); border: 1px solid var(--color-line); border-radius: var(--radius-control); color: var(--color-ink); font: inherit; min-width: 0; padding: 10px var(--space-3); width: 100%; }
+.event-request-form input:focus, .event-request-form textarea:focus, .change-request-form input:focus, .change-request-form textarea:focus, .change-request-form select:focus { border-color: var(--color-accent); }
+.event-request-form__row { display: grid; gap: var(--space-4); grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.event-request-form__row label { color: var(--color-muted); display: grid; gap: 7px; }
 .event-request-form__actions { display: flex; flex-wrap: wrap; gap: 10px; }
-.event-request-form__submit-hint { align-self: center; color: var(--muted); font-size: 0.85rem; margin: 0; }
-.event-request-form__actions button, .change-request-form > button, .change-request-form__success button { background: var(--teal); border: 0; border-radius: 6px; color: white; padding: 10px 14px; }
-.event-request-form__notice, .change-request-form__notice { background: #eef6f3; border-left: 3px solid var(--teal); color: var(--ink); margin: 0; padding: 12px 14px; }
-.my-event-requests > h2 { color: var(--ink); margin: 0 0 16px; }
-.my-event-requests > .change-request-status-list { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 20px; }
-.my-event-requests > .change-request-status-list::before { content: "Change request history"; display: block; font-size: 1.1rem; font-weight: 700; margin-bottom: 4px; }
+.event-request-form__submit-hint { align-self: center; color: var(--color-muted); font-size: var(--font-size-sm); margin: 0; }
+.event-request-form__notice, .change-request-form__notice { background: var(--color-accent-soft); border-left: 3px solid var(--color-accent); color: var(--color-ink); margin: 0; padding: var(--space-3) 14px; }
+.my-event-requests__panel-header { margin: 0 0 var(--space-4); }
+.my-event-requests__panel-header h1 { color: var(--color-ink); font-size: 1.5rem; margin: 0; }
+.my-event-requests__panel-header p { color: var(--color-muted); margin: var(--space-1) 0 0; overflow-wrap: anywhere; }
+.my-event-requests__change-history { background: var(--color-paper); border: 1px solid var(--color-line); border-radius: var(--radius-card); padding: 20px; }
+.my-event-requests__change-history h2 { color: var(--color-ink); font-size: 1.1rem; margin: 0 0 var(--space-1); }
 .dashboard--coordinator > section { text-align: left; }
 .dashboard.dashboard--event-page { max-width: 1200px; }
 .dashboard--coordinator > section > ul { margin-top: 10px; }
@@ -555,7 +543,9 @@ button { cursor: pointer; }
 .clarification-current p { color: var(--ink) !important; margin: 0; white-space: pre-wrap; }
 .clarification-current > span { color: var(--muted); font-size: 0.8rem; }
 .clarification-history__state { color: var(--muted); font-size: 0.88rem; margin: 10px 0; }
-.clarification-reply { display: grid; gap: 12px; }
+.clarification-reply { display: grid; gap: var(--space-3); }
+/* The size it had as an h2, so the panel title does not jump. */
+.clarification-reply > h1 { font-size: 1.5rem; }
 .clarification-reply label { display: grid; gap: 7px; }
 .clarification-history__open { margin-top: 8px; }
 .clarification-history-dialog { border: 0; border-radius: 12px; box-shadow: 0 18px 55px #102a2a40; color: var(--ink); margin: auto; max-height: min(82vh, 760px); max-width: min(680px, calc(100vw - 32px)); overflow-y: auto; padding: 22px; width: 100%; }
@@ -564,28 +554,28 @@ button { cursor: pointer; }
 .clarification-history-dialog__header h2 { font-size: 1.2rem; margin: 0; }
 .clarification-history-dialog__header p { color: var(--muted); margin: 4px 0 0; }
 .clarification-history-dialog__close { flex: 0 0 auto; }
-.clarification-reply textarea { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; padding: 10px 12px; resize: vertical; }
-.clarification-reply__amendments { border: 1px solid var(--line); border-radius: 8px; display: grid; gap: 12px; margin: 0; padding: 16px; }
-.clarification-reply__amendments legend { color: var(--teal-dark); font-weight: 700; padding: 0 6px; }
-.clarification-reply__amendments p { color: var(--muted); margin: 0; }
-.clarification-reply input, .clarification-reply__amendments textarea { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; padding: 10px 12px; }
-.clarification-amendments { background: #f7faf9; border: 1px solid var(--line); border-radius: 10px; display: grid; gap: 16px; padding: 18px; }
-.clarification-amendments__heading { align-items: flex-start; display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; }
-.clarification-amendments__heading h3 { color: var(--ink); font-size: 1rem; margin: 0; }
-.clarification-amendments__heading p { font-size: 0.88rem; margin: 5px 0 0; }
-.clarification-amendments__badge { background: #e8edf0; border-radius: 999px; color: #42545a; font-size: 0.76rem; font-weight: 700; padding: 5px 10px; white-space: nowrap; }
-.clarification-amendments__badge--active { background: #e8f7f1; color: #17684f; }
-.clarification-amendments .clarification-reply__amendments { background: var(--paper); }
-.clarification-amendments__grid { display: grid; gap: 12px 16px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); }
-.clarification-amendments__empty { background: var(--paper); border: 1px dashed #c7d6d1; border-radius: 8px; display: grid; gap: 6px; padding: 14px; }
-.clarification-amendments__empty strong { color: var(--ink); font-size: 0.92rem; }
-.clarification-amendments__empty span { color: var(--muted); font-size: 0.88rem; line-height: 1.5; }
-.clarification-amendments__readonly { border-top: 1px solid var(--line); padding-top: 12px; }
-.clarification-amendments__readonly summary { color: var(--teal-dark); cursor: pointer; font-size: 0.88rem; font-weight: 700; }
+.clarification-reply textarea { border: 1px solid var(--color-line); border-radius: var(--radius-control); color: var(--color-ink); font: inherit; min-width: 0; padding: 10px var(--space-3); resize: vertical; }
+/* A fieldset is as wide as its widest content by default; min-width: 0 lets it fit a phone. */
+.clarification-reply__amendments { border: 1px solid var(--color-line); border-radius: var(--radius-card); display: grid; gap: var(--space-3); margin: 0; min-width: 0; padding: var(--space-4); }
+.clarification-reply__amendments legend { color: var(--color-accent-dark); font-weight: 700; padding: 0 6px; }
+.clarification-reply__amendments p { color: var(--color-muted); margin: 0; }
+.clarification-reply input, .clarification-reply__amendments textarea { border: 1px solid var(--color-line); border-radius: var(--radius-control); color: var(--color-ink); font: inherit; min-width: 0; padding: 10px var(--space-3); }
+.clarification-amendments { background: #f7faf9; border: 1px solid var(--color-line); border-radius: 10px; display: grid; gap: var(--space-4); padding: 18px; }
+.clarification-amendments__heading { align-items: flex-start; display: flex; flex-wrap: wrap; gap: var(--space-3); justify-content: space-between; }
+.clarification-amendments__heading h2 { color: var(--color-ink); font-size: var(--font-size-base); margin: 0; }
+.clarification-amendments__heading p { font-size: var(--font-size-md); margin: 5px 0 0; }
+.clarification-amendments__heading .ui-status-badge { white-space: nowrap; }
+.clarification-amendments .clarification-reply__amendments { background: var(--color-paper); }
+.clarification-amendments__grid { display: grid; gap: var(--space-3) var(--space-4); grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); }
+.clarification-amendments__empty { background: var(--color-paper); border: 1px dashed #c7d6d1; border-radius: var(--radius-card); display: grid; gap: 6px; padding: 14px; }
+.clarification-amendments__empty strong { color: var(--color-ink); font-size: var(--font-size-md); }
+.clarification-amendments__empty span { color: var(--color-muted); font-size: var(--font-size-md); line-height: 1.5; }
+.clarification-amendments__readonly { border-top: 1px solid var(--color-line); padding-top: var(--space-3); }
+.clarification-amendments__readonly summary { color: var(--color-accent-dark); cursor: pointer; font-size: var(--font-size-md); font-weight: 700; }
 .clarification-amendments__readonly dl { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); margin: 14px 0 0; }
-.clarification-amendments__readonly dl > div { background: var(--paper); border: 1px solid var(--line); border-radius: 7px; min-width: 0; padding: 10px 12px; }
-.clarification-amendments__readonly dt { color: var(--muted); font-size: 0.76rem; font-weight: 700; margin-bottom: 4px; }
-.clarification-amendments__readonly dd { color: var(--ink); font-size: 0.88rem; margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.clarification-amendments__readonly dl > div { background: var(--color-paper); border: 1px solid var(--color-line); border-radius: 7px; min-width: 0; padding: 10px var(--space-3); }
+.clarification-amendments__readonly dt { color: var(--color-muted); font-size: 0.76rem; font-weight: 700; margin-bottom: var(--space-1); }
+.clarification-amendments__readonly dd { color: var(--color-ink); font-size: var(--font-size-md); margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 .coordinator-clarification__fields { border: 1px solid var(--line); border-radius: 8px; display: grid; gap: 8px; margin: 0; padding: 14px; }
 .coordinator-clarification__fields legend { color: var(--teal-dark); font-weight: 700; padding: 0 6px; }
 .coordinator-clarification__fields p { color: var(--muted); font-size: 0.86rem; margin: 0; }
@@ -706,8 +696,6 @@ button { cursor: pointer; }
 .event-change-history__source { background: #eef2f1; border-radius: 999px; color: var(--muted); font-size: 0.75rem; padding: 2px 8px; }
 .event-change-history__values, .event-change-history__reason { color: var(--ink); margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 .event-change-history__meta { color: var(--muted); font-size: 0.85rem; margin: 0; }
-.event-change-history__state { color: var(--muted); font-size: 0.88rem; margin: 0; }
-.event-change-history__state[role="alert"] { color: #a43c32; }
 .event-significant-change__confirmation label { align-items: flex-start; color: var(--ink); display: flex; gap: 9px; }
 .event-significant-change__confirmation input { flex: 0 0 auto; margin-top: 4px; }
 /* An organiser with no name on record is shown by id, which must read as an
@@ -835,21 +823,10 @@ button { cursor: pointer; }
 .decision-outcome dd { color: var(--ink); margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 /* The Organiser's decision block sits on the row itself, so it is set off from
    the description above it the way the clarification note is. */
-.my-event-requests__decision { background: #f6f9f8; border-left: 3px solid var(--teal); margin: 12px 0; padding: 10px 12px; }
-.my-event-requests__decision > strong { color: var(--ink); display: block; font-size: 0.92rem; }
+.my-event-requests__decision { background: #f6f9f8; border-left: 3px solid var(--color-accent); margin: var(--space-3) 0; padding: 10px var(--space-3); }
+.my-event-requests__decision > strong { color: var(--color-ink); display: block; font-size: var(--font-size-md); }
 .dashboard--coordinator .coordinator-start-review { display: grid; gap: 10px; justify-items: start; }
 .dashboard--coordinator .coordinator-start-review p { margin: 0; }
-.my-event-requests .status-badge { border-radius: 999px; display: inline-block; flex: 0 0 auto; font-size: 0.72rem; font-weight: 700; line-height: 1.3; padding: 4px 10px; text-transform: uppercase; }
-.my-event-requests .status--draft { background: #eef2f1; color: #42545a; }
-.my-event-requests .status--awaiting-review { background: #fff6e5; color: #8a5a00; }
-.my-event-requests .status--under-review { background: #e9f1fb; color: #2b5285; }
-.my-event-requests .status--action-required { background: #fff0ee; color: #a43c32; }
-.my-event-requests .status--approved { background: #e8f7f1; color: #17684f; }
-.my-event-requests .status--confirmed { background: #e2f2ee; color: #075c5a; }
-.my-event-requests .status--completed { background: #e8edf0; color: #42545a; }
-.my-event-requests .status--rejected { background: #fff0ee; color: #a43c32; }
-.my-event-requests .status--cancelled { background: #eef2f1; color: var(--muted); }
-.my-event-requests .status--unavailable, .my-event-requests .status--unknown { background: #eef2f1; color: var(--muted); }
 /* NECESSARY, not cosmetic, and the same class of bug .venue-form li fixes
    above. .dashboard li forces flex with justify-content: space-between, which
    on a label/value row throws "Purpose" to one edge of the card and the
@@ -918,49 +895,39 @@ button { cursor: pointer; }
 .booking-request__conflicts .booking-request__conflict-note { color: var(--muted); flex-basis: 100%; font-size: 0.84rem; }
 .booking-request__actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
 .booking-request__success { background: #e8f7f1; border-radius: 6px; color: #17684f; padding: 10px 14px; }
-.my-event-requests__details { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 10px; }
-.my-event-requests__details summary { color: var(--teal-dark); cursor: pointer; font-size: 0.9rem; font-weight: 700; }
-.my-event-requests__details dl { display: grid; gap: 8px 16px; grid-template-columns: minmax(140px, 220px) minmax(0, 1fr); margin: 14px 0 4px; }
-.my-event-requests__details dt { color: var(--muted); font-size: 0.86rem; font-weight: 700; }
-.my-event-requests__details dd { color: var(--ink); font-size: 0.9rem; margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
-.event-registration-page { margin: 0 auto; max-width: 960px; padding: 38px 24px 72px; }
-.event-registration-page__back { color: var(--teal-dark); display: inline-block; font-weight: 700; margin-bottom: 24px; text-decoration: none; }
-.event-registration-page__back:hover { text-decoration: underline; }
-button.event-registration-page__back { background: none; border: 0; cursor: pointer; font: inherit; font-weight: 700; padding: 0; }
-.event-registration-page__summary [role="status"] { background: #e8f7f1; border-radius: 6px; color: #17684f; font-weight: 700; margin: 18px 0 0; padding: 10px 14px; }
-.event-registration-page__configure { align-items: center; background: linear-gradient(135deg, var(--teal), var(--teal-dark)); border: 0; border-radius: 8px; box-shadow: 0 4px 12px rgba(8, 127, 123, 0.28); color: white; cursor: pointer; display: inline-flex; font: inherit; font-weight: 700; gap: 8px; margin-top: 22px; min-height: 46px; padding: 11px 22px; transition: box-shadow 0.15s, transform 0.15s; }
-.event-registration-page__configure::before { content: "⚙"; font-size: 1.05rem; }
-.event-registration-page__configure:hover { box-shadow: 0 6px 16px rgba(8, 127, 123, 0.38); transform: translateY(-1px); }
-.event-registration-page__configure:focus-visible { outline: 3px solid rgba(8, 127, 123, 0.3); outline-offset: 2px; }
-.event-registration-page__header { margin-bottom: 24px; }
-.event-registration-page__header .eyebrow { margin: 0 0 8px; }
-.event-registration-page__header h1 { color: var(--ink); font-size: clamp(1.8rem, 4vw, 2.5rem); letter-spacing: -0.04em; margin: 0 0 12px; overflow-wrap: anywhere; }
-.event-registration-page__header p:not(.eyebrow) { color: var(--muted); margin: 6px 0; }
-.event-registration-page__summary, .event-registration-page__form { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px rgba(24, 61, 58, 0.06); margin-top: 20px; padding: clamp(20px, 4vw, 30px); }
-.event-registration-page__summary h2, .event-registration-page__form h2 { color: var(--ink); font-size: 1.2rem; margin: 0 0 8px; }
-.event-registration-page__summary dl { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin: 20px 0 0; }
+.my-event-requests__details { border-top: 1px solid var(--color-line); margin-top: 14px; padding-top: 10px; }
+.my-event-requests__details summary { color: var(--color-accent-dark); cursor: pointer; font-size: var(--font-size-md); font-weight: 700; }
+.my-event-requests__details dl { display: grid; gap: var(--space-2) var(--space-4); grid-template-columns: minmax(140px, 220px) minmax(0, 1fr); margin: 14px 0 var(--space-1); }
+.my-event-requests__details dt { color: var(--color-muted); font-size: var(--font-size-sm); font-weight: 700; }
+.my-event-requests__details dd { color: var(--color-ink); font-size: var(--font-size-md); margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.event-registration-page { margin: 0 auto; max-width: 960px; padding: 38px var(--space-5) 72px; }
+.event-registration-page > .ui-button--link { display: inline-block; margin-bottom: var(--space-5); }
+.event-registration-page__summary [role="status"] { background: var(--color-success-soft); border-radius: var(--radius-control); color: var(--color-success); font-weight: 700; margin: 18px 0 0; padding: 10px 14px; }
+.event-registration-page__summary > .ui-button { margin-top: 22px; }
+.event-registration-page__header { margin-bottom: var(--space-5); }
+.event-registration-page__header .eyebrow { margin: 0 0 var(--space-2); }
+.event-registration-page__header h1 { color: var(--color-ink); font-size: clamp(1.8rem, 4vw, 2.5rem); letter-spacing: -0.04em; margin: 0 0 var(--space-3); overflow-wrap: anywhere; }
+.event-registration-page__header p:not(.eyebrow) { color: var(--color-muted); margin: 6px 0; }
+.event-registration-page__summary, .event-registration-page__form { background: var(--color-paper); border: 1px solid var(--color-line); border-radius: 10px; box-shadow: 0 8px 24px rgba(24, 61, 58, 0.06); margin-top: 20px; padding: clamp(20px, 4vw, 30px); }
+.event-registration-page__summary h2, .event-registration-page__form h2 { color: var(--color-ink); font-size: var(--font-size-h2); margin: 0 0 var(--space-2); }
+.event-registration-page__summary dl { display: grid; gap: var(--space-3); grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin: 20px 0 0; }
 .event-registration-page__summary dl > div { background: #f5f9f7; border: 1px solid #e5eeea; border-radius: 7px; min-width: 0; padding: 13px 15px; }
-.event-registration-page__summary dt { color: var(--muted); font-size: 0.8rem; font-weight: 700; margin-bottom: 5px; }
-.event-registration-page__summary dd { color: var(--ink); font-size: 0.95rem; font-weight: 600; line-height: 1.45; margin: 0; overflow-wrap: anywhere; }
-.event-registration-page__form > p { color: var(--muted); line-height: 1.5; margin: 0; }
-.event-registration-page__toggle { align-items: center; background: #f5f9f7; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); display: flex; gap: 12px; margin: 22px 0; padding: 15px 16px; }
-.event-registration-page__toggle input { accent-color: var(--teal); height: 19px; margin: 0; width: 19px; }
+.event-registration-page__summary dt { color: var(--color-muted); font-size: 0.8rem; font-weight: 700; margin-bottom: 5px; }
+.event-registration-page__summary dd { color: var(--color-ink); font-size: 0.95rem; font-weight: 600; line-height: 1.45; margin: 0; overflow-wrap: anywhere; }
+.event-registration-page__form > p { color: var(--color-muted); line-height: 1.5; margin: 0; }
+.event-registration-page__toggle { align-items: center; background: #f5f9f7; border: 1px solid var(--color-line); border-radius: var(--radius-card); color: var(--color-ink); display: flex; gap: var(--space-3); margin: 22px 0; padding: 15px var(--space-4); }
+.event-registration-page__toggle input { accent-color: var(--color-accent); height: 19px; margin: 0; width: 19px; }
 .event-registration-page__toggle span { font-weight: 700; }
 .event-registration-page__fields { display: grid; gap: 18px 20px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.event-registration-page__fields label { color: var(--ink); display: grid; font-size: 0.92rem; font-weight: 700; gap: 8px; min-width: 0; }
-.event-registration-page__optional, .event-registration-page__hint { color: var(--muted); font-size: 0.8rem; font-weight: 400; }
-.event-registration-page__fields input { background: white; border: 1px solid #aebfba; border-radius: 6px; color: var(--ink); font: inherit; min-height: 44px; min-width: 0; padding: 9px 11px; width: 100%; }
-.event-registration-page__fields input:focus { border-color: var(--teal); outline: 3px solid rgba(8, 127, 123, 0.15); }
+.event-registration-page__fields label { color: var(--color-ink); display: grid; font-size: var(--font-size-md); font-weight: 700; gap: var(--space-2); min-width: 0; }
+.event-registration-page__optional, .event-registration-page__hint { color: var(--color-muted); font-size: 0.8rem; font-weight: 400; }
+.event-registration-page__fields input { background: var(--color-paper); border: 1px solid #aebfba; border-radius: var(--radius-control); color: var(--color-ink); font: inherit; min-height: 44px; min-width: 0; padding: 9px 11px; width: 100%; }
+.event-registration-page__fields input:focus { border-color: var(--color-accent); }
 .event-registration-page__hint { line-height: 1.4; }
-.event-registration-page__actions { align-items: center; display: flex; flex-wrap: wrap; gap: 14px; margin-top: 24px; }
-.event-registration-page__actions button, .event-registration-page__error button { background: var(--teal); border: 0; border-radius: 6px; color: white; font-weight: 700; min-height: 44px; padding: 10px 16px; }
-.event-registration-page__actions button:hover, .event-registration-page__error button:hover { background: var(--teal-dark); }
-.event-registration-page__actions button:disabled, .event-registration-page__error button:disabled { cursor: wait; opacity: 0.65; }
-.event-registration-page__actions [role="status"] { color: #17684f; font-weight: 700; margin: 0; }
-.event-registration-page__notice { background: #fff6e5; border-left: 4px solid #bb7a12; border-radius: 5px; color: #61440d; line-height: 1.5; margin-top: 20px; padding: 13px 16px; }
-.event-registration-page__error { background: #fff0ee; border-left: 4px solid #a43c32; border-radius: 6px; color: #772820; margin: 20px 0; padding: 14px 16px; }
-.event-registration-page__error p { line-height: 1.5; margin: 0 0 12px; overflow-wrap: anywhere; }
-.my-event-requests__clarification { background: #fff6e5; border-left: 3px solid #bb7a12; color: #61440d; margin: 14px 0; padding: 10px 12px; white-space: pre-wrap; }
+.event-registration-page__actions { align-items: center; display: flex; flex-wrap: wrap; gap: 14px; margin-top: var(--space-5); }
+.event-registration-page__actions [role="status"] { color: var(--color-success); font-weight: 700; margin: 0; }
+.event-registration-page__notice { background: var(--color-warning-soft); border-left: 4px solid #bb7a12; border-radius: 5px; color: #61440d; line-height: 1.5; margin-top: 20px; padding: 13px var(--space-4); }
+.my-event-requests__clarification { background: var(--color-warning-soft); border-left: 3px solid #bb7a12; color: #61440d; margin: 14px 0; padding: 10px var(--space-3); white-space: pre-wrap; }
 .coordinator-clarification { display: grid; gap: 12px; }
 .coordinator-clarification label { color: var(--muted); display: grid; gap: 7px; }
 .coordinator-clarification textarea { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; min-height: 96px; padding: 10px 12px; resize: vertical; }
@@ -978,30 +945,21 @@ button.event-registration-page__back { background: none; border: 0; cursor: poin
 .coordinator-change-requests__reject-form label { color: var(--muted); display: grid; gap: 6px; }
 .coordinator-change-requests__reject-form textarea { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; min-height: 72px; padding: 9px 11px; resize: vertical; }
 .coordinator-change-requests__outcome { font-size: 0.9rem; font-weight: 700; }
-.change-request-status-list { list-style: none; margin: 16px 0 0; padding: 0; }
-.change-request-status-list__item { border-top: 1px solid var(--line); display: grid; gap: 8px; padding: 14px 0; }
+.change-request-status-list { list-style: none; margin: var(--space-4) 0 0; padding: 0; }
+.change-request-status-list__item { border-top: 1px solid var(--color-line); display: grid; gap: var(--space-2); padding: 14px 0; }
 .change-request-status-list__item:first-child { border-top: 0; }
-.change-request-status-list__field { color: var(--ink); font-weight: 700; }
-.change-request-status-list__details { color: var(--muted); overflow-wrap: anywhere; white-space: pre-wrap; }
-.change-request-status-list__statuses { display: flex; flex-wrap: wrap; gap: 8px; }
-.change-request-status-list__badge { border-radius: 4px; font-size: 0.78rem; font-weight: 700; padding: 4px 8px; }
-.status--outstanding { background: #fff6e5; color: #8a5a00; }
-.status--in-progress { background: #e9f1fb; color: #2b5285; }
-.status--processed { background: #eef2f1; color: #42545a; }
-.status--unknown { background: #eef2f1; color: var(--muted); }
-.change-request-outcome--approved { background: #e8f7f1; color: #17684f; }
-.change-request-outcome--rejected { background: #fff0ee; color: #a43c32; }
-.change-request-outcome--closed { background: #eef2f1; color: var(--muted); }
-.change-request-status-list__decision-notes { background: #f3f6f4; color: var(--ink); margin: 0; padding: 9px 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.change-request-status-list__date { color: var(--muted); font-size: 0.82rem; }
+.change-request-status-list__field { color: var(--color-ink); font-weight: 700; }
+.change-request-status-list__details { color: var(--color-muted); overflow-wrap: anywhere; white-space: pre-wrap; }
+.change-request-status-list__statuses { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.change-request-status-list__decision-notes { background: #f3f6f4; color: var(--color-ink); margin: 0; padding: 9px 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.change-request-status-list__date { color: var(--color-muted); font-size: var(--font-size-sm); }
 
 /* SCRUM-402: a submission's fields together, on the Organiser's form and list. */
-.change-request-form__row { border: 1px solid var(--line); border-radius: 8px; display: grid; gap: 10px; margin: 0; padding: 14px; }
-.change-request-form__row label { color: var(--muted); display: grid; gap: 7px; }
-.change-request-form__row > button, .change-request-form > button[type="button"] { background: transparent; border: 1px solid var(--line); color: var(--ink); justify-self: start; }
-.change-request-status-list__fields { display: grid; gap: 8px; list-style: none; margin: 0; padding: 0; }
-.change-request-status-list__note { color: var(--ink); margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
-.change-request-outcome--closed { background: #eef2f1; color: var(--muted); }
+.change-request-form__row { border: 1px solid var(--color-line); border-radius: var(--radius-card); display: grid; gap: 10px; margin: 0; min-width: 0; padding: 14px; }
+.change-request-form__row label { color: var(--color-muted); display: grid; gap: 7px; }
+.change-request-form__row > .ui-button, .change-request-form > .ui-button--secondary { justify-self: start; }
+.change-request-status-list__fields { display: grid; gap: var(--space-2); list-style: none; margin: 0; padding: 0; }
+.change-request-status-list__note { color: var(--color-ink); margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 
 /* SCRUM-402: the coordinator reviews a submission as a whole. */
 .change-request-review { display: grid; gap: 10px; }
@@ -1110,7 +1068,7 @@ button.event-registration-page__back { background: none; border: 0; cursor: poin
    .dashboard--organiser__deadline-meta { align-items: flex-start; text-align: left; }
    .my-event-requests { padding: 36px 18px; }
    .my-event-requests__header { align-items: flex-start; flex-direction: column; }
-   .my-event-requests__item { padding: 16px; }
+   .my-event-requests__item { padding: var(--space-4); }
    .event-registration-page { padding: 28px 18px 48px; }
    .event-registration-page__fields { grid-template-columns: 1fr; }
    .event-registration-page__summary dl { grid-template-columns: 1fr; }
@@ -1118,7 +1076,7 @@ button.event-registration-page__back { background: none; border: 0; cursor: poin
    .event-request-form, .change-request-form { padding: 18px; }
    .event-request-form__row, .venue-search__filters, .venue-search__window { grid-template-columns: 1fr; }
    .my-event-requests__details dl { grid-template-columns: 1fr; gap: 3px; }
-   .my-event-requests__details dd { margin-bottom: 8px; }
+   .my-event-requests__details dd { margin-bottom: var(--space-2); }
    .decision-outcome { grid-template-columns: 1fr; gap: 3px; }
    .decision-outcome dd { margin-bottom: 8px; }
    .venue-calendar-page { padding: 30px 18px; }
@@ -1287,8 +1245,17 @@ button.event-registration-page__back { background: none; border: 0; cursor: poin
 .needs-attention-reasons li { overflow-wrap: anywhere; }
 
 /* SCRUM-478 registration list */
-.registration-list__count { color: var(--ink); font-size: 1.6rem; font-weight: 700; margin: 8px 0 0; }
+.registration-list__count { color: var(--color-ink); font-size: 1.6rem; font-weight: 700; margin: var(--space-2) 0 0; }
 .registration-list__filter { margin: 20px 0; }
 .registration-list__table { border-collapse: collapse; width: 100%; }
-.registration-list__table th, .registration-list__table td { border-bottom: 1px solid var(--line); overflow-wrap: anywhere; padding: 10px 8px; text-align: left; }
-.registration-list__table th { color: var(--muted); font-size: 0.8rem; }
+.registration-list__table th, .registration-list__table td { border-bottom: 1px solid var(--color-line); overflow-wrap: anywhere; padding: 10px var(--space-2); text-align: left; }
+.registration-list__table th { color: var(--color-muted); font-size: 0.8rem; }
+/* Four columns are too narrow to read on a phone, so each registration becomes a
+   card of label and value. The header row stays for screen readers only. */
+@media (max-width: 720px) {
+  .registration-list__table, .registration-list__table tbody { display: block; }
+  .registration-list__table thead { clip-path: inset(50%); height: 1px; overflow: hidden; position: absolute; white-space: nowrap; width: 1px; }
+  .registration-list__table tr { border-bottom: 1px solid var(--color-line); display: grid; gap: var(--space-1); padding: var(--space-2) 0; }
+  .registration-list__table td { border-bottom: 0; display: grid; gap: var(--space-2); grid-template-columns: minmax(0, 8rem) minmax(0, 1fr); padding: 0; }
+  .registration-list__table td::before { color: var(--color-muted); content: attr(data-label); font-size: var(--font-size-sm); font-weight: 700; }
+}

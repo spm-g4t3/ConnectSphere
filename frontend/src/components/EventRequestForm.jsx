@@ -16,7 +16,9 @@
 // On successful submit, shows a confirmation with the request's reference
 // (its id) per AC7.
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import Button from "./ui/Button";
+import ErrorNotice from "./ui/ErrorNotice";
 import {
   createEventRequest,
   updateEventRequest,
@@ -60,6 +62,11 @@ export default function EventRequestForm({
   // is an array of { field, message } rather than a single string.
   const [submitErrors, setSubmitErrors] = useState([]);
   const [confirmation, setConfirmation] = useState(null);
+  // The confirmation replaces the form, Submit included, so focus moves to its title.
+  const confirmationHeadingRef = useRef(null);
+  useEffect(() => {
+    if (confirmation) confirmationHeadingRef.current?.focus();
+  }, [confirmation]);
 
   function updateField(field, value) {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -158,7 +165,7 @@ export default function EventRequestForm({
   if (confirmation) {
     return (
       <div className="event-request-form__confirmation">
-        <h1>Request submitted</h1>
+        <h1 ref={confirmationHeadingRef} tabIndex={-1}>Request submitted</h1>
         <p>
           Your event request has been received. Your reference number is:
         </p>
@@ -173,7 +180,7 @@ export default function EventRequestForm({
 
   return (
     <form className="event-request-form">
-      <h1>
+      <h1 tabIndex={-1}>
         {requestId
             ? "Edit draft request"
             : "Create event request"}
@@ -295,7 +302,8 @@ export default function EventRequestForm({
         />
       </label>
 
-      {saveError && <p className="event-request-form__error" role="alert">{saveError}</p>}
+      {/* No Try again: saving or submitting again is the retry. */}
+      {saveError && <ErrorNotice message={saveError} />}
       {draftSavedMessage && <p className="event-request-form__notice" role="status">{draftSavedMessage}</p>}
 
       {submitErrors.length > 0 && (
@@ -314,18 +322,17 @@ export default function EventRequestForm({
 
       {isDraft && (
         <div className="event-request-form__actions">
-          <button type="button" onClick={handleSaveDraft} disabled={savingDraft}>
+          <Button variant="secondary" onClick={handleSaveDraft} disabled={savingDraft}>
             {savingDraft ? "Saving..." : "Save draft"}
-          </button>
+          </Button>
 
-          <button
-            type="button"
+          <Button
             onClick={handleSubmit}
             disabled={submitting || !requestId}
             title={!requestId ? "Save the draft first" : undefined}
           >
             {submitting ? "Submitting..." : "Submit request"}
-          </button>
+          </Button>
           {!requestId && (
             <p className="event-request-form__submit-hint" role="status">
               Save the draft first to enable submission.

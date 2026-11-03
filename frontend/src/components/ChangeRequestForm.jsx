@@ -7,7 +7,9 @@
 // "Cancel the event" stands alone in a request (D8). Errors are keyed on the
 // status, never on the server's text; a 400's details[] go beside their row.
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import Button from "./ui/Button";
+import ErrorNotice from "./ui/ErrorNotice";
 import { submitChangeRequest } from "../services/changeRequestService";
 import {
   CHANGE_FIELD_OPTIONS,
@@ -67,6 +69,17 @@ export default function ChangeRequestForm({ eventRequestId, onSubmitted }) {
   const [errors, setErrors] = useState([]);
   const [otherErrors, setOtherErrors] = useState([]);
   const [success, setSuccess] = useState(false);
+  // Each view replaces the button that switched to it, so focus follows: to the
+  // confirmation after a submit, and to the first choice for another change.
+  const successRef = useRef(null);
+  const formRef = useRef(null);
+  const switchedView = useRef(false);
+  useEffect(() => {
+    if (!switchedView.current) return;
+    switchedView.current = false;
+    if (success) successRef.current?.focus();
+    else formRef.current?.querySelector("select")?.focus();
+  }, [success]);
 
   const cancelling = rows.some((row) => toChangeField(row.option) === "cancellation");
   const noteTooLong = Array.from(note.trim()).length > NOTE_MAX_LENGTH;
@@ -107,6 +120,7 @@ export default function ChangeRequestForm({ eventRequestId, onSubmitted }) {
         }),
         ...(note.trim() && { note: note.trim() }),
       });
+      switchedView.current = true;
       setSuccess(true);
       setRows([newRow()]);
       setNote("");
@@ -127,17 +141,23 @@ export default function ChangeRequestForm({ eventRequestId, onSubmitted }) {
 
   if (success) {
     return (
-      <div className="change-request-form__success">
+      <div className="change-request-form__success" ref={successRef} tabIndex={-1}>
         <p>Your change request has been submitted.</p>
-        <button onClick={() => setSuccess(false)}>Request another change</button>
+        <Button
+          variant="secondary"
+          onClick={() => {
+            switchedView.current = true;
+            setSuccess(false);
+          }}
+        >
+          Request another change
+        </Button>
       </div>
     );
   }
 
   return (
-    <form onSubmit={handleSubmit} className="change-request-form" noValidate>
-      <h2>Request a change</h2>
-
+    <form ref={formRef} onSubmit={handleSubmit} className="change-request-form" noValidate>
       {rows.map((row, index) => {
         const changeField = toChangeField(row.option);
         const label = `Change ${index + 1}`;
@@ -186,18 +206,18 @@ export default function ChangeRequestForm({ eventRequestId, onSubmitted }) {
             </label>
             {errors[index] && <p className="change-request-form__error">{errors[index]}</p>}
             {rows.length > 1 && (
-              <button type="button" onClick={() => setRows((current) => current.filter((_, i) => i !== index))}>
+              <Button variant="secondary" onClick={() => setRows((current) => current.filter((_, i) => i !== index))}>
                 Remove
-              </button>
+              </Button>
             )}
           </fieldset>
         );
       })}
 
       {!cancelling && (
-        <button type="button" disabled={rows.length >= MAX_CHANGES} onClick={() => setRows((current) => [...current, newRow()])}>
+        <Button variant="secondary" disabled={rows.length >= MAX_CHANGES} onClick={() => setRows((current) => [...current, newRow()])}>
           Add another change
-        </button>
+        </Button>
       )}
 
       <label>
@@ -205,7 +225,8 @@ export default function ChangeRequestForm({ eventRequestId, onSubmitted }) {
         <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} />
       </label>
 
-      {error && <p className="change-request-form__error" role="alert">{error}</p>}
+      {/* No Try again: submitting again is the retry. */}
+      {error && <ErrorNotice message={error} />}
       {otherErrors.length > 0 && (
         <div className="change-request-form__details-errors" role="alert">
           <p>Your change request can't be submitted yet:</p>
@@ -215,9 +236,9 @@ export default function ChangeRequestForm({ eventRequestId, onSubmitted }) {
         </div>
       )}
 
-      <button type="submit" disabled={submitting}>
+      <Button type="submit" disabled={submitting}>
         {submitting ? "Submitting..." : "Submit change request"}
-      </button>
+      </Button>
     </form>
   );
 }

@@ -15,10 +15,11 @@ import { getMyEventRequests, reopenEventRequest } from "../services/eventRequest
 import { isRegistrationConfigurable, mayHaveRegistrationList } from "../services/registrationStatuses";
 import {
   readStatusDisplay,
-  statusClassName,
+  statusTone,
 } from "../services/eventRequestStatusDisplay";
-import { formatMediumTimestamp } from "../services/displayFormat";
+import { formatDateTime, formatDay } from "../services/displayFormat";
 import { isReplyOverdue } from "../services/datetimeFormat";
+import { canRetryRead } from "../services/apiErrors";
 import EventRequestForm from "./EventRequestForm";
 import ChangeRequestForm from "./ChangeRequestForm";
 import ChangeRequestStatusList from "./ChangeRequestStatusList";
@@ -31,6 +32,13 @@ import ClarificationReplyForm from "./ClarificationReplyForm";
 import SafetyApprovalNotice from "./SafetyApprovalNotice";
 import ConfirmedArrangements from "./ConfirmedArrangements";
 import NeedsAttentionBadge from "./NeedsAttentionBadge";
+import Button from "./ui/Button";
+import StatusBadge from "./ui/StatusBadge";
+import LoadingText from "./ui/LoadingText";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import useFocusAfterRetry from "./useFocusAfterRetry";
+import useReturnFocus from "./useReturnFocus";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 
 /**
@@ -140,12 +148,18 @@ function assignmentLine(request) {
 // How long a row opened from a link stays highlighted, matching the CSS pulse.
 const FOCUS_HIGHLIGHT_MS = 4000;
 
+// Which control opened a panel, so Back can return focus to it. Edit is one key
+// for Continue editing and Revise and resubmit: a reopened row comes back as a draft.
+function openerKey(panel) {
+  return panel.mode === "create" ? "create" : `${panel.mode}:${panel.request.id}`;
+}
+
 export default function MyEventRequests() {
   const location = useLocation();
   const navigate = useNavigate();
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState(null); // { message, retryable }
 
   // Which panel is open, if any: { mode: "create" } | { mode: "edit", request }
   // | { mode: "change-request", request } | null
@@ -176,6 +190,7 @@ export default function MyEventRequests() {
 
   const fetchRequests = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const data = await getMyEventRequests();
       setRequests(data);
@@ -194,9 +209,8 @@ export default function MyEventRequests() {
         setFocusMissing(!found);
       }
       pendingFocusId.current = null;
-      setError(null);
-    } catch {
-      setError("Could not load your event requests.");
+    } catch (err) {
+      setError({ message: "Could not load your event requests.", retryable: canRetryRead(err) });
     } finally {
       setLoading(false);
     }
@@ -227,10 +241,36 @@ export default function MyEventRequests() {
   // handleSaved already refetches after an edit, so changes made in this app
   // are covered; this covers changes made anywhere else.
   useRefetchOnReturn(fetchRequests);
+  const { headingRef, retry } = useFocusAfterRetry(fetchRequests);
+  const panelKey = activePanel ? openerKey(activePanel) : null;
+  const { listHeadingRef, rowRef, returnFocusTo } = useReturnFocus(panelKey, loading);
+  function titleRef(node) {
+    headingRef.current = node;
+    listHeadingRef.current = node;
+  }
+
+  // An opened panel starts at its title, so keyboard and screen reader users
+  // begin at the top of what they opened. The forms draw their own h1.
+  const panelRef = useRef(null);
+  useEffect(() => {
+    if (panelKey) panelRef.current?.querySelector("h1")?.focus();
+  }, [panelKey]);
+
+  function closePanel() {
+    returnFocusTo(panelKey);
+    setActivePanel(null);
+  }
 
   function handleSaved() {
-    setActivePanel(null);
+    closePanel();
     fetchRequests();
+  }
+
+  // Like a submitted request, a change request keeps its panel open so its
+  // confirmation is seen; the history below is remounted to read the new one.
+  function handleChangeRequested() {
+    fetchRequests();
+    setActivePanel((panel) => (panel ? { ...panel, submissions: (panel.submissions ?? 0) + 1 } : panel));
   }
 
   // SCRUM-355 AC1, AC2: reopen as a draft and go straight to editing it.
@@ -251,36 +291,36 @@ export default function MyEventRequests() {
     }
   }
 
+  // A submit keeps the panel open so the form's "Request submitted" page, with
+  // the reference, is seen; the list refreshes behind it for Back to return to.
+  function handleRequestSaved(saved) {
+    fetchRequests();
+    if (saved.status !== "draft") {
+      setActivePanel((panel) => (panel ? { ...panel, submitted: true } : panel));
+    }
+  }
+
   if (activePanel?.mode === "create") {
     return (
-      <div className="my-event-requests">
-        <button className="my-event-requests__back" onClick={() => setActivePanel(null)}>&larr; Back to my requests</button>
-        <EventRequestForm
-          onSaved={(saved) => {
-            fetchRequests();
-            if (saved.status !== "draft") setActivePanel(null);
-          }}
-        />
+      <div className="my-event-requests" ref={panelRef}>
+        <Button variant="link" onClick={closePanel}>&larr; Back to my requests</Button>
+        <EventRequestForm onSaved={handleRequestSaved} />
       </div>
     );
   }
 
   if (activePanel?.mode === "edit") {
     return (
-      <div className="my-event-requests">
-        <button className="my-event-requests__back" onClick={() => setActivePanel(null)}>&larr; Back to my requests</button>
-        {/* Saving a draft keeps the panel open, so a revision keeps the
-            rejection beside the form (SCRUM-355 AC3); submitting closes it.
-            The rejection comes first, so it is read before the form. */}
+      <div className="my-event-requests" ref={panelRef}>
+        <Button variant="link" onClick={closePanel}>&larr; Back to my requests</Button>
+        {/* A revision keeps the rejection beside the form (SCRUM-355 AC3),
+            first so it is read before the form. Once submitted, the
+            confirmation is the page, so the rejection goes. */}
         <div className="my-event-requests__revision">
-          <DecisionHistory eventRequestId={activePanel.request.id} view="organiser" />
-          <EventRequestForm
-            existingRequest={activePanel.request}
-            onSaved={(saved) => {
-              fetchRequests();
-              if (saved.status !== "draft") setActivePanel(null);
-            }}
-          />
+          {!activePanel.submitted && (
+            <DecisionHistory eventRequestId={activePanel.request.id} view="organiser" headingLevel={2} />
+          )}
+          <EventRequestForm existingRequest={activePanel.request} onSaved={handleRequestSaved} />
         </div>
       </div>
     );
@@ -288,8 +328,8 @@ export default function MyEventRequests() {
 
   if (activePanel?.mode === "clarification-response") {
     return (
-      <div className="my-event-requests">
-        <button className="my-event-requests__back" onClick={handleSaved}>&larr; Back to my requests</button>
+      <div className="my-event-requests" ref={panelRef}>
+        <Button variant="link" onClick={handleSaved}>&larr; Back to my requests</Button>
         <ClarificationReplyForm request={activePanel.request} onSaved={handleSaved} />
       </div>
     );
@@ -297,14 +337,21 @@ export default function MyEventRequests() {
 
   if (activePanel?.mode === "change-request") {
     return (
-      <div className="my-event-requests">
-        <button className="my-event-requests__back" onClick={handleSaved}>&larr; Back to my requests</button>
-        <h2>{activePanel.request.eventName}</h2>
+      <div className="my-event-requests" ref={panelRef}>
+        <Button variant="link" onClick={handleSaved}>&larr; Back to my requests</Button>
+        {/* The title sits outside the form so the page keeps it after a submission. */}
+        <header className="my-event-requests__panel-header">
+          <h1 tabIndex={-1}>Request a change</h1>
+          <p>{activePanel.request.eventName}</p>
+        </header>
         <ChangeRequestForm
           eventRequestId={activePanel.request.id}
-          onSubmitted={handleSaved}
+          onSubmitted={handleChangeRequested}
         />
-        <ChangeRequestStatusList eventRequestId={activePanel.request.id} />
+        <section className="my-event-requests__change-history" aria-labelledby="change-request-history-heading">
+          <h2 id="change-request-history-heading">Change request history</h2>
+          <ChangeRequestStatusList key={activePanel.submissions ?? 0} eventRequestId={activePanel.request.id} />
+        </section>
       </div>
     );
   }
@@ -312,18 +359,22 @@ export default function MyEventRequests() {
   return (
     <div className="my-event-requests">
       <div className="my-event-requests__header">
-        <h1>My event requests</h1>
-        <button onClick={() => setActivePanel({ mode: "create" })}>
+        <h1 ref={titleRef} tabIndex={-1}>My event requests</h1>
+        <Button ref={rowRef("create")} onClick={() => setActivePanel({ mode: "create" })}>
           + New event request
-        </button>
+        </Button>
       </div>
 
-      {loading && <p>Loading...</p>}
-      {error && <p className="my-event-requests__error">{error}</p>}
+      {loading && <LoadingText />}
+      {error && <ErrorNotice message={error.message} onRetry={error.retryable ? retry : undefined} />}
       {focusMissing && <p role="status">That event is no longer in your list.</p>}
 
+      {/* Points at the header button rather than repeating it: one primary action in view. */}
       {!loading && !error && requests.length === 0 && (
-        <p>You haven't created any event requests yet.</p>
+        <EmptyState
+          message="You haven't created any event requests yet."
+          nextStep="Select + New event request to start one."
+        />
       )}
 
       <ul className="my-event-requests__list">
@@ -344,9 +395,9 @@ export default function MyEventRequests() {
             >
               <div className="my-event-requests__item-main">
                 <strong>{req.eventName}</strong>
-                <span className={`status-badge ${statusClassName(display.group)}`}>
+                <StatusBadge tone={statusTone(display.group)}>
                   {display.label}
-                </span>
+                </StatusBadge>
                 <NeedsAttentionBadge event={req} />
               </div>
               <p className="my-event-requests__item-description">
@@ -366,7 +417,7 @@ export default function MyEventRequests() {
               )}
               {req.status === "pending_clarification" && req.clarificationReplyByDate && (
                 <p className="my-event-requests__clarification">
-                  Please respond by {formatMediumTimestamp(req.clarificationReplyByDate, "Not specified")}.
+                  Please respond by {formatDay(req.clarificationReplyByDate, "Not specified")}.
                   {isReplyOverdue(req.clarificationReplyByDate) && (
                     <strong className="clarification-overdue"> Overdue</strong>
                   )}
@@ -394,7 +445,7 @@ export default function MyEventRequests() {
                   {/* SCRUM-347 AC5: a rejected event's earlier decisions. Not their
                       reason: an older rejection's would read as the current one. */}
                   {req.status === "rejected" && (
-                    <DecisionHistory eventRequestId={req.id} view="organiser" showReason={false} />
+                    <DecisionHistory eventRequestId={req.id} view="organiser" showReason={false} headingLevel={2} />
                   )}
                 </div>
               )}
@@ -406,7 +457,7 @@ export default function MyEventRequests() {
                     <dt>Reason</dt>
                     <dd>{req.cancellationReason || "No reason recorded."}</dd>
                     <dt>Cancelled on</dt>
-                    <dd>{formatMediumTimestamp(req.cancelledAt, "Not specified")}</dd>
+                    <dd>{formatDateTime(req.cancelledAt, "Not specified")}</dd>
                   </dl>
                 </div>
               )}
@@ -419,9 +470,9 @@ export default function MyEventRequests() {
                   <dt>Description</dt>
                   <dd>{req.description || "Not specified"}</dd>
                   <dt>Proposed start</dt>
-                  <dd>{formatMediumTimestamp(req.proposedStart, "Not specified")}</dd>
+                  <dd>{formatDateTime(req.proposedStart, "Not specified")}</dd>
                   <dt>Proposed end</dt>
-                  <dd>{formatMediumTimestamp(req.proposedEnd, "Not specified")}</dd>
+                  <dd>{formatDateTime(req.proposedEnd, "Not specified")}</dd>
                   <dt>Expected attendance</dt>
                   <dd>{req.expectedAttendance ?? "Not specified"}</dd>
                   <dt>Venue requirements</dt>
@@ -453,7 +504,7 @@ export default function MyEventRequests() {
               <div className="my-event-requests__item-actions">
                 {isRegistrationConfigurable(req.status) && (
                   <Link
-                    className="my-event-requests__registration-link"
+                    className="ui-button ui-button--secondary"
                     to={`/events/${req.id}/registration`}
                   >
                     Registration settings
@@ -461,32 +512,37 @@ export default function MyEventRequests() {
                 )}
                 {mayHaveRegistrationList(req.status) && (
                   <Link
-                    className="my-event-requests__registration-link"
+                    className="ui-button ui-button--secondary"
                     to={`/events/${req.id}/registrations`}
                   >
                     View registrations
                   </Link>
                 )}
                 {req.status === "draft" && (
-                  <button onClick={() => setActivePanel({ mode: "edit", request: req })}>
+                  <Button ref={rowRef(`edit:${req.id}`)} onClick={() => setActivePanel({ mode: "edit", request: req })}>
                     Continue editing
-                  </button>
+                  </Button>
                 )}
 
                 {req.status === "rejected" && (
-                  <button disabled={reopeningId === req.id} onClick={() => handleReopen(req)}>
+                  <Button
+                    ref={rowRef(`edit:${req.id}`)}
+                    disabled={reopeningId === req.id}
+                    onClick={() => handleReopen(req)}
+                  >
                     {reopeningId === req.id ? "Reopening..." : "Revise and resubmit"}
-                  </button>
+                  </Button>
                 )}
 
                 {req.status === "pending_clarification" && (
-                  <button
+                  <Button
+                    ref={rowRef(`clarification-response:${req.id}`)}
                     onClick={() =>
                       setActivePanel({ mode: "clarification-response", request: req })
                     }
                   >
                     Respond to clarification
-                  </button>
+                  </Button>
                 )}
 
                 {/* SCRUM-347: a rejected event is revised and resubmitted instead.
@@ -496,16 +552,17 @@ export default function MyEventRequests() {
                   req.status !== "cancelled" &&
                   req.status !== "completed" &&
                   req.status !== "rejected" && (
-                  <button
+                  <Button
+                    ref={rowRef(`change-request:${req.id}`)}
+                    variant="secondary"
                     onClick={() => setActivePanel({ mode: "change-request", request: req })}
                   >
                     Request a change
-                  </button>
+                  </Button>
                 )}
               </div>
-              {reopenError?.id === req.id && (
-                <p className="my-event-requests__error" role="alert">{reopenError.message}</p>
-              )}
+              {/* No Try again: the Revise and resubmit button is the retry. */}
+              {reopenError?.id === req.id && <ErrorNotice message={reopenError.message} />}
             </li>
           );
         })}

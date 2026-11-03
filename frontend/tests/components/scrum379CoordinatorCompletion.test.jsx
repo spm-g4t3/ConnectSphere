@@ -461,7 +461,7 @@ describe("SCRUM379 the Organiser never sees closing notes", () => {
     const { container } = render(<MemoryRouter><MyEventRequests /></MemoryRouter>);
 
     expect(await screen.findByText("IS212 Industry Night")).toBeInTheDocument();
-    expect(screen.getByText("Completed", { selector: ".status-badge" })).toBeInTheDocument();
+    expect(screen.getByText("Completed", { selector: ".ui-status-badge" })).toBeInTheDocument();
     expect(container.textContent).not.toContain(SECRET);
     expect(screen.queryByText(/Closing notes/i)).not.toBeInTheDocument();
   });

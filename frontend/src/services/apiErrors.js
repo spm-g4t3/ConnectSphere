@@ -56,9 +56,10 @@ export function makeErrorMapper({
 
 /**
  * Whether reading again could help. A refused role (403), a record that is gone
- * (404) or input the server refused (400) gets the same answer again.
+ * (404) or input the server refused (400) gets the same answer again, and an
+ * expired session (401) is fixed only by signing in again.
  */
 export function canRetryRead(err) {
   const status = err?.response?.status;
-  return status !== 400 && status !== 403 && status !== 404;
+  return status !== 400 && status !== 401 && status !== 403 && status !== 404;
 }

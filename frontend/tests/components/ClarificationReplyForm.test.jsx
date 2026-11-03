@@ -35,7 +35,7 @@ describe("SCRUM-162 clarification reply and scoped amendments", () => {
     render(<ClarificationReplyForm request={REQUEST} onSaved={onSaved} />);
 
     expect(screen.getByText(REQUEST.clarificationNote)).toBeInTheDocument();
-    expect(screen.getByText(/reply by 2026-10-10/i)).toBeInTheDocument();
+    expect(screen.getByText(/reply by 10 Oct 2026/i)).toBeInTheDocument();
     expect(screen.getAllByRole("textbox")).toHaveLength(1);
     expect(await screen.findByText("Event amendments")).toBeInTheDocument();
     expect(screen.getByText("Reply only")).toBeInTheDocument();

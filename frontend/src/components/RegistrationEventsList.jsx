@@ -1,59 +1,68 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { getMyEventRequests } from "../services/eventRequestService";
 import { isRegistrationConfigurable } from "../services/registrationStatuses";
 import { readStatusDisplay } from "../services/eventRequestStatusDisplay";
-import { formatMediumDateTime } from "../services/displayFormat";
-
-function formatStart(value) {
-  const date = value ? new Date(value) : null;
-  if (!date || Number.isNaN(date.getTime())) return "Start not set";
-  return formatMediumDateTime(date);
-}
+import { formatDateTime } from "../services/displayFormat";
+import { canRetryRead } from "../services/apiErrors";
+import LoadingText from "./ui/LoadingText";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import useFocusAfterRetry from "./useFocusAfterRetry";
 
 export default function RegistrationEventsList() {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState(null); // { message, retryable }
+
+  const loadEvents = useCallback((isActive = () => true) =>
+    getMyEventRequests()
+      .then((data) => {
+        if (isActive()) setEvents(data.filter((req) => isRegistrationConfigurable(req.status)));
+      })
+      .catch((err) => {
+        if (isActive()) setError({ message: "Could not load your events.", retryable: canRetryRead(err) });
+      })
+      .finally(() => {
+        if (isActive()) setLoading(false);
+      }), []);
 
   useEffect(() => {
     let active = true;
-    getMyEventRequests()
-      .then((data) => {
-        if (active) setEvents(data.filter((req) => isRegistrationConfigurable(req.status)));
-      })
-      .catch(() => {
-        if (active) setError("Could not load your events.");
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
+    loadEvents(() => active);
     return () => {
       active = false;
     };
-  }, []);
+  }, [loadEvents]);
+
+  function reloadEvents() {
+    setLoading(true);
+    setError(null);
+    return loadEvents();
+  }
+  const { headingRef, retry } = useFocusAfterRetry(reloadEvents);
 
   return (
     <main className="event-registration-page">
-      <h1>Event registration</h1>
+      <h1 ref={headingRef} tabIndex={-1}>Event registration</h1>
       <p>
         Choose an event to set up its registration. Attendees can register only once the event is Confirmed.
       </p>
-      {loading && <p role="status">Loading your events…</p>}
-      {error && <p role="alert">{error}</p>}
+      {loading && <LoadingText />}
+      {error && <ErrorNotice message={error.message} onRetry={error.retryable ? retry : undefined} />}
       {!loading && !error && events.length === 0 && (
-        <p>
-          None of your events can have registration set up yet. An event must be Approved, in
-          Safety review, Safety approved or Confirmed.
-        </p>
+        <EmptyState
+          message="None of your events can have registration set up yet."
+          nextStep="An event must be Approved, in Safety review, Safety approved or Confirmed."
+        />
       )}
       {events.length > 0 && (
         <ul className="registration-events-list">
           {events.map((event) => (
             <li key={event.id}>
               <strong>{event.eventName}</strong>
-              <span> · {readStatusDisplay(event).label} · {formatStart(event.proposedStart)} </span>
-              <Link to={`/events/${event.id}/registration`}>Configure registration</Link>
+              <span> · {readStatusDisplay(event).label} · {formatDateTime(event.proposedStart, "Start not set")} </span>
+              <Link className="ui-button ui-button--secondary" to={`/events/${event.id}/registration`}>Configure registration</Link>
             </li>
           ))}
         </ul>
