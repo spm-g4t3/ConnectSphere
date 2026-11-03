@@ -41,7 +41,7 @@ export default function EventRegistrationList({ eventId }) {
 
   return (
     <main className="event-registration-page">
-      <Link className="event-registration-page__back" to={back.to}>{back.label}</Link>
+      <Link className="ui-button ui-button--link" to={back.to}>{back.label}</Link>
 
       {/* Titled before the list loads, so loading and error states still have their h1. */}
       <header className="event-registration-page__header">

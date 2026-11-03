@@ -53,7 +53,7 @@ export default function RegistrationEventsList() {
             <li key={event.id}>
               <strong>{event.eventName}</strong>
               <span> · {readStatusDisplay(event).label} · {formatStart(event.proposedStart)} </span>
-              <Link to={`/events/${event.id}/registration`}>Configure registration</Link>
+              <Link className="ui-button ui-button--secondary" to={`/events/${event.id}/registration`}>Configure registration</Link>
             </li>
           ))}
         </ul>

@@ -3,6 +3,7 @@ import { getConfirmedArrangements } from "../services/eventRequestService";
 import { formatVenuePeriod } from "../services/datetimeFormat";
 import { readStatusDisplay } from "../services/eventRequestStatusDisplay";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
+import Button from "./ui/Button";
 
 const READ_ERRORS = {
   403: "Only the event's organiser can view these arrangements.",
@@ -38,7 +39,7 @@ function ArrangementDetails({ eventRequestId }) {
   if (state.error) return (
     <div role="alert">
       <p>{state.error}</p>
-      <button type="button" onClick={load}>Retry arrangements</button>
+      <Button variant="secondary" onClick={load}>Retry arrangements</Button>
     </div>
   );
   const data = state.data;

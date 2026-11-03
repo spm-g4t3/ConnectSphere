@@ -329,10 +329,10 @@ describe("SCRUM347 change requests closed with the event", () => {
 
 describe("SCRUM379 AC4 change request outcome styling", () => {
   it.each([
-    ["event_completed", "change-request-outcome--closed"],
-    ["approved", "change-request-outcome--approved"],
-    ["rejected", "change-request-outcome--rejected"],
-    ["event_cancelled", "change-request-outcome--rejected"],
+    ["event_completed", "ui-status-badge--neutral"],
+    ["approved", "ui-status-badge--success"],
+    ["rejected", "ui-status-badge--danger"],
+    ["event_cancelled", "ui-status-badge--danger"],
   ])("SCRUM379_AC4_%s_is_styled_%s", async (decision, cls) => {
     vi.mocked(getChangeRequests).mockResolvedValue([{
       id: "c1", fieldLabel: "Venue", details: "A larger room", status: "processed", decision, decisionNotes: null,

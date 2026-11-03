@@ -11,25 +11,27 @@ import { getChangeRequests } from "../services/changeRequestService";
 import { useEffect, useState, useCallback } from "react";
 import { formatTimestamp } from "../services/displayFormat";
 import { changeFieldLabel, groupChangeRequests, outcomeLabel } from "../services/changeRequestDisplay";
+import StatusBadge from "./ui/StatusBadge";
 
 const POLL_INTERVAL_MS = 15000;
 
-// The three states a change request moves through.
+// The three states a change request moves through. Processed stays neutral:
+// the outcome badge beside it carries the approved or rejected colour.
 const STATUS_CONFIG = {
-  outstanding: { label: "Outstanding", className: "status--outstanding" },
-  in_progress: { label: "In Progress", className: "status--in-progress" },
-  processed: { label: "Processed", className: "status--processed" },
+  outstanding: { label: "Outstanding", tone: "warning" },
+  in_progress: { label: "In Progress", tone: "info" },
+  processed: { label: "Processed", tone: "neutral" },
 };
 
 // The label comes from outcomeLabel, shared with the coordinator's panel; only the
 // look is chosen here. An outcome not listed is styled as a plain closure.
-const DECISION_CLASSES = {
-  approved: "change-request-outcome--approved",
-  rejected: "change-request-outcome--rejected",
+const DECISION_TONES = {
+  approved: "success",
+  rejected: "danger",
   // Closed by the system when the whole event was, not decided on their own.
-  event_rejected: "change-request-outcome--rejected",
-  event_cancelled: "change-request-outcome--rejected",
-  event_completed: "change-request-outcome--closed",
+  event_rejected: "danger",
+  event_cancelled: "danger",
+  event_completed: "neutral",
 };
 
 function useChangeRequests(eventRequestId) {
@@ -77,7 +79,7 @@ export default function ChangeRequestStatusList({ eventRequestId }) {
     <ul className="change-request-status-list">
       {groupChangeRequests(requests).map((group) => {
         const status = group.rows[0].status;
-        const config = STATUS_CONFIG[status] || { label: status, className: "status--unknown" };
+        const config = STATUS_CONFIG[status] || { label: status, tone: "neutral" };
         const outcome = outcomeLabel(group.decision);
 
         return (
@@ -94,13 +96,11 @@ export default function ChangeRequestStatusList({ eventRequestId }) {
               <p className="change-request-status-list__note"><strong>Your note:</strong> {group.organiserNote}</p>
             )}
             <div className="change-request-status-list__statuses">
-              <span className={`change-request-status-list__badge ${config.className}`}>
-                {config.label}
-              </span>
+              <StatusBadge tone={config.tone}>{config.label}</StatusBadge>
               {outcome && (
-                <span className={`change-request-status-list__badge ${DECISION_CLASSES[group.decision] ?? "change-request-outcome--closed"}`}>
+                <StatusBadge tone={DECISION_TONES[group.decision] ?? "neutral"}>
                   Outcome: {outcome}
-                </span>
+                </StatusBadge>
               )}
             </div>
             {group.decisionNotes && (

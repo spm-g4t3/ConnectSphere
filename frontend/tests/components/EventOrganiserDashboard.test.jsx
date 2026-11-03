@@ -67,13 +67,13 @@ beforeEach(() => {
 
 describe("SCRUM-488 AC5: the Organiser's dashboard with events in the safety statuses", () => {
   it.each([
-    ["safety_review", "Safety check", "status--under-review"],
-    ["safety_approved", "Safety approved", "status--approved"],
+    ["safety_review", "Safety check", "ui-status-badge--info"],
+    ["safety_approved", "Safety approved", "ui-status-badge--success"],
   ])("SCRUM488_AC5_shows_an_event_in_%s_as_%s_with_the_groups_style", async (status, label, cssClass) => {
     renderDashboard([event("e1", status, "Industry Night")]);
 
     const row = (await screen.findByText("Industry Night")).closest("li");
-    expect(within(row).getByText(label)).toHaveClass("status-badge", cssClass);
+    expect(within(row).getByText(label)).toHaveClass("ui-status-badge", cssClass);
     expect(within(row).getByText(DISPLAY[status].description)).toBeInTheDocument();
     if (status === "safety_approved") {
       expect(within(row).getByRole("status")).toHaveTextContent("Safety approval complete");

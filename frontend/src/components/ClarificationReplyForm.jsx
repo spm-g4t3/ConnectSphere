@@ -4,6 +4,8 @@ import {
   respondToEventClarification,
 } from "../services/eventRequestService";
 import ClarificationHistory from "./ClarificationHistory";
+import Button from "./ui/Button";
+import StatusBadge from "./ui/StatusBadge";
 import {
   toDatetimeLocalValue,
   toOffsetIsoString,
@@ -206,11 +208,11 @@ export default function ClarificationReplyForm({ request, onSaved }) {
               <h2>Event amendments</h2>
               <p>Only fields approved by your Coordinator can be changed.</p>
             </div>
-            <span className={`clarification-amendments__badge${requestedFields.length ? " clarification-amendments__badge--active" : ""}`}>
+            <StatusBadge tone={requestedFields.length ? "success" : "neutral"}>
               {requestedFields.length
                 ? `${requestedFields.length} field${requestedFields.length === 1 ? "" : "s"} editable`
                 : "Reply only"}
-            </span>
+            </StatusBadge>
           </div>
 
           {requestedFields.length > 0 ? (
@@ -254,9 +256,9 @@ export default function ClarificationReplyForm({ request, onSaved }) {
         />
       </label>
       {error && <p role="alert">{error}</p>}
-      <button type="submit" disabled={loadingFields || sending || !message.trim()}>
+      <Button type="submit" disabled={loadingFields || sending || !message.trim()}>
         {sending ? "Sending..." : "Send reply"}
-      </button>
+      </Button>
     </form>
   );
 }

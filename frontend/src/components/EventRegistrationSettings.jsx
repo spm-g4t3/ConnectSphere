@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import Button from "./ui/Button";
 import {
   getRegistrationSettings,
   saveRegistrationSettings,
@@ -133,18 +134,17 @@ export default function EventRegistrationSettings({ eventId }) {
   return (
     <main className="event-registration-page">
       {editing ? (
-        <button
-          type="button"
-          className="event-registration-page__back"
+        <Button
+          variant="link"
           onClick={() => {
             setEditing(false);
             setError(null);
           }}
         >
           ← Back to registration settings
-        </button>
+        </Button>
       ) : (
-        <Link className="event-registration-page__back" to="/registration">← Back to Registration</Link>
+        <Link className="ui-button ui-button--link" to="/registration">← Back to Registration</Link>
       )}
       {/* Titled before the event loads, so loading and error states still have their h1. */}
       <header className="event-registration-page__header">
@@ -161,9 +161,9 @@ export default function EventRegistrationSettings({ eventId }) {
       {error && (
         <div className="event-registration-page__error" role="alert">
           <p>{error}</p>
-          <button type="button" disabled={loading} onClick={loadSettings}>
+          <Button variant="secondary" disabled={loading} onClick={loadSettings}>
             Retry loading settings
-          </button>
+          </Button>
         </div>
       )}
       {event && (
@@ -186,16 +186,14 @@ export default function EventRegistrationSettings({ eventId }) {
               </dl>
               {saved && <p role="status">Registration settings saved.</p>}
               {canEdit && loaded && form && (
-                <button
-                  type="button"
-                  className="event-registration-page__configure"
+                <Button
                   onClick={() => {
                     setSaved(false);
                     setEditing(true);
                   }}
                 >
                   Configure registration
-                </button>
+                </Button>
               )}
             </section>
           )}
@@ -279,9 +277,9 @@ export default function EventRegistrationSettings({ eventId }) {
                 Times are in your device's time zone ({deviceTimeZoneLabel()}).
               </p>
               <div className="event-registration-page__actions">
-                <button type="submit" disabled={saving}>
+                <Button type="submit" disabled={saving}>
                   {saving ? "Saving..." : "Save registration settings"}
-                </button>
+                </Button>
               </div>
             </form>
           )}

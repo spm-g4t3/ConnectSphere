@@ -5,13 +5,14 @@ import { Link } from "react-router-dom";
 import { getMyEventRequests } from "../services/eventRequestService";
 import {
   readStatusDisplay,
-  statusClassName,
+  statusTone,
 } from "../services/eventRequestStatusDisplay";
 import { formatEventDate } from "../services/displayFormat";
 import { isReplyOverdue } from "../services/datetimeFormat";
 import NotificationInbox from "./NotificationInbox";
 import SafetyApprovalNotice from "./SafetyApprovalNotice";
 import NeedsAttentionBadge from "./NeedsAttentionBadge";
+import StatusBadge from "./ui/StatusBadge";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 
 export default function EventOrganiserDashboard({ user }) {
@@ -65,19 +66,19 @@ export default function EventOrganiserDashboard({ user }) {
                   <p>{event.clarificationNote || "The Event Coordinator requested an amendment."}</p>
                 </div>
                 <div className="dashboard--organiser__deadline-meta">
-                  <span className="deadline-tag">
+                  <StatusBadge tone="warning">
                     {event.clarificationReplyByDate
                       ? isReplyOverdue(event.clarificationReplyByDate)
                         ? "Overdue since"
                         : "Reply by"
                       : "Amend before event starts"}
-                  </span>
+                  </StatusBadge>
                   <span>{event.clarificationReplyByDate || formatEventDate(event.proposedStart)}</span>
                 </div>
                 <Link
                   to="/events"
                   state={{ openClarificationRequestId: event.id }}
-                  className="dashboard--organiser__manage-event"
+                  className="ui-button ui-button--link"
                 >
                   Respond in My Events
                 </Link>
@@ -103,9 +104,9 @@ export default function EventOrganiserDashboard({ user }) {
                   <summary>
                     <span className="dashboard--organiser__event-summary">
                       <strong>{event.eventName}</strong>
-                      <span className={`status-badge ${statusClassName(statusDisplay.group)}`}>
+                      <StatusBadge tone={statusTone(statusDisplay.group)}>
                         {statusDisplay.label}
-                      </span>
+                      </StatusBadge>
                       <NeedsAttentionBadge event={event} />
                     </span>
                     <span className="dashboard--organiser__event-date">
@@ -150,7 +151,7 @@ export default function EventOrganiserDashboard({ user }) {
                   <Link
                     to="/events"
                     state={{ focusEventRequestId: event.id }}
-                    className="dashboard--organiser__manage-event"
+                    className="ui-button ui-button--link"
                   >
                     Open in My Events
                   </Link>
@@ -165,7 +166,7 @@ export default function EventOrganiserDashboard({ user }) {
           )}
         </ul>
         <Link
-          className="dashboard--organiser__create-event"
+          className="ui-button ui-button--primary"
           to="/events"
           state={{ openNewEventRequest: true }}
         >

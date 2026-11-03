@@ -8,6 +8,7 @@
 // status, never on the server's text; a 400's details[] go beside their row.
 
 import { useState } from "react";
+import Button from "./ui/Button";
 import { submitChangeRequest } from "../services/changeRequestService";
 import {
   CHANGE_FIELD_OPTIONS,
@@ -129,7 +130,7 @@ export default function ChangeRequestForm({ eventRequestId, onSubmitted }) {
     return (
       <div className="change-request-form__success">
         <p>Your change request has been submitted.</p>
-        <button onClick={() => setSuccess(false)}>Request another change</button>
+        <Button variant="secondary" onClick={() => setSuccess(false)}>Request another change</Button>
       </div>
     );
   }
@@ -184,18 +185,18 @@ export default function ChangeRequestForm({ eventRequestId, onSubmitted }) {
             </label>
             {errors[index] && <p className="change-request-form__error">{errors[index]}</p>}
             {rows.length > 1 && (
-              <button type="button" onClick={() => setRows((current) => current.filter((_, i) => i !== index))}>
+              <Button variant="secondary" onClick={() => setRows((current) => current.filter((_, i) => i !== index))}>
                 Remove
-              </button>
+              </Button>
             )}
           </fieldset>
         );
       })}
 
       {!cancelling && (
-        <button type="button" disabled={rows.length >= MAX_CHANGES} onClick={() => setRows((current) => [...current, newRow()])}>
+        <Button variant="secondary" disabled={rows.length >= MAX_CHANGES} onClick={() => setRows((current) => [...current, newRow()])}>
           Add another change
-        </button>
+        </Button>
       )}
 
       <label>
@@ -213,9 +214,9 @@ export default function ChangeRequestForm({ eventRequestId, onSubmitted }) {
         </div>
       )}
 
-      <button type="submit" disabled={submitting}>
+      <Button type="submit" disabled={submitting}>
         {submitting ? "Submitting..." : "Submit change request"}
-      </button>
+      </Button>
     </form>
   );
 }

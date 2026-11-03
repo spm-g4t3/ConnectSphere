@@ -386,8 +386,8 @@ describe("SCRUM488_AC5 the Organiser's list shows the safety statuses", () => {
   // it sends for each status, written out; the labels are provisional until
   // SCRUM-549's decision is confirmed.
   const SAFETY = [
-    ["safety_review", "Safety check", "UNDER_REVIEW", "status--under-review", "A Safety Officer is checking the arrangements for your event before it can be confirmed."],
-    ["safety_approved", "Safety approved", "APPROVED", "status--approved", "The safety check is complete. Your Coordinator can now confirm your event."],
+    ["safety_review", "Safety check", "UNDER_REVIEW", "ui-status-badge--info", "A Safety Officer is checking the arrangements for your event before it can be confirmed."],
+    ["safety_approved", "Safety approved", "APPROVED", "ui-status-badge--success", "The safety check is complete. Your Coordinator can now confirm your event."],
   ];
 
   const safetyEvent = (status, label, group, description, overrides = {}) =>
@@ -406,7 +406,7 @@ describe("SCRUM488_AC5 the Organiser's list shows the safety statuses", () => {
     renderList([safetyEvent(status, label, group, description)]);
 
     const item = (await screen.findByText(`Event in ${status}`)).closest("li");
-    expect(within(item).getByText(label)).toHaveClass("status-badge", cssClass);
+    expect(within(item).getByText(label)).toHaveClass("ui-status-badge", cssClass);
     expect(within(item).getByText(description)).toBeInTheDocument();
   });
 
@@ -446,8 +446,8 @@ describe("SCRUM488_AC5 the Organiser's list shows the safety statuses", () => {
       .toHaveTextContent("Safety approval complete");
     expect(within(screen.getByText("B").closest("li")).queryByText("Safety approval complete"))
       .not.toBeInTheDocument();
-    expect(badge("A")).toHaveClass("status--awaiting-review");
-    expect(badge("D")).toHaveClass("status--confirmed");
+    expect(badge("A")).toHaveClass("ui-status-badge--warning");
+    expect(badge("D")).toHaveClass("ui-status-badge--accent");
   });
 });
 

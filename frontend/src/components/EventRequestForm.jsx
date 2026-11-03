@@ -17,6 +17,7 @@
 // (its id) per AC7.
 
 import { useState } from "react";
+import Button from "./ui/Button";
 import {
   createEventRequest,
   updateEventRequest,
@@ -314,18 +315,17 @@ export default function EventRequestForm({
 
       {isDraft && (
         <div className="event-request-form__actions">
-          <button type="button" onClick={handleSaveDraft} disabled={savingDraft}>
+          <Button variant="secondary" onClick={handleSaveDraft} disabled={savingDraft}>
             {savingDraft ? "Saving..." : "Save draft"}
-          </button>
+          </Button>
 
-          <button
-            type="button"
+          <Button
             onClick={handleSubmit}
             disabled={submitting || !requestId}
             title={!requestId ? "Save the draft first" : undefined}
           >
             {submitting ? "Submitting..." : "Submit request"}
-          </button>
+          </Button>
           {!requestId && (
             <p className="event-request-form__submit-hint" role="status">
               Save the draft first to enable submission.

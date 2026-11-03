@@ -15,7 +15,7 @@ import { getMyEventRequests, reopenEventRequest } from "../services/eventRequest
 import { isRegistrationConfigurable, mayHaveRegistrationList } from "../services/registrationStatuses";
 import {
   readStatusDisplay,
-  statusClassName,
+  statusTone,
 } from "../services/eventRequestStatusDisplay";
 import { formatMediumTimestamp } from "../services/displayFormat";
 import { isReplyOverdue } from "../services/datetimeFormat";
@@ -31,6 +31,8 @@ import ClarificationReplyForm from "./ClarificationReplyForm";
 import SafetyApprovalNotice from "./SafetyApprovalNotice";
 import ConfirmedArrangements from "./ConfirmedArrangements";
 import NeedsAttentionBadge from "./NeedsAttentionBadge";
+import Button from "./ui/Button";
+import StatusBadge from "./ui/StatusBadge";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 
 /**
@@ -254,7 +256,7 @@ export default function MyEventRequests() {
   if (activePanel?.mode === "create") {
     return (
       <div className="my-event-requests">
-        <button className="my-event-requests__back" onClick={() => setActivePanel(null)}>&larr; Back to my requests</button>
+        <Button variant="link" onClick={() => setActivePanel(null)}>&larr; Back to my requests</Button>
         <EventRequestForm
           onSaved={(saved) => {
             fetchRequests();
@@ -268,7 +270,7 @@ export default function MyEventRequests() {
   if (activePanel?.mode === "edit") {
     return (
       <div className="my-event-requests">
-        <button className="my-event-requests__back" onClick={() => setActivePanel(null)}>&larr; Back to my requests</button>
+        <Button variant="link" onClick={() => setActivePanel(null)}>&larr; Back to my requests</Button>
         {/* Saving a draft keeps the panel open, so a revision keeps the
             rejection beside the form (SCRUM-355 AC3); submitting closes it.
             The rejection comes first, so it is read before the form. */}
@@ -289,7 +291,7 @@ export default function MyEventRequests() {
   if (activePanel?.mode === "clarification-response") {
     return (
       <div className="my-event-requests">
-        <button className="my-event-requests__back" onClick={handleSaved}>&larr; Back to my requests</button>
+        <Button variant="link" onClick={handleSaved}>&larr; Back to my requests</Button>
         <ClarificationReplyForm request={activePanel.request} onSaved={handleSaved} />
       </div>
     );
@@ -298,7 +300,7 @@ export default function MyEventRequests() {
   if (activePanel?.mode === "change-request") {
     return (
       <div className="my-event-requests">
-        <button className="my-event-requests__back" onClick={handleSaved}>&larr; Back to my requests</button>
+        <Button variant="link" onClick={handleSaved}>&larr; Back to my requests</Button>
         {/* The title sits outside the form so the page keeps it after a submission. */}
         <header className="my-event-requests__panel-header">
           <h1>Request a change</h1>
@@ -320,9 +322,9 @@ export default function MyEventRequests() {
     <div className="my-event-requests">
       <div className="my-event-requests__header">
         <h1>My event requests</h1>
-        <button onClick={() => setActivePanel({ mode: "create" })}>
+        <Button onClick={() => setActivePanel({ mode: "create" })}>
           + New event request
-        </button>
+        </Button>
       </div>
 
       {loading && <p>Loading...</p>}
@@ -351,9 +353,9 @@ export default function MyEventRequests() {
             >
               <div className="my-event-requests__item-main">
                 <strong>{req.eventName}</strong>
-                <span className={`status-badge ${statusClassName(display.group)}`}>
+                <StatusBadge tone={statusTone(display.group)}>
                   {display.label}
-                </span>
+                </StatusBadge>
                 <NeedsAttentionBadge event={req} />
               </div>
               <p className="my-event-requests__item-description">
@@ -460,7 +462,7 @@ export default function MyEventRequests() {
               <div className="my-event-requests__item-actions">
                 {isRegistrationConfigurable(req.status) && (
                   <Link
-                    className="my-event-requests__registration-link"
+                    className="ui-button ui-button--secondary"
                     to={`/events/${req.id}/registration`}
                   >
                     Registration settings
@@ -468,32 +470,32 @@ export default function MyEventRequests() {
                 )}
                 {mayHaveRegistrationList(req.status) && (
                   <Link
-                    className="my-event-requests__registration-link"
+                    className="ui-button ui-button--secondary"
                     to={`/events/${req.id}/registrations`}
                   >
                     View registrations
                   </Link>
                 )}
                 {req.status === "draft" && (
-                  <button onClick={() => setActivePanel({ mode: "edit", request: req })}>
+                  <Button onClick={() => setActivePanel({ mode: "edit", request: req })}>
                     Continue editing
-                  </button>
+                  </Button>
                 )}
 
                 {req.status === "rejected" && (
-                  <button disabled={reopeningId === req.id} onClick={() => handleReopen(req)}>
+                  <Button disabled={reopeningId === req.id} onClick={() => handleReopen(req)}>
                     {reopeningId === req.id ? "Reopening..." : "Revise and resubmit"}
-                  </button>
+                  </Button>
                 )}
 
                 {req.status === "pending_clarification" && (
-                  <button
+                  <Button
                     onClick={() =>
                       setActivePanel({ mode: "clarification-response", request: req })
                     }
                   >
                     Respond to clarification
-                  </button>
+                  </Button>
                 )}
 
                 {/* SCRUM-347: a rejected event is revised and resubmitted instead.
@@ -503,11 +505,12 @@ export default function MyEventRequests() {
                   req.status !== "cancelled" &&
                   req.status !== "completed" &&
                   req.status !== "rejected" && (
-                  <button
+                  <Button
+                    variant="secondary"
                     onClick={() => setActivePanel({ mode: "change-request", request: req })}
                   >
                     Request a change
-                  </button>
+                  </Button>
                 )}
               </div>
               {reopenError?.id === req.id && (
