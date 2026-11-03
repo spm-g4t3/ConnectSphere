@@ -35,6 +35,20 @@ describe("SCRUM588 the markup the table layout rules hang on", () => {
     expect(within(table).getAllByRole("cell")[2].textContent).toBe("x".repeat(200));
   });
 
+  it("SCRUM588_AC9_history_change_cell_is_the_second_cell_and_keeps_a_long_name_in_one_piece", async () => {
+    const longName = "Projector".repeat(30);
+    equipment.getEquipmentHistory.mockResolvedValue([
+      { id: 3, field: "created", oldValue: null, newValue: longName, note: null, changedBy: null, changedAt: "2026-10-05T11:00:00+00:00" },
+      { id: 4, field: "name", oldValue: longName, newValue: `${longName}2`, note: "renamed", changedBy: null, changedAt: "2026-10-06T11:00:00+00:00" },
+    ]);
+    render(<EquipmentHistory type={{ id: "p1", name: "Projector (HD)" }} />);
+
+    const cells = within(await screen.findByRole("table")).getAllByRole("cell");
+    expect(cells[1].textContent).toBe(`Created as "${longName}"`);
+    expect(cells[5].textContent).toContain(`${longName}2`);
+    expect(cells[5].textContent).not.toMatch(/\s{2,}/);
+  });
+
   it("SCRUM588_AC9_history_with_a_missing_note_still_has_a_third_cell", async () => {
     equipment.getEquipmentHistory.mockResolvedValue([
       { id: 2, field: "retiredAt", oldValue: null, newValue: "2026-10-05T11:00:00+00:00", note: null, changedBy: null, changedAt: "2026-10-05T11:00:00+00:00" },
