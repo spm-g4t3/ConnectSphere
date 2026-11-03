@@ -106,4 +106,33 @@ describe('SCRUM-375 cancellation service', () => {
     ).rejects.toBeInstanceOf(ValidationError);
     expect(client.calls).toHaveLength(0);
   });
+
+  it('SCRUM370_AC2_refuses_an_attendee_message_that_is_not_text_before_the_database', async () => {
+    const client = createRpcClient({ data: storedEvent, error: null });
+
+    const err = await cancelEventRequest(
+      EVENT_ID,
+      { reason: 'Organiser withdrew', initiator: 'organiser_request', attendeeMessage: 42 },
+      COORDINATOR_ID,
+      { client },
+    ).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toBe('Attendee message must be text');
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM175_AC6_a_blank_attendee_message_is_sent_as_null', async () => {
+    const client = createRpcClient({ data: storedEvent, error: null });
+
+    await cancelEventRequest(
+      EVENT_ID,
+      { reason: 'Organiser withdrew', initiator: 'organiser_request', attendeeMessage: '   ' },
+      COORDINATOR_ID,
+      { client },
+    );
+
+    expect(client.calls[0].fn).toBe('cancel_event_request');
+    expect(client.calls[0].args.p_attendee_message).toBeNull();
+  });
 });

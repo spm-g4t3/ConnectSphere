@@ -65,11 +65,16 @@ const stateRow = ({ status = 'pending_review', lines = [lineRow()] } = {}) => ({
  * A client whose `rpc` answers by function name and whose `from` answers the
  * single-row read of equipment_types and the existence read of event_requests.
  */
-function fakeClient({ rpc = {}, type = { id: TYPE_ID, retired_at: null }, event = { id: EVENT_ID } } = {}) {
+function fakeClient({
+  rpc = {},
+  type = { id: TYPE_ID, retired_at: null },
+  event = { id: EVENT_ID },
+  tableErrors = {},
+} = {}) {
   return rpcByNameClient({
     rpc,
     fallback: () => ok({ request: null }),
-    table: (name) => ok(name === 'equipment_types' ? type : event),
+    table: (name) => tableErrors[name] ?? ok(name === 'equipment_types' ? type : event),
   });
 }
 
@@ -349,6 +354,27 @@ describe('AC2 to AC5: adding a line', () => {
     expect(client.rpcCalls).toEqual([]);
   });
 
+  it('SCRUM21_AC2_a_failed_equipment_type_read_is_a_500_and_nothing_is_written', async () => {
+    client = fakeClient({ tableErrors: { equipment_types: dbError('XX000', 'types is broken') } });
+
+    const err = await errorFrom(addEquipmentLine(EVENT_ID, { equipmentTypeId: TYPE_ID, quantity: 1 }, COORDINATOR_ID, { client }));
+
+    expect(err.message).toBe('types is broken');
+    expect(err).not.toBeInstanceOf(AppError);
+    expect(client.fromCalls).toEqual(['equipment_types']);
+    expect(client.rpcCalls).toEqual([]);
+  });
+
+  it('SCRUM21_AC4_a_failed_read_of_the_event_lines_is_a_500_and_nothing_is_written', async () => {
+    client = fakeClient({ rpc: { equipment_for_event: dbError('XX000', 'lines are broken') } });
+
+    const err = await errorFrom(addEquipmentLine(EVENT_ID, { equipmentTypeId: TYPE_ID, quantity: 1 }, COORDINATOR_ID, { client }));
+
+    expect(err.message).toBe('lines are broken');
+    expect(err).not.toBeInstanceOf(AppError);
+    expect(writes(client)).toEqual([]);
+  });
+
   it('SCRUM21_AC1_refuses_a_blank_caller_before_any_call', async () => {
     const err = await errorFrom(
       addEquipmentLine(EVENT_ID, { equipmentTypeId: TYPE_ID, quantity: 1 }, '  ', { client }),
@@ -418,6 +444,32 @@ describe('AC1: what the database refuses becomes a typed error', () => {
     const err = await callAdd(dbError('23505', 'That equipment type is already on this event'));
 
     expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([{ field: 'equipmentTypeId', message: 'is already on this event' }]);
+  });
+
+  it('SCRUM21_AC6_22023_nothing_to_change_is_a_400_naming_the_changes', async () => {
+    const message = 'There is nothing to change';
+    client = fakeClient({ rpc: { amend_equipment_line: dbError('22023', message) } });
+
+    const err = await errorFrom(amendEquipmentLine(EVENT_ID, LINE_ID, { quantity: 3 }, COORDINATOR_ID, { client }));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([{ field: 'changes', message }]);
+  });
+
+  it('SCRUM21_AC1_22023_that_names_no_field_is_a_400_with_no_field', async () => {
+    const err = await callAdd(dbError('22023', 'The fields to change must be an object'));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toBe('The fields to change must be an object');
+    expect(err.details).toEqual([]);
+  });
+
+  it('SCRUM21_AC4_23505_without_a_message_still_says_the_type_is_already_on_the_event', async () => {
+    const err = await callAdd(dbError('23505', ''));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toBe('That equipment type is already on this event');
     expect(err.details).toEqual([{ field: 'equipmentTypeId', message: 'is already on this event' }]);
   });
 
@@ -585,5 +637,33 @@ describe('AC11: reading an event equipment', () => {
     await listEventEquipment(EVENT_ID, { client });
 
     expect(writes(client)).toEqual([]);
+  });
+
+  it('SCRUM21_AC11_a_request_without_lines_reads_as_an_empty_list', async () => {
+    // equipment_for_event always sends a lines array; this is the fallback.
+    client = fakeClient({ rpc: { equipment_for_event: ok({ request: { id: REQUEST_ID, status: 'pending_review' } }) } });
+
+    const state = await listEventEquipment(EVENT_ID, { client });
+
+    expect(state.request.lines).toEqual([]);
+  });
+
+  it('SCRUM21_AC11_a_failed_event_read_is_a_500_and_the_equipment_is_not_read', async () => {
+    client = fakeClient({ tableErrors: { event_requests: dbError('XX000', 'events are broken') } });
+
+    const err = await errorFrom(listEventEquipment(EVENT_ID, { client }));
+
+    expect(err.message).toBe('events are broken');
+    expect(err).not.toBeInstanceOf(AppError);
+    expect(client.rpcCalls).toEqual([]);
+  });
+
+  it('SCRUM21_AC11_a_failed_equipment_read_becomes_a_typed_error', async () => {
+    client = fakeClient({ rpc: { equipment_for_event: dbError('P0002', 'Event request not found') } });
+
+    const err = await errorFrom(listEventEquipment(EVENT_ID, { client }));
+
+    expect(err).toBeInstanceOf(NotFoundError);
+    expect(client.rpcCalls).toEqual([{ name: 'equipment_for_event', args: { p_event_request_id: EVENT_ID } }]);
   });
 });

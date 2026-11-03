@@ -997,6 +997,21 @@ describe('AC4: the previous values can be read back', () => {
     await expect(getVenueHistory(VENUE_ID)).resolves.toEqual([]);
   });
 
+  it('SCRUM15_AC4_a_null_answer_is_an_empty_list', async () => {
+    from.mockReturnValueOnce(queryStub({ data: null, error: null }));
+
+    await expect(getVenueHistory(VENUE_ID)).resolves.toEqual([]);
+  });
+
+  it('SCRUM15_AC4_a_failed_read_rejects_with_the_database_message', async () => {
+    from.mockReturnValueOnce(queryStub({ data: null, error: { code: '08006', message: 'connection failure' } }));
+
+    const err = await errorFromAsync(() => getVenueHistory(VENUE_ID));
+
+    expect(err.constructor).toBe(Error);
+    expect(err.message).toBe('connection failure');
+  });
+
   it('SCRUM15_AC4_rejects_a_malformed_id_before_any_network_call', async () => {
     const err = await errorFromAsync(() => getVenueHistory('not-a-uuid'));
 
@@ -1064,6 +1079,21 @@ describe('AC3: a retired venue keeps its bookings', () => {
     from.mockReturnValueOnce(queryStub({ data: [], error: null }));
 
     await expect(getBookingsForVenue(VENUE_ID)).resolves.toEqual([]);
+  });
+
+  it('SCRUM15_AC3_a_null_answer_is_an_empty_list', async () => {
+    from.mockReturnValueOnce(queryStub({ data: null, error: null }));
+
+    await expect(getBookingsForVenue(VENUE_ID)).resolves.toEqual([]);
+  });
+
+  it('SCRUM15_AC3_a_failed_read_rejects_with_the_database_message', async () => {
+    from.mockReturnValueOnce(queryStub({ data: null, error: { code: '08006', message: 'connection failure' } }));
+
+    const err = await errorFromAsync(() => getBookingsForVenue(VENUE_ID));
+
+    expect(err.constructor).toBe(Error);
+    expect(err.message).toBe('connection failure');
   });
 
   it('SCRUM15_AC3_rejects_a_malformed_id_before_any_network_call', async () => {
@@ -1402,6 +1432,32 @@ describe('SCRUM17_AC2 a dated search leaves out venues blocked in the window', (
     );
     expect(tablesQueried()).toEqual(['venues']);
     expect(availabilityCalls()).toHaveLength(1);
+  });
+
+  it('SCRUM17_AC2_a_22P02_without_a_message_is_still_a_validation_error', async () => {
+    givenTables({ free: { data: null, error: { code: '22P02' } } });
+
+    const err = await errorFromAsync(() => searchVenues({ startsAt: STARTS, endsAt: ENDS }));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toBe('A value was rejected by the database: ');
+  });
+
+  it('SCRUM17_AC2_a_failed_venues_read_rejects_before_any_availability_call', async () => {
+    givenTables({ venues: { data: null, error: { code: '08006', message: 'connection failure' } } });
+
+    const err = await errorFromAsync(() => searchVenues({ startsAt: STARTS, endsAt: ENDS }));
+
+    expect(err.constructor).toBe(Error);
+    expect(err.message).toBe('connection failure');
+    expect(availabilityCalls()).toHaveLength(0);
+  });
+
+  it('SCRUM17_AC2_a_null_venues_answer_is_an_empty_list_with_no_availability_call', async () => {
+    givenTables({ venues: { data: null, error: null } });
+
+    await expect(searchVenues({ startsAt: STARTS, endsAt: ENDS })).resolves.toEqual([]);
+    expect(availabilityCalls()).toHaveLength(0);
   });
 
   it('SCRUM17_AC2_an_unknown_blocks_error_rejects_too', async () => {
@@ -3310,6 +3366,40 @@ describe('SCRUM575_AC7 updateVenue lists the bookings shortened hours leave out'
     expect(err.message).toMatch(/changed since you confirmed/);
     expect(err.conflicts.map((c) => c.bookingId).sort()).toEqual(listed);
     expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['venue_operating_hours'],
+    ['bookings'],
+  ])('SCRUM575_AC7_a_failed_%s_read_rejects_and_saves_nothing', async (table) => {
+    const reads = givenVenue({ bookings: [LATE_WED] });
+    reads[table] = queryStub({ data: null, error: { code: '08006', message: 'connection failure' } });
+
+    const err = await errorFromAsync(() => updateVenue(VENUE_ID, { hours: WED_9_TO_5 }, STAFF_ID));
+
+    expect(err.constructor).toBe(Error);
+    expect(err.message).toBe('connection failure');
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM575_AC7_no_hours_or_bookings_read_back_lists_nothing_and_saves', async () => {
+    const reads = givenVenue();
+    reads.venue_operating_hours = queryStub({ data: null, error: null });
+    reads.bookings = queryStub({ data: null, error: null });
+
+    await updateVenue(VENUE_ID, { hours: WED_9_TO_5 }, STAFF_ID);
+
+    expect(rpcArgs().p_hours).toEqual(WED_9_TO_5);
+    expect(rpcArgs().p_hours_flag_booking_ids).toBeNull();
+  });
+
+  it('SCRUM575_AC7_a_listed_booking_whose_event_is_not_readable_has_a_null_event_name', async () => {
+    givenVenue({ bookings: [{ ...LATE_WED, event_requests: null }] });
+
+    const err = await errorFromAsync(() => updateVenue(VENUE_ID, { hours: WED_9_TO_5 }, STAFF_ID));
+
+    expect(err.code).toBe('VENUE_HOURS_BOOKING_CONFLICT');
+    expect(err.conflicts).toMatchObject([{ bookingId: A, eventName: null }]);
   });
 
   it('SCRUM575_AC7_an_edit_without_hours_reads_no_bookings', async () => {
