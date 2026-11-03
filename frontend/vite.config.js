@@ -303,6 +303,22 @@ const SCRUM586_FILES = [
   'src/components/ui/Tabs.jsx',
 ]
 
+// Shared service files brought to 100% by the coverage push; gating them
+// stops a later change from silently dropping a request path.
+const COVERAGE_SERVICE_FILES = [
+  'src/services/eventRequestService.js',
+  'src/services/venueService.js',
+  'src/services/datetimeFormat.js',
+  'src/services/equipmentReviewService.js',
+  'src/services/venueLookups.js',
+  'src/services/safetyReviewService.js',
+  'src/services/eventRequestStatusDisplay.js',
+  'src/services/eventRegistrationService.js',
+  'src/services/changeRequestService.js',
+  'src/services/venueSuitabilityDisplay.js',
+  'src/services/equipmentReviewErrors.js',
+]
+
 // https://vite.dev/config/
 //
 // defineConfig comes from vitest/config rather than vite so the `test` block
@@ -320,6 +336,8 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['src/**/*.{js,jsx}'],
+      // main.jsx only mounts <App /> with createRoot; App itself is tested.
+      exclude: ['src/main.jsx'],
       reporter: ['text', 'json-summary'],
       reportOnFailure: true,
       thresholds: Object.fromEntries([
@@ -364,6 +382,7 @@ export default defineConfig({
         ...SCRUM584_FILES.map((file) => [file, FULL]),
         ...SCRUM591_FILES.map((file) => [file, FULL]),
         ...SCRUM586_FILES.map((file) => [file, FULL]),
+        ...COVERAGE_SERVICE_FILES.map((file) => [file, FULL]),
       ]),
     },
   },
