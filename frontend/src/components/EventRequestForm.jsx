@@ -18,6 +18,7 @@
 
 import { useState } from "react";
 import Button from "./ui/Button";
+import ErrorNotice from "./ui/ErrorNotice";
 import {
   createEventRequest,
   updateEventRequest,
@@ -296,7 +297,8 @@ export default function EventRequestForm({
         />
       </label>
 
-      {saveError && <p className="event-request-form__error" role="alert">{saveError}</p>}
+      {/* No Try again: saving or submitting again is the retry. */}
+      {saveError && <ErrorNotice message={saveError} />}
       {draftSavedMessage && <p className="event-request-form__notice" role="status">{draftSavedMessage}</p>}
 
       {submitErrors.length > 0 && (

@@ -162,8 +162,8 @@ describe("SCRUM494 registration times on a device outside Singapore", () => {
     renderSettings();
     await screen.findByRole("button", { name: "Configure registration" });
 
-    expect(screen.getByText("2026-11-01 10:00 (Singapore time)")).toBeInTheDocument();
-    expect(screen.getByText("2026-11-10 10:00 (Singapore time)")).toBeInTheDocument();
+    expect(screen.getByText("1 Nov 2026, 10:00 am")).toBeInTheDocument();
+    expect(screen.getByText("10 Nov 2026, 10:00 am")).toBeInTheDocument();
   });
 
   it("SCRUM494_AC6_labels_the_inputs_with_the_device_time_zone", async () => {

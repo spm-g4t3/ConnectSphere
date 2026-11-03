@@ -3,17 +3,25 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { normaliseRole } from "../auth/normaliseRole";
 import { getEventRegistrations } from "../services/eventRegistrationService";
-import { formatVenueTimestamp } from "../services/datetimeFormat";
+import { VENUE_TIME_NOTE } from "../services/datetimeFormat";
+import { formatDateTime } from "../services/displayFormat";
+import { canRetryRead } from "../services/apiErrors";
+import LoadingText from "./ui/LoadingText";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import useFocusAfterRetry from "./useFocusAfterRetry";
 
 // Read only by design: no register, withdraw, edit or export actions here.
 export default function EventRegistrationList({ eventId }) {
   const { user } = useAuth();
   const [hideWithdrawn, setHideWithdrawn] = useState(false);
   const [list, setList] = useState(null);
-  // Which filter the last answer was for: loading is derived from it, so the
-  // effect sets no state before the request settles.
-  const [result, setResult] = useState({ hideWithdrawn: null, error: null });
-  const loading = result.hideWithdrawn !== hideWithdrawn;
+  // Bumped by Try again to run the read below once more.
+  const [attempt, setAttempt] = useState(0);
+  // Which filter and attempt the last answer was for: loading is derived from
+  // it, so the effect sets no state before the request settles.
+  const [result, setResult] = useState({ hideWithdrawn: null, attempt: null, error: null });
+  const loading = result.hideWithdrawn !== hideWithdrawn || result.attempt !== attempt;
   const { error } = result;
 
   useEffect(() => {
@@ -22,16 +30,24 @@ export default function EventRegistrationList({ eventId }) {
       .then((data) => {
         if (!active) return;
         setList(data);
-        setResult({ hideWithdrawn, error: null });
+        setResult({ hideWithdrawn, attempt, error: null });
       })
       .catch((err) => {
         if (!active) return;
-        setResult({ hideWithdrawn, error: err?.response?.data?.error || "Could not load the registrations." });
+        setResult({
+          hideWithdrawn,
+          attempt,
+          error: err?.response?.data?.error || "Could not load the registrations.",
+          retryable: canRetryRead(err),
+        });
       });
     return () => {
       active = false;
     };
-  }, [eventId, hideWithdrawn]);
+  }, [eventId, hideWithdrawn, attempt]);
+
+  // The h1 stays on screen while it reloads, so focus can go there at once.
+  const { headingRef, retry } = useFocusAfterRetry(() => setAttempt((count) => count + 1));
 
   const isCoordinator = normaliseRole(user?.role) === "EVENT_COORDINATOR";
   const back = isCoordinator
@@ -46,12 +62,10 @@ export default function EventRegistrationList({ eventId }) {
       {/* Titled before the list loads, so loading and error states still have their h1. */}
       <header className="event-registration-page__header">
         {list && <p className="eyebrow">Registrations</p>}
-        <h1>{list?.event.eventName || "Registrations"}</h1>
+        <h1 ref={headingRef} tabIndex={-1}>{list?.event.eventName || "Registrations"}</h1>
       </header>
 
-      {error && (
-        <div className="event-registration-page__error" role="alert">{error}</div>
-      )}
+      {error && !loading && <ErrorNotice message={error} onRetry={result.retryable ? retry : undefined} />}
 
       {list && (
         <>
@@ -74,14 +88,20 @@ export default function EventRegistrationList({ eventId }) {
           </label>
 
           {list.entries.length === 0 ? (
-            <p>No registrations to show.</p>
+            <EmptyState
+              message="No registrations to show."
+              nextStep={hideWithdrawn
+                ? "Clear Hide withdrawn to include withdrawn registrations."
+                : "Attendees who register for this event will appear here."}
+            />
           ) : (
             <table className="registration-list__table">
               <thead>
                 <tr>
                   <th scope="col">Attendee</th>
                   <th scope="col">Email</th>
-                  <th scope="col">Joined</th>
+                  {/* The zone is said once, here, rather than in every row. */}
+                  <th scope="col">Joined {VENUE_TIME_NOTE}</th>
                   <th scope="col">Status</th>
                 </tr>
               </thead>
@@ -91,7 +111,7 @@ export default function EventRegistrationList({ eventId }) {
                     <td>{entry.attendeeName || "Name not set"}</td>
                     <td>{entry.attendeeEmail || "Email not set"}</td>
                     {/* A waitlisted entry is dated, and ordered, by when it joined the queue. */}
-                    <td>{formatVenueTimestamp(entry.waitlistedAt ?? entry.registeredAt, "Unknown")}</td>
+                    <td>{formatDateTime(entry.waitlistedAt ?? entry.registeredAt, "Unknown")}</td>
                     <td>{entry.statusLabel}</td>
                   </tr>
                 ))}
@@ -101,7 +121,7 @@ export default function EventRegistrationList({ eventId }) {
         </>
       )}
 
-      {loading && <p role="status">Loading registrations…</p>}
+      {loading && <LoadingText />}
     </main>
   );
 }

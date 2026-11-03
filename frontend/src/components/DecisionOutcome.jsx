@@ -35,7 +35,9 @@ import {
   getAssignmentHistory,
   getAssignmentHistoryForReview,
 } from "../services/eventRequestService";
-import { formatTimestamp } from "../services/displayFormat";
+import { formatDateTime } from "../services/displayFormat";
+import { canRetryRead } from "../services/apiErrors";
+import ErrorNotice from "./ui/ErrorNotice";
 
 const FETCH_BY_VIEW = {
   coordinator: getAssignmentHistoryForReview,
@@ -61,6 +63,9 @@ export default function DecisionOutcome({ request, view }) {
   const { user } = useAuth();
   const [deciderName, setDeciderName] = useState(null);
   const [nameLoaded, setNameLoaded] = useState(false);
+  const [nameError, setNameError] = useState(null); // { retryable }
+  // Bumped by Try again to run the read below once more.
+  const [attempt, setAttempt] = useState(0);
 
   const decidedBy = request.decidedBy;
   const decidedByYou = view === "coordinator" && Boolean(user?.id) && decidedBy === user.id;
@@ -79,9 +84,9 @@ export default function DecisionOutcome({ request, view }) {
         const held = (entries ?? []).find((entry) => entry.newCoordinatorId === decidedBy);
         setDeciderName(held?.newCoordinatorName ?? null);
       })
-      .catch(() => {
-        // The name is the least important line of the record. If it cannot be
-        // read, the outcome and the reason still show, and the name says so.
+      .catch((err) => {
+        // Only the name's line says so: the outcome and the reason still show.
+        if (!cancelled) setNameError({ retryable: canRetryRead(err) });
       })
       .finally(() => {
         if (!cancelled) setNameLoaded(true);
@@ -90,13 +95,28 @@ export default function DecisionOutcome({ request, view }) {
     return () => {
       cancelled = true;
     };
-  }, [request.id, decidedBy, decidedByYou, fetchHistory]);
+  }, [request.id, decidedBy, decidedByYou, fetchHistory, attempt]);
+
+  function retryName() {
+    setNameLoaded(false);
+    setNameError(null);
+    setAttempt((count) => count + 1);
+  }
 
   let decider;
   if (decidedByYou) decider = "You";
   else if (!decidedBy) decider = "Not recorded";
+  // Plain text, not LoadingText: one value in a record, and a live region per
+  // decided row would be announced once for every row in the list.
   else if (!nameLoaded) decider = "Loading...";
-  else decider = deciderName ?? "A coordinator with no name on record";
+  else if (nameError) {
+    decider = (
+      <ErrorNotice
+        message="The decider's name could not be loaded."
+        onRetry={nameError.retryable ? retryName : undefined}
+      />
+    );
+  } else decider = deciderName ?? "A coordinator with no name on record";
 
   const isRejection = request.decision === "rejected";
 
@@ -115,7 +135,7 @@ export default function DecisionOutcome({ request, view }) {
       <dd>{decider}</dd>
 
       <dt>Decided</dt>
-      <dd>{formatTimestamp(request.decidedAt, "Not recorded")}</dd>
+      <dd>{formatDateTime(request.decidedAt, "Not recorded")}</dd>
     </dl>
   );
 }

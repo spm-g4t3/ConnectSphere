@@ -9,6 +9,7 @@
 
 import { useState } from "react";
 import Button from "./ui/Button";
+import ErrorNotice from "./ui/ErrorNotice";
 import { submitChangeRequest } from "../services/changeRequestService";
 import {
   CHANGE_FIELD_OPTIONS,
@@ -204,7 +205,8 @@ export default function ChangeRequestForm({ eventRequestId, onSubmitted }) {
         <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} />
       </label>
 
-      {error && <p className="change-request-form__error" role="alert">{error}</p>}
+      {/* No Try again: submitting again is the retry. */}
+      {error && <ErrorNotice message={error} />}
       {otherErrors.length > 0 && (
         <div className="change-request-form__details-errors" role="alert">
           <p>Your change request can't be submitted yet:</p>

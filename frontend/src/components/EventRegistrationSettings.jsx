@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import Button from "./ui/Button";
+import LoadingText from "./ui/LoadingText";
+import ErrorNotice from "./ui/ErrorNotice";
+import useFocusAfterRetry from "./useFocusAfterRetry";
 import {
   getRegistrationSettings,
   saveRegistrationSettings,
@@ -9,10 +12,12 @@ import { isRegistrationConfigurable } from "../services/registrationStatuses";
 import { readStatusDisplay } from "../services/eventRequestStatusDisplay";
 import {
   deviceTimeZoneLabel,
-  formatVenueTimestamp,
   toDatetimeLocalValue,
   toOffsetIsoString,
+  VENUE_TIME_NOTE,
 } from "../services/datetimeFormat";
+import { formatDateTime } from "../services/displayFormat";
+import { canRetryRead } from "../services/apiErrors";
 
 const FIELD_LABELS = {
   registrationEnabled: "Registration",
@@ -25,9 +30,9 @@ const FIELD_LABELS = {
 };
 
 function loadErrorMessage(error) {
-  const message = apiError(error);
+  const message = apiError(error, "Could not load registration settings.");
   return message === "Unexpected server error"
-    ? `${message} Check that the registration migrations are applied to the API database, then retry.`
+    ? `${message} Check that the registration migrations are applied to the API database, then try again.`
     : message;
 }
 
@@ -40,14 +45,14 @@ function displayStatus(event) {
   return readStatusDisplay(event).label;
 }
 
-function apiError(error) {
+function apiError(error, fallback = "Could not save registration settings.") {
   const body = error?.response?.data;
   if (body?.details?.length) {
     return body.details
       .map(({ field, message }) => (FIELD_LABELS[field] ? `${FIELD_LABELS[field]}: ${message}` : message))
       .join(" ");
   }
-  return body?.error || "Could not save registration settings.";
+  return body?.error || fallback;
 }
 
 export default function EventRegistrationSettings({ eventId }) {
@@ -56,6 +61,8 @@ export default function EventRegistrationSettings({ eventId }) {
   const [loaded, setLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  // Kept apart: a failed read can be tried again, a failed save is saved again.
+  const [loadError, setLoadError] = useState(null); // { message, retryable }
   const [error, setError] = useState(null);
   const [saved, setSaved] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -76,17 +83,22 @@ export default function EventRegistrationSettings({ eventId }) {
     setLoaded(true);
   }
 
+  function failedLoad(err) {
+    return { message: loadErrorMessage(err), retryable: canRetryRead(err) };
+  }
+
   async function loadSettings() {
     setLoading(true);
-    setError(null);
+    setLoadError(null);
     try {
       applyLoaded(await getRegistrationSettings(eventId));
-    } catch (loadError) {
-      setError(loadErrorMessage(loadError));
+    } catch (err) {
+      setLoadError(failedLoad(err));
     } finally {
       setLoading(false);
     }
   }
+  const { headingRef, retry } = useFocusAfterRetry(loadSettings);
 
   useEffect(() => {
     let active = true;
@@ -94,8 +106,8 @@ export default function EventRegistrationSettings({ eventId }) {
       .then((data) => {
         if (active) applyLoaded(data);
       })
-      .catch((loadError) => {
-        if (active) setError(loadErrorMessage(loadError));
+      .catch((err) => {
+        if (active) setLoadError(failedLoad(err));
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -149,23 +161,19 @@ export default function EventRegistrationSettings({ eventId }) {
       {/* Titled before the event loads, so loading and error states still have their h1. */}
       <header className="event-registration-page__header">
         {event && <p className="eyebrow">Event registration</p>}
-        <h1>{event?.eventName || "Registration settings"}</h1>
+        <h1 ref={headingRef} tabIndex={-1}>{event?.eventName || "Registration settings"}</h1>
         {event && (
           <>
             <p>Event status: <strong>{displayStatus(event)}</strong></p>
-            <p>Event starts: {formatVenueTimestamp(event.proposedStart)}</p>
+            {/* The first time on the page, so the one place the zone is said. */}
+            <p>Event starts: {formatDateTime(event.proposedStart, "Not set")} {VENUE_TIME_NOTE}</p>
           </>
         )}
       </header>
-      {loading && <p role="status">Loading registration settings...</p>}
-      {error && (
-        <div className="event-registration-page__error" role="alert">
-          <p>{error}</p>
-          <Button variant="secondary" disabled={loading} onClick={loadSettings}>
-            Retry loading settings
-          </Button>
-        </div>
-      )}
+      {loading && <LoadingText />}
+      {loadError && <ErrorNotice message={loadError.message} onRetry={loadError.retryable ? retry : undefined} />}
+      {/* No Try again: saving again is the retry. */}
+      {error && <ErrorNotice message={error} />}
       {event && (
         <>
           {settings && !editing && (
@@ -173,14 +181,14 @@ export default function EventRegistrationSettings({ eventId }) {
               <h2 id="registration-summary-heading">Current registration</h2>
               <dl>
                 <div><dt>Status</dt><dd>{settings.enabled ? "On" : "Off"}</dd></div>
-                <div><dt>Opens</dt><dd>{formatVenueTimestamp(settings.opensAt)}</dd></div>
-                <div><dt>Closes</dt><dd>{formatVenueTimestamp(settings.closesAt)}</dd></div>
+                <div><dt>Opens</dt><dd>{formatDateTime(settings.opensAt, "Not set")}</dd></div>
+                <div><dt>Closes</dt><dd>{formatDateTime(settings.closesAt, "Not set")}</dd></div>
                 <div><dt>Capacity</dt><dd>{settings.capacity ?? "Unlimited"}</dd></div>
                 <div>
                   <dt>Registered</dt>
                   <dd>{settings.registeredCount}{settings.capacity ? ` / ${settings.capacity}` : ""}</dd>
                 </div>
-                <div><dt>Withdrawal deadline</dt><dd>{formatVenueTimestamp(settings.withdrawalDeadline)}</dd></div>
+                <div><dt>Withdrawal deadline</dt><dd>{formatDateTime(settings.withdrawalDeadline, "Not set")}</dd></div>
                 <div><dt>Waiting list</dt><dd>{settings.waitlistEnabled ? "On" : "Off"}</dd></div>
                 <div><dt>Waitlisted</dt><dd>{settings.waitlistCount ?? 0}</dd></div>
               </dl>

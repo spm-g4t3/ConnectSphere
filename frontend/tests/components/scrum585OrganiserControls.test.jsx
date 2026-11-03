@@ -250,12 +250,12 @@ describe("SCRUM585 AC3 the registration screens use the shared Button", () => {
     expectSharedControls(container);
   });
 
-  it("SCRUM585_AC3_registration_settings_retry_is_a_shared_button", async () => {
+  it("SCRUM585_AC3_registration_settings_try_again_is_a_shared_button", async () => {
     vi.mocked(getRegistrationSettings).mockRejectedValue(httpError(500));
     const { container } = render(<EventRegistrationSettings eventId="e1" />, { wrapper: MemoryRouter });
 
     await screen.findByRole("alert");
-    expectControl("button", "Retry loading settings", "secondary");
+    expectControl("button", "Try again", "secondary");
     expectSharedControls(container);
   });
 

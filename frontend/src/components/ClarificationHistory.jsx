@@ -1,7 +1,12 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { getEventClarificationHistory } from "../services/eventRequestService";
-import { formatMediumTimestamp } from "../services/displayFormat";
+import { formatDateTime, formatDay } from "../services/displayFormat";
 import { isReplyOverdue } from "../services/datetimeFormat";
+import { canRetryRead } from "../services/apiErrors";
+import LoadingText from "./ui/LoadingText";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import useFocusAfterRetry from "./useFocusAfterRetry";
 
 const ENTRY_LABELS = {
   question: "Coordinator question",
@@ -21,13 +26,6 @@ const FIELD_LABELS = {
   equipmentRequirements: "Equipment requirements",
 };
 
-function formatReplyByDate(value) {
-  const date = new Date(`${value}T00:00:00`);
-  return Number.isNaN(date.getTime())
-    ? value
-    : new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(date);
-}
-
 export default function ClarificationHistory({
   eventRequestId,
   isOpen = false,
@@ -35,31 +33,53 @@ export default function ClarificationHistory({
 }) {
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState(null); // { message, retryable }
+
+  // State is set only while still wanted, so a reply for an event the dialog
+  // has moved on from is dropped. Resolves once settled, for Try again's focus.
+  const loadHistory = useCallback((isActive = () => true) =>
+    getEventClarificationHistory(eventRequestId)
+      .then((history) => {
+        if (isActive()) setEntries(history);
+      })
+      .catch((err) => {
+        if (isActive()) {
+          setError({ message: "Clarification history could not be loaded.", retryable: canRetryRead(err) });
+        }
+      })
+      .finally(() => {
+        if (isActive()) setLoading(false);
+      }), [eventRequestId]);
 
   useEffect(() => {
     let cancelled = false;
-    getEventClarificationHistory(eventRequestId)
-      .then((history) => {
-        if (!cancelled) setEntries(history);
-      })
-      .catch(() => {
-        if (!cancelled) setError("Clarification history could not be loaded.");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+    loadHistory(() => !cancelled);
     return () => {
       cancelled = true;
     };
-  }, [eventRequestId]);
+  }, [loadHistory]);
 
-  if (loading) {
-    return <p className="clarification-history__state">Loading clarification history...</p>;
+  function reload() {
+    setLoading(true);
+    setError(null);
+    return loadHistory();
   }
-  if (error) return <p className="clarification-history__state" role="alert">{error}</p>;
+  const { headingRef, retry } = useFocusAfterRetry(reload);
+
+  // Every state renders in this box, so focus has somewhere to land after Try again.
+  const box = (content) => <div ref={headingRef} tabIndex={-1}>{content}</div>;
+
+  if (loading) return box(<LoadingText />);
+  if (error) {
+    return box(<ErrorNotice message={error.message} onRetry={error.retryable ? retry : undefined} />);
+  }
   if (entries.length === 0) {
-    return <p className="clarification-history__state">No clarification updates yet.</p>;
+    return box(
+      <EmptyState
+        message="No clarification updates yet."
+        nextStep="Questions and replies about this event will appear here."
+      />,
+    );
   }
 
   const latestQuestion = [...entries].reverse().find((entry) => entry.type === "question");
@@ -69,10 +89,10 @@ export default function ClarificationHistory({
     : entries;
 
   if (visibleEntries.length === 0) {
-    return <p className="clarification-history__state">No earlier messages.</p>;
+    return box(<p className="clarification-history__state">No earlier messages.</p>);
   }
 
-  return (
+  return box(
     <div className="clarification-history" aria-label="Clarification conversation">
       {visibleEntries.map((entry) => {
         const overdue = isOpen &&
@@ -93,7 +113,7 @@ export default function ClarificationHistory({
                 className="clarification-history__meta"
                 dateTime={entry.createdAt || undefined}
               >
-                {formatMediumTimestamp(entry.createdAt, "Date not recorded")}
+                {formatDateTime(entry.createdAt, "Date not recorded")}
               </time>
             </header>
             <p className="clarification-history__message">{entry.message}</p>
@@ -107,12 +127,12 @@ export default function ClarificationHistory({
             )}
             {entry.replyByDate && (
               <p className="clarification-history__deadline">
-                Reply by <time dateTime={entry.replyByDate}>{formatReplyByDate(entry.replyByDate)}</time>
+                Reply by <time dateTime={entry.replyByDate}>{formatDay(entry.replyByDate)}</time>
               </p>
             )}
           </article>
         );
       })}
-    </div>
+    </div>,
   );
 }

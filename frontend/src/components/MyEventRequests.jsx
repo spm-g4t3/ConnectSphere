@@ -17,8 +17,9 @@ import {
   readStatusDisplay,
   statusTone,
 } from "../services/eventRequestStatusDisplay";
-import { formatMediumTimestamp } from "../services/displayFormat";
+import { formatDateTime, formatDay } from "../services/displayFormat";
 import { isReplyOverdue } from "../services/datetimeFormat";
+import { canRetryRead } from "../services/apiErrors";
 import EventRequestForm from "./EventRequestForm";
 import ChangeRequestForm from "./ChangeRequestForm";
 import ChangeRequestStatusList from "./ChangeRequestStatusList";
@@ -33,6 +34,10 @@ import ConfirmedArrangements from "./ConfirmedArrangements";
 import NeedsAttentionBadge from "./NeedsAttentionBadge";
 import Button from "./ui/Button";
 import StatusBadge from "./ui/StatusBadge";
+import LoadingText from "./ui/LoadingText";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import useFocusAfterRetry from "./useFocusAfterRetry";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 
 /**
@@ -147,7 +152,7 @@ export default function MyEventRequests() {
   const navigate = useNavigate();
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState(null); // { message, retryable }
 
   // Which panel is open, if any: { mode: "create" } | { mode: "edit", request }
   // | { mode: "change-request", request } | null
@@ -178,6 +183,7 @@ export default function MyEventRequests() {
 
   const fetchRequests = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const data = await getMyEventRequests();
       setRequests(data);
@@ -196,9 +202,8 @@ export default function MyEventRequests() {
         setFocusMissing(!found);
       }
       pendingFocusId.current = null;
-      setError(null);
-    } catch {
-      setError("Could not load your event requests.");
+    } catch (err) {
+      setError({ message: "Could not load your event requests.", retryable: canRetryRead(err) });
     } finally {
       setLoading(false);
     }
@@ -229,6 +234,7 @@ export default function MyEventRequests() {
   // handleSaved already refetches after an edit, so changes made in this app
   // are covered; this covers changes made anywhere else.
   useRefetchOnReturn(fetchRequests);
+  const { headingRef, retry } = useFocusAfterRetry(fetchRequests);
 
   function handleSaved() {
     setActivePanel(null);
@@ -253,16 +259,20 @@ export default function MyEventRequests() {
     }
   }
 
+  // A submit keeps the panel open so the form's "Request submitted" page, with
+  // the reference, is seen; the list refreshes behind it for Back to return to.
+  function handleRequestSaved(saved) {
+    fetchRequests();
+    if (saved.status !== "draft") {
+      setActivePanel((panel) => (panel ? { ...panel, submitted: true } : panel));
+    }
+  }
+
   if (activePanel?.mode === "create") {
     return (
       <div className="my-event-requests">
         <Button variant="link" onClick={() => setActivePanel(null)}>&larr; Back to my requests</Button>
-        <EventRequestForm
-          onSaved={(saved) => {
-            fetchRequests();
-            if (saved.status !== "draft") setActivePanel(null);
-          }}
-        />
+        <EventRequestForm onSaved={handleRequestSaved} />
       </div>
     );
   }
@@ -271,18 +281,14 @@ export default function MyEventRequests() {
     return (
       <div className="my-event-requests">
         <Button variant="link" onClick={() => setActivePanel(null)}>&larr; Back to my requests</Button>
-        {/* Saving a draft keeps the panel open, so a revision keeps the
-            rejection beside the form (SCRUM-355 AC3); submitting closes it.
-            The rejection comes first, so it is read before the form. */}
+        {/* A revision keeps the rejection beside the form (SCRUM-355 AC3),
+            first so it is read before the form. Once submitted, the
+            confirmation is the page, so the rejection goes. */}
         <div className="my-event-requests__revision">
-          <DecisionHistory eventRequestId={activePanel.request.id} view="organiser" headingLevel={2} />
-          <EventRequestForm
-            existingRequest={activePanel.request}
-            onSaved={(saved) => {
-              fetchRequests();
-              if (saved.status !== "draft") setActivePanel(null);
-            }}
-          />
+          {!activePanel.submitted && (
+            <DecisionHistory eventRequestId={activePanel.request.id} view="organiser" headingLevel={2} />
+          )}
+          <EventRequestForm existingRequest={activePanel.request} onSaved={handleRequestSaved} />
         </div>
       </div>
     );
@@ -321,18 +327,22 @@ export default function MyEventRequests() {
   return (
     <div className="my-event-requests">
       <div className="my-event-requests__header">
-        <h1>My event requests</h1>
+        <h1 ref={headingRef} tabIndex={-1}>My event requests</h1>
         <Button onClick={() => setActivePanel({ mode: "create" })}>
           + New event request
         </Button>
       </div>
 
-      {loading && <p>Loading...</p>}
-      {error && <p className="my-event-requests__error">{error}</p>}
+      {loading && <LoadingText />}
+      {error && <ErrorNotice message={error.message} onRetry={error.retryable ? retry : undefined} />}
       {focusMissing && <p role="status">That event is no longer in your list.</p>}
 
+      {/* Points at the header button rather than repeating it: one primary action in view. */}
       {!loading && !error && requests.length === 0 && (
-        <p>You haven't created any event requests yet.</p>
+        <EmptyState
+          message="You haven't created any event requests yet."
+          nextStep="Select + New event request to start one."
+        />
       )}
 
       <ul className="my-event-requests__list">
@@ -375,7 +385,7 @@ export default function MyEventRequests() {
               )}
               {req.status === "pending_clarification" && req.clarificationReplyByDate && (
                 <p className="my-event-requests__clarification">
-                  Please respond by {formatMediumTimestamp(req.clarificationReplyByDate, "Not specified")}.
+                  Please respond by {formatDay(req.clarificationReplyByDate, "Not specified")}.
                   {isReplyOverdue(req.clarificationReplyByDate) && (
                     <strong className="clarification-overdue"> Overdue</strong>
                   )}
@@ -415,7 +425,7 @@ export default function MyEventRequests() {
                     <dt>Reason</dt>
                     <dd>{req.cancellationReason || "No reason recorded."}</dd>
                     <dt>Cancelled on</dt>
-                    <dd>{formatMediumTimestamp(req.cancelledAt, "Not specified")}</dd>
+                    <dd>{formatDateTime(req.cancelledAt, "Not specified")}</dd>
                   </dl>
                 </div>
               )}
@@ -428,9 +438,9 @@ export default function MyEventRequests() {
                   <dt>Description</dt>
                   <dd>{req.description || "Not specified"}</dd>
                   <dt>Proposed start</dt>
-                  <dd>{formatMediumTimestamp(req.proposedStart, "Not specified")}</dd>
+                  <dd>{formatDateTime(req.proposedStart, "Not specified")}</dd>
                   <dt>Proposed end</dt>
-                  <dd>{formatMediumTimestamp(req.proposedEnd, "Not specified")}</dd>
+                  <dd>{formatDateTime(req.proposedEnd, "Not specified")}</dd>
                   <dt>Expected attendance</dt>
                   <dd>{req.expectedAttendance ?? "Not specified"}</dd>
                   <dt>Venue requirements</dt>
@@ -513,9 +523,8 @@ export default function MyEventRequests() {
                   </Button>
                 )}
               </div>
-              {reopenError?.id === req.id && (
-                <p className="my-event-requests__error" role="alert">{reopenError.message}</p>
-              )}
+              {/* No Try again: the Revise and resubmit button is the retry. */}
+              {reopenError?.id === req.id && <ErrorNotice message={reopenError.message} />}
             </li>
           );
         })}

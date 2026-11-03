@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   getEventClarificationHistory,
   respondToEventClarification,
@@ -6,11 +6,15 @@ import {
 import ClarificationHistory from "./ClarificationHistory";
 import Button from "./ui/Button";
 import StatusBadge from "./ui/StatusBadge";
+import LoadingText from "./ui/LoadingText";
+import ErrorNotice from "./ui/ErrorNotice";
+import useFocusAfterRetry from "./useFocusAfterRetry";
 import {
   toDatetimeLocalValue,
   toOffsetIsoString,
 } from "../services/datetimeFormat";
-import { formatMediumDateTime } from "../services/displayFormat";
+import { formatDateTime, formatDay } from "../services/displayFormat";
+import { canRetryRead } from "../services/apiErrors";
 
 const FIELD_LABELS = {
   eventName: "Event name",
@@ -58,10 +62,7 @@ function toAmendments(fields, form) {
 function readOnlyValue(field, request) {
   const value = request[field];
   if (value === null || value === undefined || value === "") return "Not provided";
-  if (field === "proposedStart" || field === "proposedEnd") {
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? String(value) : formatMediumDateTime(date);
-  }
+  if (field === "proposedStart" || field === "proposedEnd") return formatDateTime(value);
   return String(value);
 }
 
@@ -70,28 +71,42 @@ export default function ClarificationReplyForm({ request, onSaved }) {
   const [form, setForm] = useState(() => initialValues(request));
   const [requestedFields, setRequestedFields] = useState([]);
   const [loadingFields, setLoadingFields] = useState(true);
+  // Kept apart: a failed read can be tried again, a failed send is sent again.
+  const [loadError, setLoadError] = useState(null); // { message, retryable }
   const [error, setError] = useState(null);
   const [sending, setSending] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
+  const loadFields = useCallback((isActive = () => true) =>
     getEventClarificationHistory(request.id)
       .then((history) => {
-        if (!cancelled) {
+        if (isActive()) {
           const openQuestion = [...history].reverse().find((entry) => entry.type === "question");
           setRequestedFields(openQuestion?.requestedFields ?? []);
         }
       })
-      .catch(() => {
-        if (!cancelled) setError("Could not load the clarification details.");
+      .catch((err) => {
+        if (isActive()) {
+          setLoadError({ message: "Could not load the clarification details.", retryable: canRetryRead(err) });
+        }
       })
       .finally(() => {
-        if (!cancelled) setLoadingFields(false);
-      });
+        if (isActive()) setLoadingFields(false);
+      }), [request.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadFields(() => !cancelled);
     return () => {
       cancelled = true;
     };
-  }, [request.id]);
+  }, [loadFields]);
+
+  function reloadFields() {
+    setLoadingFields(true);
+    setLoadError(null);
+    return loadFields();
+  }
+  const { headingRef, retry } = useFocusAfterRetry(reloadFields);
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -189,7 +204,7 @@ export default function ClarificationReplyForm({ request, onSaved }) {
         <blockquote>{request.clarificationNote}</blockquote>
       )}
       {request.clarificationReplyByDate && (
-        <p>Please reply by {request.clarificationReplyByDate}.</p>
+        <p>Please reply by {formatDay(request.clarificationReplyByDate)}.</p>
       )}
 
       <details className="clarification-reply__history">
@@ -198,11 +213,15 @@ export default function ClarificationReplyForm({ request, onSaved }) {
       </details>
 
       {loadingFields ? (
-        <section className="clarification-amendments" aria-label="Event amendments">
-          <p>Loading amendment options...</p>
+        <section className="clarification-amendments" aria-label="Event amendments" ref={headingRef} tabIndex={-1}>
+          <LoadingText />
+        </section>
+      ) : loadError ? (
+        <section className="clarification-amendments" aria-label="Event amendments" ref={headingRef} tabIndex={-1}>
+          <ErrorNotice message={loadError.message} onRetry={loadError.retryable ? retry : undefined} />
         </section>
       ) : (
-        <section className="clarification-amendments" aria-label="Event amendments">
+        <section className="clarification-amendments" aria-label="Event amendments" ref={headingRef} tabIndex={-1}>
           <div className="clarification-amendments__heading">
             <div>
               <h2>Event amendments</h2>
@@ -255,7 +274,8 @@ export default function ClarificationReplyForm({ request, onSaved }) {
           disabled={loadingFields || sending}
         />
       </label>
-      {error && <p role="alert">{error}</p>}
+      {/* No Try again: sending again is the retry. */}
+      {error && <ErrorNotice message={error} />}
       <Button type="submit" disabled={loadingFields || sending || !message.trim()}>
         {sending ? "Sending..." : "Send reply"}
       </Button>

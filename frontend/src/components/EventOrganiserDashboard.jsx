@@ -7,26 +7,31 @@ import {
   readStatusDisplay,
   statusTone,
 } from "../services/eventRequestStatusDisplay";
-import { formatEventDate } from "../services/displayFormat";
+import { formatDateTime, formatDay } from "../services/displayFormat";
 import { isReplyOverdue } from "../services/datetimeFormat";
+import { canRetryRead } from "../services/apiErrors";
 import NotificationInbox from "./NotificationInbox";
 import SafetyApprovalNotice from "./SafetyApprovalNotice";
 import NeedsAttentionBadge from "./NeedsAttentionBadge";
 import StatusBadge from "./ui/StatusBadge";
+import LoadingText from "./ui/LoadingText";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import useFocusAfterRetry from "./useFocusAfterRetry";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 
 export default function EventOrganiserDashboard({ user }) {
   const [events, setEvents] = useState([]);
   const [eventsLoading, setEventsLoading] = useState(true);
-  const [eventsError, setEventsError] = useState(null);
+  const [eventsError, setEventsError] = useState(null); // { message, retryable }
 
   const fetchEvents = useCallback(async () => {
     setEventsLoading(true);
+    setEventsError(null);
     try {
       setEvents(await getMyEventRequests());
-      setEventsError(null);
-    } catch {
-      setEventsError("Could not load your event requests.");
+    } catch (err) {
+      setEventsError({ message: "Could not load your event requests.", retryable: canRetryRead(err) });
     } finally {
       setEventsLoading(false);
     }
@@ -37,6 +42,8 @@ export default function EventOrganiserDashboard({ user }) {
   }, [fetchEvents, user.id]);
 
   useRefetchOnReturn(fetchEvents);
+  const { headingRef, retry } = useFocusAfterRetry(fetchEvents);
+  const showEmptyEvents = !eventsLoading && !eventsError && events.length === 0;
 
   const deadlines = events
     .filter((event) => event.status === "pending_clarification")
@@ -50,9 +57,24 @@ export default function EventOrganiserDashboard({ user }) {
       return firstDeadline - secondDeadline;
     });
 
+  const createEventLink = (
+    <Link
+      className="ui-button ui-button--primary"
+      to="/events"
+      state={{ openNewEventRequest: true }}
+    >
+      + Create new event
+    </Link>
+  );
+
   return (
     <div className="dashboard dashboard--organiser">
-      <h1>Welcome, {user.name}</h1>
+      <h1 ref={headingRef} tabIndex={-1}>Welcome, {user.name}</h1>
+
+      {/* Once, above both sections: both are read from the same list. */}
+      {eventsError && (
+        <ErrorNotice message={eventsError.message} onRetry={eventsError.retryable ? retry : undefined} />
+      )}
 
       {/* First, because a clarification waiting on the Organiser blocks the review. */}
       <section>
@@ -73,7 +95,11 @@ export default function EventOrganiserDashboard({ user }) {
                         : "Reply by"
                       : "Amend before event starts"}
                   </StatusBadge>
-                  <span>{event.clarificationReplyByDate || formatEventDate(event.proposedStart)}</span>
+                  <span>
+                    {event.clarificationReplyByDate
+                      ? formatDay(event.clarificationReplyByDate)
+                      : formatDateTime(event.proposedStart, "Date not set")}
+                  </span>
                 </div>
                 <Link
                   to="/events"
@@ -85,12 +111,14 @@ export default function EventOrganiserDashboard({ user }) {
               </li>
             );
           })}
-          {!eventsLoading && deadlines.length === 0 && (
-            <p>No outstanding amendments before your event dates.</p>
-          )}
-          {eventsLoading && <p>Checking for requested amendments...</p>}
-          {eventsError && <p className="dashboard--organiser__error" role="alert">{eventsError}</p>}
         </ul>
+        {eventsLoading && <LoadingText />}
+        {!eventsLoading && !eventsError && deadlines.length === 0 && (
+          <EmptyState
+            message="No outstanding amendments before your event dates."
+            nextStep="When a Coordinator asks you a question about an event, it will appear here."
+          />
+        )}
       </section>
 
       <section>
@@ -110,7 +138,7 @@ export default function EventOrganiserDashboard({ user }) {
                       <NeedsAttentionBadge event={event} />
                     </span>
                     <span className="dashboard--organiser__event-date">
-                      {formatEventDate(event.proposedStart)}
+                      {formatDateTime(event.proposedStart, "Date not set")}
                     </span>
                   </summary>
                   <dl>
@@ -121,9 +149,9 @@ export default function EventOrganiserDashboard({ user }) {
                     <dt>Description</dt>
                     <dd>{event.description || "Not specified"}</dd>
                     <dt>Proposed start</dt>
-                    <dd>{formatEventDate(event.proposedStart)}</dd>
+                    <dd>{formatDateTime(event.proposedStart, "Date not set")}</dd>
                     <dt>Proposed end</dt>
-                    <dd>{formatEventDate(event.proposedEnd)}</dd>
+                    <dd>{formatDateTime(event.proposedEnd, "Date not set")}</dd>
                     <dt>Expected attendance</dt>
                     <dd>{event.expectedAttendance ?? "Not specified"}</dd>
                     <dt>Venue requirements</dt>
@@ -141,7 +169,7 @@ export default function EventOrganiserDashboard({ user }) {
                   )}
                   {event.clarificationReplyByDate && (
                     <p className="dashboard--organiser__clarification">
-                      Reply by {event.clarificationReplyByDate}
+                      Reply by {formatDay(event.clarificationReplyByDate)}
                       {isReplyOverdue(event.clarificationReplyByDate) && (
                         <strong className="clarification-overdue"> — Overdue</strong>
                       )}
@@ -159,19 +187,18 @@ export default function EventOrganiserDashboard({ user }) {
               </li>
             );
           })}
-          {eventsLoading && <p>Loading your events...</p>}
-          {eventsError && <p className="dashboard--organiser__error" role="alert">{eventsError}</p>}
-          {!eventsLoading && !eventsError && events.length === 0 && (
-            <p>You haven't created any events yet.</p>
-          )}
         </ul>
-        <Link
-          className="ui-button ui-button--primary"
-          to="/events"
-          state={{ openNewEventRequest: true }}
-        >
-          + Create new event
-        </Link>
+        {eventsLoading && <LoadingText />}
+        {/* The empty state carries the create link, so it is not shown twice. */}
+        {showEmptyEvents ? (
+          <EmptyState
+            message="You haven't created any events yet."
+            nextStep="Create an event request to get started."
+            action={createEventLink}
+          />
+        ) : (
+          createEventLink
+        )}
       </section>
       <NotificationInbox />
     </div>

@@ -47,7 +47,7 @@ describe("SCRUM478 EventRegistrationList", () => {
     expect(within(rows[1]).getByText("Withdrawn")).toBeInTheDocument();
     expect(within(rows[2]).getByText("Event cancelled")).toBeInTheDocument();
     // Singapore time on every device: 09:00Z is 17:00 there.
-    expect(within(rows[0]).getAllByRole("cell")[2]).toHaveTextContent("2030-01-01 17:00 (Singapore time)");
+    expect(within(rows[0]).getAllByRole("cell")[2]).toHaveTextContent("1 Jan 2030, 5:00 pm");
   });
 
   it("SCRUM478_AC3_shows_registered_against_capacity_or_alone", async () => {
@@ -75,7 +75,7 @@ describe("SCRUM478 EventRegistrationList", () => {
     vi.mocked(getEventRegistrations).mockResolvedValue(listing({ entries: [waitlisted] }));
     renderList();
     const [row] = (await screen.findAllByRole("row")).slice(1);
-    expect(within(row).getAllByRole("cell")[2]).toHaveTextContent("2030-01-02 09:00 (Singapore time)");
+    expect(within(row).getAllByRole("cell")[2]).toHaveTextContent("2 Jan 2030, 9:00 am");
   });
 
   it("SCRUM478_AC4_asks_the_server_to_hide_withdrawn_when_toggled", async () => {

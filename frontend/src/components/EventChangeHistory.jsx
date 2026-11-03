@@ -5,9 +5,14 @@
 // it came through a significant change (SCRUM-395). The server decides who may
 // read it: the Organiser, the assigned coordinator and the Lead.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { getEventChangeHistory } from "../services/eventRequestService";
-import { formatMediumTimestamp, formatTimestamp } from "../services/displayFormat";
+import { formatDateTime } from "../services/displayFormat";
+import { canRetryRead } from "../services/apiErrors";
+import LoadingText from "./ui/LoadingText";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import useFocusAfterRetry from "./useFocusAfterRetry";
 import { TIMESTAMP_FIELDS, detailFieldLabel } from "../services/eventDetailFields";
 
 const SOURCE_LABEL = {
@@ -28,7 +33,7 @@ function sourceLabel(source) {
 /** One side of a change as words: a date, a number, text, or 395's equipment flag. */
 function valueText(field, value) {
   if (value === null || value === undefined || value === "") return "Not specified";
-  if (TIMESTAMP_FIELDS.includes(field)) return formatTimestamp(value, "Not specified");
+  if (TIMESTAMP_FIELDS.includes(field)) return formatDateTime(value, "Not specified");
   if (typeof value === "object") {
     if (typeof value.changeRequested === "boolean") {
       return value.changeRequested ? "Equipment change requested" : "No equipment change";
@@ -46,27 +51,49 @@ export default function EventChangeHistory({ eventRequestId }) {
   // Tagged with the request it was read for, as DecisionHistory's is.
   const [result, setResult] = useState(null);
 
-  useEffect(() => {
-    let cancelled = false;
+  // Resolves once settled, so Try again can move focus after the read.
+  const loadHistory = useCallback((isActive = () => true) =>
     getEventChangeHistory(eventRequestId)
       .then((entries) => {
-        if (!cancelled) setResult({ id: eventRequestId, entries });
+        if (isActive()) setResult({ id: eventRequestId, entries });
       })
-      .catch(() => {
-        if (!cancelled) setResult({ id: eventRequestId, error: "The change history could not be loaded." });
-      });
+      .catch((err) => {
+        if (isActive()) {
+          setResult({ id: eventRequestId, error: "The change history could not be loaded.", retryable: canRetryRead(err) });
+        }
+      }), [eventRequestId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadHistory(() => !cancelled);
     return () => {
       cancelled = true;
     };
-  }, [eventRequestId]);
+  }, [loadHistory]);
 
-  if (result?.id !== eventRequestId) return <p className="event-change-history__state">Loading change history...</p>;
-  if (result.error) return <p className="event-change-history__state" role="alert">{result.error}</p>;
+  function reload() {
+    setResult(null);
+    return loadHistory();
+  }
+  const { headingRef, retry } = useFocusAfterRetry(reload);
+
+  // Every state renders in this box, so focus has somewhere to land after Try again.
+  const box = (content) => <div ref={headingRef} tabIndex={-1}>{content}</div>;
+
+  if (result?.id !== eventRequestId) return box(<LoadingText />);
+  if (result.error) {
+    return box(<ErrorNotice message={result.error} onRetry={result.retryable ? retry : undefined} />);
+  }
   if (result.entries.length === 0) {
-    return <p className="event-change-history__state">No changes have been recorded.</p>;
+    return box(
+      <EmptyState
+        message="No changes have been recorded."
+        nextStep="Changes made to this event's details will appear here."
+      />,
+    );
   }
 
-  return (
+  return box(
     <ol className="event-change-history__list">
       {result.entries.map((entry) => (
         <li key={entry.id} className="event-change-history__entry">
@@ -82,11 +109,11 @@ export default function EventChangeHistory({ eventRequestId }) {
           <p className="event-change-history__meta">
             {entry.changedByName ?? "A coordinator with no name on record"}
             {", "}
-            {formatMediumTimestamp(entry.changedAt, "at an unrecorded time")}
+            {formatDateTime(entry.changedAt, "at an unrecorded time")}
           </p>
           <p className="event-change-history__reason">Reason: {entry.reason || "No reason was recorded."}</p>
         </li>
       ))}
-    </ol>
+    </ol>,
   );
 }

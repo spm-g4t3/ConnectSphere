@@ -131,7 +131,6 @@ button { cursor: pointer; }
 .dashboard--organiser__deadline-row p { margin: 6px 0 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 .dashboard--organiser__deadline-meta { align-items: flex-end; display: flex; flex-direction: column; gap: 5px; text-align: right; }
 .dashboard--organiser__deadline-row > .ui-button { grid-column: 1 / -1; justify-self: start; }
-.dashboard--organiser__error { background: var(--color-danger-soft); border-radius: var(--radius-control); color: var(--color-danger) !important; padding: 10px var(--space-3); }
 .my-event-requests { margin: 0 auto; max-width: 1080px; padding: 54px var(--space-5); }
 .my-event-requests > .ui-button--link { margin-bottom: 18px; }
 .my-event-requests__header { align-items: center; display: flex; gap: 20px; justify-content: space-between; margin-bottom: var(--space-5); }
@@ -159,7 +158,6 @@ button { cursor: pointer; }
    description as the reassign hint is under its field. */
 .my-event-requests__assignment { color: var(--color-accent-dark); font-size: var(--font-size-md); margin: -6px 0 10px; }
 .my-event-requests__item-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: 14px; }
-.my-event-requests__error { background: var(--color-danger-soft); border-radius: var(--radius-control); color: var(--color-danger); padding: 10px var(--space-3); }
 .event-request-form, .change-request-form { background: var(--color-paper); border: 1px solid var(--color-line); border-radius: var(--radius-card); display: grid; gap: 18px; margin: 0 0 var(--space-5); padding: var(--space-5); }
 /* SCRUM-355. A revision keeps the rejection it answers beside the form on a
    wide screen, and above it on a narrow one. A draft never rejected has no
@@ -169,7 +167,7 @@ button { cursor: pointer; }
   .my-event-requests__revision:has(> .decision-history) { grid-template-columns: minmax(0, 1fr) minmax(260px, 340px); }
   .my-event-requests__revision > .decision-history { grid-column: 2; grid-row: 1; position: sticky; top: 16px; }
 }
-/* The red of a rejection, as .my-event-requests__error; the coordinator's
+/* The red of a rejection, as an error notice; the coordinator's
    resubmission mark is amber, a thing to note rather than a failure. */
 .decision-history { background: var(--paper); border: 1px solid var(--line); border-left: 3px solid #a43c32; border-radius: 8px; display: grid; gap: 10px; margin: 0 0 24px; min-width: 0; padding: 16px 18px; }
 .decision-history h2, .decision-history h3 { color: var(--ink); font-size: 0.95rem; margin: 4px 0 0; }
@@ -182,7 +180,6 @@ button { cursor: pointer; }
 .decision-history__list li { border-left: 2px solid var(--line); color: var(--muted); font-size: 0.86rem; padding: 2px 0 2px 12px; }
 .decision-history__list li strong { color: var(--ink); }
 .decision-history .decision-history__list p { color: var(--ink); margin: 4px 0 0; overflow-wrap: anywhere; white-space: pre-wrap; }
-.decision-history__state { color: #a43c32; font-size: 0.88rem; margin: 10px 0; }
 .event-request-form h1 { color: var(--color-ink); margin: 0; }
 .event-request-form > label, .change-request-form > label { color: var(--color-muted); display: grid; gap: 7px; line-height: 1.4; }
 .event-request-form input, .event-request-form textarea, .change-request-form input, .change-request-form textarea, .change-request-form select { background: var(--color-paper); border: 1px solid var(--color-line); border-radius: var(--radius-control); color: var(--color-ink); font: inherit; min-width: 0; padding: 10px var(--space-3); width: 100%; }
@@ -656,8 +653,6 @@ button { cursor: pointer; }
 .event-change-history__source { background: #eef2f1; border-radius: 999px; color: var(--muted); font-size: 0.75rem; padding: 2px 8px; }
 .event-change-history__values, .event-change-history__reason { color: var(--ink); margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 .event-change-history__meta { color: var(--muted); font-size: 0.85rem; margin: 0; }
-.event-change-history__state { color: var(--muted); font-size: 0.88rem; margin: 0; }
-.event-change-history__state[role="alert"] { color: #a43c32; }
 .event-significant-change__confirmation label { align-items: flex-start; color: var(--ink); display: flex; gap: 9px; }
 .event-significant-change__confirmation input { flex: 0 0 auto; margin-top: 4px; }
 .dashboard--coordinator .coordinator-request-detail__significant-change { margin: 0 0 8px; }
@@ -890,8 +885,6 @@ button { cursor: pointer; }
 .event-registration-page__actions { align-items: center; display: flex; flex-wrap: wrap; gap: 14px; margin-top: var(--space-5); }
 .event-registration-page__actions [role="status"] { color: var(--color-success); font-weight: 700; margin: 0; }
 .event-registration-page__notice { background: var(--color-warning-soft); border-left: 4px solid #bb7a12; border-radius: 5px; color: #61440d; line-height: 1.5; margin-top: 20px; padding: 13px var(--space-4); }
-.event-registration-page__error { background: var(--color-danger-soft); border-left: 4px solid var(--color-danger); border-radius: var(--radius-control); color: #772820; margin: 20px 0; padding: 14px var(--space-4); }
-.event-registration-page__error p { line-height: 1.5; margin: 0 0 12px; overflow-wrap: anywhere; }
 .my-event-requests__clarification { background: var(--color-warning-soft); border-left: 3px solid #bb7a12; color: #61440d; margin: 14px 0; padding: 10px var(--space-3); white-space: pre-wrap; }
 .coordinator-clarification { display: grid; gap: 12px; }
 .coordinator-clarification label { color: var(--muted); display: grid; gap: 7px; }

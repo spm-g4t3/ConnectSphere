@@ -3,7 +3,10 @@ import { getConfirmedArrangements } from "../services/eventRequestService";
 import { formatVenuePeriod } from "../services/datetimeFormat";
 import { readStatusDisplay } from "../services/eventRequestStatusDisplay";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
-import Button from "./ui/Button";
+import { canRetryRead } from "../services/apiErrors";
+import LoadingText from "./ui/LoadingText";
+import ErrorNotice from "./ui/ErrorNotice";
+import useFocusAfterRetry from "./useFocusAfterRetry";
 
 const READ_ERRORS = {
   403: "Only the event's organiser can view these arrangements.",
@@ -25,7 +28,12 @@ function ArrangementDetails({ eventRequestId }) {
       }
       if (current === version.current) setState({ data });
     } catch (error) {
-      if (current === version.current) setState({ error: READ_ERRORS[error?.response?.status] ?? "Confirmed arrangements could not be loaded. Please try again." });
+      if (current === version.current) {
+        setState({
+          error: READ_ERRORS[error?.response?.status] ?? "Confirmed arrangements could not be loaded.",
+          retryable: canRetryRead(error),
+        });
+      }
     }
   }, [eventRequestId]);
 
@@ -34,20 +42,23 @@ function ArrangementDetails({ eventRequestId }) {
     return () => { version.current += 1; };
   }, [load]);
   useRefetchOnReturn(load);
+  const { headingRef, retry } = useFocusAfterRetry(load);
 
-  if (state.loading) return <p role="status">Loading confirmed arrangements...</p>;
-  if (state.error) return (
-    <div role="alert">
-      <p>{state.error}</p>
-      <Button variant="secondary" onClick={load}>Retry arrangements</Button>
-    </div>
-  );
+  // Every state renders in this box, so focus has somewhere to land after Try again.
+  const box = (content) => <div ref={headingRef} tabIndex={-1}>{content}</div>;
+
+  if (state.loading) return box(<LoadingText />);
+  if (state.error) {
+    return box(<ErrorNotice message={state.error} onRetry={state.retryable ? retry : undefined} />);
+  }
   const data = state.data;
   const display = readStatusDisplay(data);
   const completed = data.status === "completed";
-  if (data.status !== "confirmed" && !completed) return <p role="status">The event is now {display.label}. Its arrangements are not currently confirmed.</p>;
+  if (data.status !== "confirmed" && !completed) {
+    return box(<p role="status">The event is now {display.label}. Its arrangements are not currently confirmed.</p>);
+  }
 
-  return (
+  return box(
     <section aria-label={completed ? "Arrangements of the completed event" : "Current confirmed arrangements"}>
       <dl>
         <dt>Date and time</dt>
@@ -61,7 +72,7 @@ function ArrangementDetails({ eventRequestId }) {
       {data.equipment.length === 0 ? <p>No equipment is arranged for this event.</p> : (
         <ul>{data.equipment.map((line) => <li key={line.lineId}>{line.name ?? "Equipment type unavailable"}: {line.quantity ?? "Quantity unavailable"}</li>)}</ul>
       )}
-    </section>
+    </section>,
   );
 }
 

@@ -11,7 +11,6 @@ import userEvent from "@testing-library/user-event";
 import ChangeRequestForm from "../../src/components/ChangeRequestForm.jsx";
 import ChangeRequestStatusList from "../../src/components/ChangeRequestStatusList.jsx";
 import { getChangeRequests, submitChangeRequest } from "../../src/services/changeRequestService";
-import { formatTimestamp } from "../../src/services/displayFormat.js";
 import { httpError } from "../helpers/async.js";
 
 vi.mock("../../src/services/changeRequestService", () => ({
@@ -223,7 +222,7 @@ describe("SCRUM-402 the Organiser's list", () => {
     expect(card).toHaveTextContent("Expected attendance");
     expect(card).toHaveTextContent("150");
     expect(card).toHaveTextContent("Outstanding");
-    expect(card).toHaveTextContent(`Requested ${formatTimestamp("2026-10-20T03:00:00Z", "")}`);
+    expect(card).toHaveTextContent("Requested 20 Oct 2026, 11:00 am");
     expect(screen.getAllByText(/^Outstanding$/)).toHaveLength(1);
   });
 
@@ -242,7 +241,7 @@ describe("SCRUM-402 the Organiser's list", () => {
 
     expect(await screen.findByText(`Outcome: ${label}`)).toBeInTheDocument();
     expect(screen.getByText(noteLabel)).toBeInTheDocument();
-    expect(screen.getByText(/processed/)).toHaveTextContent(formatTimestamp("2026-10-22T03:00:00Z", ""));
+    expect(screen.getByText(/processed/)).toHaveTextContent("processed 22 Oct 2026, 11:00 am");
   });
 
   it("SCRUM402_AC10_an_unknown_status_and_a_row_from_before_the_groups_still_read", async () => {
