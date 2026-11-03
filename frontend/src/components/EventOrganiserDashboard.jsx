@@ -53,6 +53,45 @@ export default function EventOrganiserDashboard({ user }) {
     <div className="dashboard dashboard--organiser">
       <h1>Welcome, {user.name}</h1>
 
+      {/* First, because a clarification waiting on the Organiser blocks the review. */}
+      <section>
+        <h2>Needs your response</h2>
+        <ul>
+          {deadlines.map((event) => {
+            return (
+              <li key={event.id} className="dashboard--organiser__deadline-row">
+                <div>
+                  <strong>{event.eventName}</strong>
+                  <p>{event.clarificationNote || "The Event Coordinator requested an amendment."}</p>
+                </div>
+                <div className="dashboard--organiser__deadline-meta">
+                  <span className="deadline-tag">
+                    {event.clarificationReplyByDate
+                      ? isReplyOverdue(event.clarificationReplyByDate)
+                        ? "Overdue since"
+                        : "Reply by"
+                      : "Amend before event starts"}
+                  </span>
+                  <span>{event.clarificationReplyByDate || formatEventDate(event.proposedStart)}</span>
+                </div>
+                <Link
+                  to="/events"
+                  state={{ openClarificationRequestId: event.id }}
+                  className="dashboard--organiser__manage-event"
+                >
+                  Respond in My Events
+                </Link>
+              </li>
+            );
+          })}
+          {!eventsLoading && deadlines.length === 0 && (
+            <p>No outstanding amendments before your event dates.</p>
+          )}
+          {eventsLoading && <p>Checking for requested amendments...</p>}
+          {eventsError && <p className="dashboard--organiser__error" role="alert">{eventsError}</p>}
+        </ul>
+      </section>
+
       <section>
         <h2>My events</h2>
         <ul>
@@ -132,44 +171,6 @@ export default function EventOrganiserDashboard({ user }) {
         >
           + Create new event
         </Link>
-      </section>
-
-      <section>
-        <h2>Upcoming deadlines</h2>
-        <ul>
-          {deadlines.map((event) => {
-            return (
-              <li key={event.id} className="dashboard--organiser__deadline-row">
-                <div>
-                  <strong>{event.eventName}</strong>
-                  <p>{event.clarificationNote || "The Event Coordinator requested an amendment."}</p>
-                </div>
-                <div className="dashboard--organiser__deadline-meta">
-                  <span className="deadline-tag">
-                    {event.clarificationReplyByDate
-                      ? isReplyOverdue(event.clarificationReplyByDate)
-                        ? "Overdue since"
-                        : "Reply by"
-                      : "Amend before event starts"}
-                  </span>
-                  <span>{event.clarificationReplyByDate || formatEventDate(event.proposedStart)}</span>
-                </div>
-                <Link
-                  to="/events"
-                  state={{ openClarificationRequestId: event.id }}
-                  className="dashboard--organiser__manage-event"
-                >
-                  Respond in My Events
-                </Link>
-              </li>
-            );
-          })}
-          {!eventsLoading && deadlines.length === 0 && (
-            <p>No outstanding amendments before your event dates.</p>
-          )}
-          {eventsLoading && <p>Checking for requested amendments...</p>}
-          {eventsError && <p className="dashboard--organiser__error" role="alert">{eventsError}</p>}
-        </ul>
       </section>
       <NotificationInbox />
     </div>

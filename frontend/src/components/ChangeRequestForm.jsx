@@ -136,8 +136,6 @@ export default function ChangeRequestForm({ eventRequestId, onSubmitted }) {
 
   return (
     <form onSubmit={handleSubmit} className="change-request-form" noValidate>
-      <h2>Request a change</h2>
-
       {rows.map((row, index) => {
         const changeField = toChangeField(row.option);
         const label = `Change ${index + 1}`;

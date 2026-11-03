@@ -273,7 +273,7 @@ export default function MyEventRequests() {
             rejection beside the form (SCRUM-355 AC3); submitting closes it.
             The rejection comes first, so it is read before the form. */}
         <div className="my-event-requests__revision">
-          <DecisionHistory eventRequestId={activePanel.request.id} view="organiser" />
+          <DecisionHistory eventRequestId={activePanel.request.id} view="organiser" headingLevel={2} />
           <EventRequestForm
             existingRequest={activePanel.request}
             onSaved={(saved) => {
@@ -299,12 +299,19 @@ export default function MyEventRequests() {
     return (
       <div className="my-event-requests">
         <button className="my-event-requests__back" onClick={handleSaved}>&larr; Back to my requests</button>
-        <h2>{activePanel.request.eventName}</h2>
+        {/* The title sits outside the form so the page keeps it after a submission. */}
+        <header className="my-event-requests__panel-header">
+          <h1>Request a change</h1>
+          <p>{activePanel.request.eventName}</p>
+        </header>
         <ChangeRequestForm
           eventRequestId={activePanel.request.id}
           onSubmitted={handleSaved}
         />
-        <ChangeRequestStatusList eventRequestId={activePanel.request.id} />
+        <section className="my-event-requests__change-history" aria-labelledby="change-request-history-heading">
+          <h2 id="change-request-history-heading">Change request history</h2>
+          <ChangeRequestStatusList eventRequestId={activePanel.request.id} />
+        </section>
       </div>
     );
   }
@@ -394,7 +401,7 @@ export default function MyEventRequests() {
                   {/* SCRUM-347 AC5: a rejected event's earlier decisions. Not their
                       reason: an older rejection's would read as the current one. */}
                   {req.status === "rejected" && (
-                    <DecisionHistory eventRequestId={req.id} view="organiser" showReason={false} />
+                    <DecisionHistory eventRequestId={req.id} view="organiser" showReason={false} headingLevel={2} />
                   )}
                 </div>
               )}

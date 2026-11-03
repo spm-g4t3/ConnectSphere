@@ -146,6 +146,17 @@ export default function EventRegistrationSettings({ eventId }) {
       ) : (
         <Link className="event-registration-page__back" to="/registration">← Back to Registration</Link>
       )}
+      {/* Titled before the event loads, so loading and error states still have their h1. */}
+      <header className="event-registration-page__header">
+        {event && <p className="eyebrow">Event registration</p>}
+        <h1>{event?.eventName || "Registration settings"}</h1>
+        {event && (
+          <>
+            <p>Event status: <strong>{displayStatus(event)}</strong></p>
+            <p>Event starts: {formatVenueTimestamp(event.proposedStart)}</p>
+          </>
+        )}
+      </header>
       {loading && <p role="status">Loading registration settings...</p>}
       {error && (
         <div className="event-registration-page__error" role="alert">
@@ -157,12 +168,6 @@ export default function EventRegistrationSettings({ eventId }) {
       )}
       {event && (
         <>
-          <header className="event-registration-page__header">
-            <p className="eyebrow">Event registration</p>
-            <h1>{event.eventName}</h1>
-            <p>Event status: <strong>{displayStatus(event)}</strong></p>
-            <p>Event starts: {formatVenueTimestamp(event.proposedStart)}</p>
-          </header>
           {settings && !editing && (
             <section className="event-registration-page__summary" aria-labelledby="registration-summary-heading">
               <h2 id="registration-summary-heading">Current registration</h2>

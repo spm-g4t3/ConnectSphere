@@ -43,17 +43,18 @@ export default function EventRegistrationList({ eventId }) {
     <main className="event-registration-page">
       <Link className="event-registration-page__back" to={back.to}>{back.label}</Link>
 
+      {/* Titled before the list loads, so loading and error states still have their h1. */}
+      <header className="event-registration-page__header">
+        {list && <p className="eyebrow">Registrations</p>}
+        <h1>{list?.event.eventName || "Registrations"}</h1>
+      </header>
+
       {error && (
         <div className="event-registration-page__error" role="alert">{error}</div>
       )}
 
       {list && (
         <>
-          <header className="event-registration-page__header">
-            <p className="eyebrow">Registrations</p>
-            <h1>{list.event.eventName}</h1>
-          </header>
-
           <section className="event-registration-page__summary" aria-labelledby="registration-counts-heading">
             <h2 id="registration-counts-heading">Registered</h2>
             <p className="registration-list__count" aria-label="Registered count">

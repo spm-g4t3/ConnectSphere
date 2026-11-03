@@ -182,7 +182,7 @@ export default function ClarificationReplyForm({ request, onSaved }) {
 
   return (
     <form className="clarification-reply" onSubmit={handleSubmit}>
-      <h2>Reply to the Coordinator</h2>
+      <h1>Reply to the Coordinator</h1>
       {request.clarificationNote && (
         <blockquote>{request.clarificationNote}</blockquote>
       )}
@@ -203,7 +203,7 @@ export default function ClarificationReplyForm({ request, onSaved }) {
         <section className="clarification-amendments" aria-label="Event amendments">
           <div className="clarification-amendments__heading">
             <div>
-              <h3>Event amendments</h3>
+              <h2>Event amendments</h2>
               <p>Only fields approved by your Coordinator can be changed.</p>
             </div>
             <span className={`clarification-amendments__badge${requestedFields.length ? " clarification-amendments__badge--active" : ""}`}>

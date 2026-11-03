@@ -21,8 +21,10 @@ const DECISION_LABEL = {
  *                                                 the request is a resubmission
  * @param {boolean} [props.showReason]  false beside a current rejection, whose
  *                                      own reason is the one to act on (SCRUM-347)
+ * @param {2|3} [props.headingLevel]  2 where the history is a section of the
+ *                                     page itself, 3 inside another section
  */
-export default function DecisionHistory({ eventRequestId, view = "organiser", showReason = true }) {
+export default function DecisionHistory({ eventRequestId, view = "organiser", showReason = true, headingLevel = 3 }) {
   // Tagged with the request it was read for, so switching requests never shows
   // the previous one's decisions or error while the new read is in flight.
   const [result, setResult] = useState(null);
@@ -50,6 +52,7 @@ export default function DecisionHistory({ eventRequestId, view = "organiser", sh
   // (SCRUM-347) is history too. The newest rejection is the one being answered.
   const resubmitted = entries.some((entry) => entry.supersededReason === "reopened_for_revision");
   const latestRejection = [...entries].reverse().find((entry) => entry.decision === "rejected");
+  const Heading = `h${headingLevel}`;
 
   return (
     <section className="decision-history" aria-label="Previous decisions">
@@ -64,7 +67,7 @@ export default function DecisionHistory({ eventRequestId, view = "organiser", sh
           <p>{latestRejection.decisionNote || "No reason was recorded."}</p>
         </div>
       )}
-      <h3>Previous decisions</h3>
+      <Heading>Previous decisions</Heading>
       <ol className="decision-history__list">
         {entries.map((entry) => (
           <li key={entry.id}>
