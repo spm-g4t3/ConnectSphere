@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import Button from "./ui/Button";
 import LoadingText from "./ui/LoadingText";
@@ -68,6 +68,20 @@ export default function EventRegistrationSettings({ eventId }) {
   const [editing, setEditing] = useState(false);
   const [event, setEvent] = useState(null);
   const canEdit = isRegistrationConfigurable(event?.status);
+  // Opening or closing the form removes the button that did it, so focus moves
+  // to the form's title, or back to Configure registration.
+  const formHeadingRef = useRef(null);
+  const configureRef = useRef(null);
+  const switchedView = useRef(false);
+  useEffect(() => {
+    if (!switchedView.current) return;
+    switchedView.current = false;
+    (editing ? formHeadingRef : configureRef).current?.focus();
+  }, [editing]);
+  function showForm(open) {
+    switchedView.current = true;
+    setEditing(open);
+  }
 
   function applyLoaded(data) {
     setEvent(data);
@@ -135,7 +149,7 @@ export default function EventRegistrationSettings({ eventId }) {
       setSettings(updated);
       setEvent((current) => ({ ...current, settings: updated }));
       setSaved(true);
-      setEditing(false);
+      showForm(false);
     } catch (saveError) {
       setError(apiError(saveError));
     } finally {
@@ -149,7 +163,7 @@ export default function EventRegistrationSettings({ eventId }) {
         <Button
           variant="link"
           onClick={() => {
-            setEditing(false);
+            showForm(false);
             setError(null);
           }}
         >
@@ -195,9 +209,10 @@ export default function EventRegistrationSettings({ eventId }) {
               {saved && <p role="status">Registration settings saved.</p>}
               {canEdit && loaded && form && (
                 <Button
+                  ref={configureRef}
                   onClick={() => {
                     setSaved(false);
-                    setEditing(true);
+                    showForm(true);
                   }}
                 >
                   Configure registration
@@ -213,7 +228,7 @@ export default function EventRegistrationSettings({ eventId }) {
           )}
           {canEdit && loaded && form && editing && (
             <form className="event-registration-page__form" aria-label="Registration settings" onSubmit={save}>
-              <h2>Configure registration</h2>
+              <h2 ref={formHeadingRef} tabIndex={-1}>Configure registration</h2>
               <p>Set when attendees can register and the maximum number of places available.</p>
               <label className="event-registration-page__toggle">
                 <input

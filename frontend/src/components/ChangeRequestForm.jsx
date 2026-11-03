@@ -7,7 +7,7 @@
 // "Cancel the event" stands alone in a request (D8). Errors are keyed on the
 // status, never on the server's text; a 400's details[] go beside their row.
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Button from "./ui/Button";
 import ErrorNotice from "./ui/ErrorNotice";
 import { submitChangeRequest } from "../services/changeRequestService";
@@ -69,6 +69,17 @@ export default function ChangeRequestForm({ eventRequestId, onSubmitted }) {
   const [errors, setErrors] = useState([]);
   const [otherErrors, setOtherErrors] = useState([]);
   const [success, setSuccess] = useState(false);
+  // Each view replaces the button that switched to it, so focus follows: to the
+  // confirmation after a submit, and to the first choice for another change.
+  const successRef = useRef(null);
+  const formRef = useRef(null);
+  const switchedView = useRef(false);
+  useEffect(() => {
+    if (!switchedView.current) return;
+    switchedView.current = false;
+    if (success) successRef.current?.focus();
+    else formRef.current?.querySelector("select")?.focus();
+  }, [success]);
 
   const cancelling = rows.some((row) => toChangeField(row.option) === "cancellation");
   const noteTooLong = Array.from(note.trim()).length > NOTE_MAX_LENGTH;
@@ -109,6 +120,7 @@ export default function ChangeRequestForm({ eventRequestId, onSubmitted }) {
         }),
         ...(note.trim() && { note: note.trim() }),
       });
+      switchedView.current = true;
       setSuccess(true);
       setRows([newRow()]);
       setNote("");
@@ -129,15 +141,23 @@ export default function ChangeRequestForm({ eventRequestId, onSubmitted }) {
 
   if (success) {
     return (
-      <div className="change-request-form__success">
+      <div className="change-request-form__success" ref={successRef} tabIndex={-1}>
         <p>Your change request has been submitted.</p>
-        <Button variant="secondary" onClick={() => setSuccess(false)}>Request another change</Button>
+        <Button
+          variant="secondary"
+          onClick={() => {
+            switchedView.current = true;
+            setSuccess(false);
+          }}
+        >
+          Request another change
+        </Button>
       </div>
     );
   }
 
   return (
-    <form onSubmit={handleSubmit} className="change-request-form" noValidate>
+    <form ref={formRef} onSubmit={handleSubmit} className="change-request-form" noValidate>
       {rows.map((row, index) => {
         const changeField = toChangeField(row.option);
         const label = `Change ${index + 1}`;

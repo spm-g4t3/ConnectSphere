@@ -131,6 +131,13 @@ button { cursor: pointer; }
 .dashboard--organiser__deadline-row p { margin: 6px 0 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 .dashboard--organiser__deadline-meta { align-items: flex-end; display: flex; flex-direction: column; gap: 5px; text-align: right; }
 .dashboard--organiser__deadline-row > .ui-button { grid-column: 1 / -1; justify-self: start; }
+/* One clear ring for every Organiser control and focused title, so keyboard
+   users can always see where they are. */
+.dashboard--organiser :is(a, button, input, select, textarea, summary, [tabindex]):focus-visible,
+.my-event-requests :is(a, button, input, select, textarea, summary, [tabindex]):focus-visible,
+.event-registration-page :is(a, button, input, select, textarea, summary, [tabindex]):focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+/* Event names, notes and references can be one long word; wrap them inside a 360px screen. */
+.dashboard--organiser, .my-event-requests, .event-registration-page { overflow-wrap: anywhere; }
 .my-event-requests { margin: 0 auto; max-width: 1080px; padding: 54px var(--space-5); }
 .my-event-requests > .ui-button--link { margin-bottom: 18px; }
 .my-event-requests__header { align-items: center; display: flex; gap: 20px; justify-content: space-between; margin-bottom: var(--space-5); }
@@ -183,7 +190,7 @@ button { cursor: pointer; }
 .event-request-form h1 { color: var(--color-ink); margin: 0; }
 .event-request-form > label, .change-request-form > label { color: var(--color-muted); display: grid; gap: 7px; line-height: 1.4; }
 .event-request-form input, .event-request-form textarea, .change-request-form input, .change-request-form textarea, .change-request-form select { background: var(--color-paper); border: 1px solid var(--color-line); border-radius: var(--radius-control); color: var(--color-ink); font: inherit; min-width: 0; padding: 10px var(--space-3); width: 100%; }
-.event-request-form input:focus, .event-request-form textarea:focus, .change-request-form input:focus, .change-request-form textarea:focus, .change-request-form select:focus { border-color: var(--color-accent); outline: 2px solid rgba(8, 127, 123, 0.16); }
+.event-request-form input:focus, .event-request-form textarea:focus, .change-request-form input:focus, .change-request-form textarea:focus, .change-request-form select:focus { border-color: var(--color-accent); }
 .event-request-form__row { display: grid; gap: var(--space-4); grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .event-request-form__row label { color: var(--color-muted); display: grid; gap: 7px; }
 .event-request-form__actions { display: flex; flex-wrap: wrap; gap: 10px; }
@@ -502,11 +509,12 @@ button { cursor: pointer; }
 .clarification-history-dialog__header h2 { font-size: 1.2rem; margin: 0; }
 .clarification-history-dialog__header p { color: var(--muted); margin: 4px 0 0; }
 .clarification-history-dialog__close { flex: 0 0 auto; }
-.clarification-reply textarea { border: 1px solid var(--color-line); border-radius: var(--radius-control); color: var(--color-ink); font: inherit; padding: 10px var(--space-3); resize: vertical; }
-.clarification-reply__amendments { border: 1px solid var(--color-line); border-radius: var(--radius-card); display: grid; gap: var(--space-3); margin: 0; padding: var(--space-4); }
+.clarification-reply textarea { border: 1px solid var(--color-line); border-radius: var(--radius-control); color: var(--color-ink); font: inherit; min-width: 0; padding: 10px var(--space-3); resize: vertical; }
+/* A fieldset is as wide as its widest content by default; min-width: 0 lets it fit a phone. */
+.clarification-reply__amendments { border: 1px solid var(--color-line); border-radius: var(--radius-card); display: grid; gap: var(--space-3); margin: 0; min-width: 0; padding: var(--space-4); }
 .clarification-reply__amendments legend { color: var(--color-accent-dark); font-weight: 700; padding: 0 6px; }
 .clarification-reply__amendments p { color: var(--color-muted); margin: 0; }
-.clarification-reply input, .clarification-reply__amendments textarea { border: 1px solid var(--color-line); border-radius: var(--radius-control); color: var(--color-ink); font: inherit; padding: 10px var(--space-3); }
+.clarification-reply input, .clarification-reply__amendments textarea { border: 1px solid var(--color-line); border-radius: var(--radius-control); color: var(--color-ink); font: inherit; min-width: 0; padding: 10px var(--space-3); }
 .clarification-amendments { background: #f7faf9; border: 1px solid var(--color-line); border-radius: 10px; display: grid; gap: var(--space-4); padding: 18px; }
 .clarification-amendments__heading { align-items: flex-start; display: flex; flex-wrap: wrap; gap: var(--space-3); justify-content: space-between; }
 .clarification-amendments__heading h2 { color: var(--color-ink); font-size: var(--font-size-base); margin: 0; }
@@ -880,7 +888,7 @@ button { cursor: pointer; }
 .event-registration-page__fields label { color: var(--color-ink); display: grid; font-size: var(--font-size-md); font-weight: 700; gap: var(--space-2); min-width: 0; }
 .event-registration-page__optional, .event-registration-page__hint { color: var(--color-muted); font-size: 0.8rem; font-weight: 400; }
 .event-registration-page__fields input { background: var(--color-paper); border: 1px solid #aebfba; border-radius: var(--radius-control); color: var(--color-ink); font: inherit; min-height: 44px; min-width: 0; padding: 9px 11px; width: 100%; }
-.event-registration-page__fields input:focus { border-color: var(--color-accent); outline: 3px solid rgba(8, 127, 123, 0.15); }
+.event-registration-page__fields input:focus { border-color: var(--color-accent); }
 .event-registration-page__hint { line-height: 1.4; }
 .event-registration-page__actions { align-items: center; display: flex; flex-wrap: wrap; gap: 14px; margin-top: var(--space-5); }
 .event-registration-page__actions [role="status"] { color: var(--color-success); font-weight: 700; margin: 0; }
@@ -921,7 +929,7 @@ button { cursor: pointer; }
 .change-request-status-list__date { color: var(--color-muted); font-size: var(--font-size-sm); }
 
 /* SCRUM-402: a submission's fields together, on the Organiser's form and list. */
-.change-request-form__row { border: 1px solid var(--color-line); border-radius: var(--radius-card); display: grid; gap: 10px; margin: 0; padding: 14px; }
+.change-request-form__row { border: 1px solid var(--color-line); border-radius: var(--radius-card); display: grid; gap: 10px; margin: 0; min-width: 0; padding: 14px; }
 .change-request-form__row label { color: var(--color-muted); display: grid; gap: 7px; }
 .change-request-form__row > .ui-button, .change-request-form > .ui-button--secondary { justify-self: start; }
 .change-request-status-list__fields { display: grid; gap: var(--space-2); list-style: none; margin: 0; padding: 0; }
@@ -1219,3 +1227,12 @@ button { cursor: pointer; }
 .registration-list__table { border-collapse: collapse; width: 100%; }
 .registration-list__table th, .registration-list__table td { border-bottom: 1px solid var(--color-line); overflow-wrap: anywhere; padding: 10px var(--space-2); text-align: left; }
 .registration-list__table th { color: var(--color-muted); font-size: 0.8rem; }
+/* Four columns are too narrow to read on a phone, so each registration becomes a
+   card of label and value. The header row stays for screen readers only. */
+@media (max-width: 720px) {
+  .registration-list__table, .registration-list__table tbody { display: block; }
+  .registration-list__table thead { clip-path: inset(50%); height: 1px; overflow: hidden; position: absolute; white-space: nowrap; width: 1px; }
+  .registration-list__table tr { border-bottom: 1px solid var(--color-line); display: grid; gap: var(--space-1); padding: var(--space-2) 0; }
+  .registration-list__table td { border-bottom: 0; display: grid; gap: var(--space-2); grid-template-columns: minmax(0, 8rem) minmax(0, 1fr); padding: 0; }
+  .registration-list__table td::before { color: var(--color-muted); content: attr(data-label); font-size: var(--font-size-sm); font-weight: 700; }
+}

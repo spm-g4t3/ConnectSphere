@@ -38,6 +38,7 @@ import LoadingText from "./ui/LoadingText";
 import EmptyState from "./ui/EmptyState";
 import ErrorNotice from "./ui/ErrorNotice";
 import useFocusAfterRetry from "./useFocusAfterRetry";
+import useReturnFocus from "./useReturnFocus";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 
 /**
@@ -147,6 +148,12 @@ function assignmentLine(request) {
 // How long a row opened from a link stays highlighted, matching the CSS pulse.
 const FOCUS_HIGHLIGHT_MS = 4000;
 
+// Which control opened a panel, so Back can return focus to it. Edit is one key
+// for Continue editing and Revise and resubmit: a reopened row comes back as a draft.
+function openerKey(panel) {
+  return panel.mode === "create" ? "create" : `${panel.mode}:${panel.request.id}`;
+}
+
 export default function MyEventRequests() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -235,10 +242,35 @@ export default function MyEventRequests() {
   // are covered; this covers changes made anywhere else.
   useRefetchOnReturn(fetchRequests);
   const { headingRef, retry } = useFocusAfterRetry(fetchRequests);
+  const panelKey = activePanel ? openerKey(activePanel) : null;
+  const { listHeadingRef, rowRef, returnFocusTo } = useReturnFocus(panelKey, loading);
+  function titleRef(node) {
+    headingRef.current = node;
+    listHeadingRef.current = node;
+  }
+
+  // An opened panel starts at its title, so keyboard and screen reader users
+  // begin at the top of what they opened. The forms draw their own h1.
+  const panelRef = useRef(null);
+  useEffect(() => {
+    if (panelKey) panelRef.current?.querySelector("h1")?.focus();
+  }, [panelKey]);
+
+  function closePanel() {
+    returnFocusTo(panelKey);
+    setActivePanel(null);
+  }
 
   function handleSaved() {
-    setActivePanel(null);
+    closePanel();
     fetchRequests();
+  }
+
+  // Like a submitted request, a change request keeps its panel open so its
+  // confirmation is seen; the history below is remounted to read the new one.
+  function handleChangeRequested() {
+    fetchRequests();
+    setActivePanel((panel) => (panel ? { ...panel, submissions: (panel.submissions ?? 0) + 1 } : panel));
   }
 
   // SCRUM-355 AC1, AC2: reopen as a draft and go straight to editing it.
@@ -270,8 +302,8 @@ export default function MyEventRequests() {
 
   if (activePanel?.mode === "create") {
     return (
-      <div className="my-event-requests">
-        <Button variant="link" onClick={() => setActivePanel(null)}>&larr; Back to my requests</Button>
+      <div className="my-event-requests" ref={panelRef}>
+        <Button variant="link" onClick={closePanel}>&larr; Back to my requests</Button>
         <EventRequestForm onSaved={handleRequestSaved} />
       </div>
     );
@@ -279,8 +311,8 @@ export default function MyEventRequests() {
 
   if (activePanel?.mode === "edit") {
     return (
-      <div className="my-event-requests">
-        <Button variant="link" onClick={() => setActivePanel(null)}>&larr; Back to my requests</Button>
+      <div className="my-event-requests" ref={panelRef}>
+        <Button variant="link" onClick={closePanel}>&larr; Back to my requests</Button>
         {/* A revision keeps the rejection beside the form (SCRUM-355 AC3),
             first so it is read before the form. Once submitted, the
             confirmation is the page, so the rejection goes. */}
@@ -296,7 +328,7 @@ export default function MyEventRequests() {
 
   if (activePanel?.mode === "clarification-response") {
     return (
-      <div className="my-event-requests">
+      <div className="my-event-requests" ref={panelRef}>
         <Button variant="link" onClick={handleSaved}>&larr; Back to my requests</Button>
         <ClarificationReplyForm request={activePanel.request} onSaved={handleSaved} />
       </div>
@@ -305,20 +337,20 @@ export default function MyEventRequests() {
 
   if (activePanel?.mode === "change-request") {
     return (
-      <div className="my-event-requests">
+      <div className="my-event-requests" ref={panelRef}>
         <Button variant="link" onClick={handleSaved}>&larr; Back to my requests</Button>
         {/* The title sits outside the form so the page keeps it after a submission. */}
         <header className="my-event-requests__panel-header">
-          <h1>Request a change</h1>
+          <h1 tabIndex={-1}>Request a change</h1>
           <p>{activePanel.request.eventName}</p>
         </header>
         <ChangeRequestForm
           eventRequestId={activePanel.request.id}
-          onSubmitted={handleSaved}
+          onSubmitted={handleChangeRequested}
         />
         <section className="my-event-requests__change-history" aria-labelledby="change-request-history-heading">
           <h2 id="change-request-history-heading">Change request history</h2>
-          <ChangeRequestStatusList eventRequestId={activePanel.request.id} />
+          <ChangeRequestStatusList key={activePanel.submissions ?? 0} eventRequestId={activePanel.request.id} />
         </section>
       </div>
     );
@@ -327,8 +359,8 @@ export default function MyEventRequests() {
   return (
     <div className="my-event-requests">
       <div className="my-event-requests__header">
-        <h1 ref={headingRef} tabIndex={-1}>My event requests</h1>
-        <Button onClick={() => setActivePanel({ mode: "create" })}>
+        <h1 ref={titleRef} tabIndex={-1}>My event requests</h1>
+        <Button ref={rowRef("create")} onClick={() => setActivePanel({ mode: "create" })}>
           + New event request
         </Button>
       </div>
@@ -487,19 +519,24 @@ export default function MyEventRequests() {
                   </Link>
                 )}
                 {req.status === "draft" && (
-                  <Button onClick={() => setActivePanel({ mode: "edit", request: req })}>
+                  <Button ref={rowRef(`edit:${req.id}`)} onClick={() => setActivePanel({ mode: "edit", request: req })}>
                     Continue editing
                   </Button>
                 )}
 
                 {req.status === "rejected" && (
-                  <Button disabled={reopeningId === req.id} onClick={() => handleReopen(req)}>
+                  <Button
+                    ref={rowRef(`edit:${req.id}`)}
+                    disabled={reopeningId === req.id}
+                    onClick={() => handleReopen(req)}
+                  >
                     {reopeningId === req.id ? "Reopening..." : "Revise and resubmit"}
                   </Button>
                 )}
 
                 {req.status === "pending_clarification" && (
                   <Button
+                    ref={rowRef(`clarification-response:${req.id}`)}
                     onClick={() =>
                       setActivePanel({ mode: "clarification-response", request: req })
                     }
@@ -516,6 +553,7 @@ export default function MyEventRequests() {
                   req.status !== "completed" &&
                   req.status !== "rejected" && (
                   <Button
+                    ref={rowRef(`change-request:${req.id}`)}
                     variant="secondary"
                     onClick={() => setActivePanel({ mode: "change-request", request: req })}
                   >

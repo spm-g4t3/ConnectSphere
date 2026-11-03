@@ -16,7 +16,7 @@
 // On successful submit, shows a confirmation with the request's reference
 // (its id) per AC7.
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Button from "./ui/Button";
 import ErrorNotice from "./ui/ErrorNotice";
 import {
@@ -62,6 +62,11 @@ export default function EventRequestForm({
   // is an array of { field, message } rather than a single string.
   const [submitErrors, setSubmitErrors] = useState([]);
   const [confirmation, setConfirmation] = useState(null);
+  // The confirmation replaces the form, Submit included, so focus moves to its title.
+  const confirmationHeadingRef = useRef(null);
+  useEffect(() => {
+    if (confirmation) confirmationHeadingRef.current?.focus();
+  }, [confirmation]);
 
   function updateField(field, value) {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -160,7 +165,7 @@ export default function EventRequestForm({
   if (confirmation) {
     return (
       <div className="event-request-form__confirmation">
-        <h1>Request submitted</h1>
+        <h1 ref={confirmationHeadingRef} tabIndex={-1}>Request submitted</h1>
         <p>
           Your event request has been received. Your reference number is:
         </p>
@@ -175,7 +180,7 @@ export default function EventRequestForm({
 
   return (
     <form className="event-request-form">
-      <h1>
+      <h1 tabIndex={-1}>
         {requestId
             ? "Edit draft request"
             : "Create event request"}

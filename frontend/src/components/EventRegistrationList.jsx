@@ -108,11 +108,12 @@ export default function EventRegistrationList({ eventId }) {
               <tbody>
                 {list.entries.map((entry) => (
                   <tr key={entry.id}>
-                    <td>{entry.attendeeName || "Name not set"}</td>
-                    <td>{entry.attendeeEmail || "Email not set"}</td>
+                    {/* data-label names each cell where a phone stacks the row into a card. */}
+                    <td data-label="Attendee">{entry.attendeeName || "Name not set"}</td>
+                    <td data-label="Email">{entry.attendeeEmail || "Email not set"}</td>
                     {/* A waitlisted entry is dated, and ordered, by when it joined the queue. */}
-                    <td>{formatDateTime(entry.waitlistedAt ?? entry.registeredAt, "Unknown")}</td>
-                    <td>{entry.statusLabel}</td>
+                    <td data-label={`Joined ${VENUE_TIME_NOTE}`}>{formatDateTime(entry.waitlistedAt ?? entry.registeredAt, "Unknown")}</td>
+                    <td data-label="Status">{entry.statusLabel}</td>
                   </tr>
                 ))}
               </tbody>

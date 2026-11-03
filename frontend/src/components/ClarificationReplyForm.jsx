@@ -199,7 +199,7 @@ export default function ClarificationReplyForm({ request, onSaved }) {
 
   return (
     <form className="clarification-reply" onSubmit={handleSubmit}>
-      <h1>Reply to the Coordinator</h1>
+      <h1 tabIndex={-1}>Reply to the Coordinator</h1>
       {request.clarificationNote && (
         <blockquote>{request.clarificationNote}</blockquote>
       )}
