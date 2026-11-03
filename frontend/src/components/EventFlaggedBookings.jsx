@@ -14,12 +14,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import FlaggedBookingFlagDetail from "./FlaggedBookingFlagDetail";
 import FlaggedBookingReasonForm from "./FlaggedBookingReasonForm";
-import { asList, formatTimestamp } from "../services/displayFormat";
+import { asList, formatDateTime } from "../services/displayFormat";
 import { formatVenuePeriod } from "../services/datetimeFormat";
 import { venueText } from "../services/flaggedBookingDisplay";
 import { cancelFlaggedBooking, getEventFlaggedBookings } from "../services/flaggedBookingService";
 import { coordinatorCancelErrorMessage, isStaleResolutionError } from "../services/flaggedBookingErrors";
 import { statusMessageOf } from "../services/apiErrors";
+import Button from "./ui/Button";
 
 const LIST_ERROR_MESSAGES = {
   403: "Only the coordinator assigned to this event can see its flagged bookings.",
@@ -27,23 +28,24 @@ const LIST_ERROR_MESSAGES = {
 };
 const LIST_DEFAULT_ERROR = "Flagged bookings could not be loaded.";
 
-function FlaggedBooking({ item, busy, cancelling, error, replacing, onCancel, onReplace }) {
+function FlaggedBooking({ item, headingLevel, busy, cancelling, error, replacing, onCancel, onReplace }) {
+  const Heading = `h${headingLevel}`;
   const regionId = `event-flagged-booking-${item.id}`;
 
   return (
     <li className="pending-bookings__card" aria-labelledby={`${regionId}-venue`}>
       <div className="pending-bookings__detail">
-        <h4 id={`${regionId}-venue`}>{venueText(item)}</h4>
+        <Heading id={`${regionId}-venue`}>{venueText(item)}</Heading>
         <dl>
           <dt>Booking period</dt>
           <dd>{formatVenuePeriod(item.startsAt, item.endsAt)}</dd>
           <dt>Flagged</dt>
-          <dd>{formatTimestamp(item.flaggedAt, "at an unknown time")}</dd>
+          <dd>{formatDateTime(item.flaggedAt, "at an unknown time")}</dd>
         </dl>
 
         <FlaggedBookingFlagDetail
           item={item}
-          headingLevel={5}
+          headingLevel={headingLevel + 1}
           reasonsNote={<p className="pending-bookings__event-status">Alternative arrangements are required.</p>}
           replacementsNote={
             <p className="pending-bookings__event-status">
@@ -60,9 +62,9 @@ function FlaggedBooking({ item, busy, cancelling, error, replacing, onCancel, on
 
         {/* Not a toggle: it picks this booking for Find a venue below, so the
             choice is said in text rather than as a pressed state. */}
-        <button type="button" disabled={busy} onClick={() => onReplace(item)}>
+        <Button variant="secondary" disabled={busy} onClick={() => onReplace(item)}>
           Find a replacement venue
-        </button>
+        </Button>
         {replacing && <p className="pending-bookings__event-status">Finding a replacement below.</p>}
         <FlaggedBookingReasonForm
           id={`${regionId}-cancel`}
@@ -78,7 +80,9 @@ function FlaggedBooking({ item, busy, cancelling, error, replacing, onCancel, on
   );
 }
 
-export default function EventFlaggedBookings({ eventRequestId, replacingId, onReplace, onCancelled, onLoaded }) {
+// headingLevel: the section's own heading; the event screen's section level.
+export default function EventFlaggedBookings({ eventRequestId, replacingId, onReplace, onCancelled, onLoaded, headingLevel = 3 }) {
+  const Heading = `h${headingLevel}`;
   const [bookings, setBookings] = useState([]);
   const [error, setError] = useState(null);
   const [cancellingId, setCancellingId] = useState(null);
@@ -154,13 +158,13 @@ export default function EventFlaggedBookings({ eventRequestId, replacingId, onRe
 
   return (
     <section className="event-flagged-bookings">
-      <h3>Flagged bookings</h3>
+      <Heading>Flagged bookings</Heading>
       {error && (
         <div className="pending-bookings__error" role="alert">
           <p>{error}</p>
-          <button type="button" onClick={load}>
+          <Button variant="secondary" onClick={load}>
             Try again
-          </button>
+          </Button>
         </div>
       )}
       {listError && (
@@ -179,6 +183,7 @@ export default function EventFlaggedBookings({ eventRequestId, replacingId, onRe
             <FlaggedBooking
               key={item.id}
               item={item}
+              headingLevel={headingLevel + 1}
               busy={cancellingId !== null}
               cancelling={cancellingId === item.id}
               error={cardError?.id === item.id ? cardError.message : null}

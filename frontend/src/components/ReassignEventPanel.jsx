@@ -74,13 +74,16 @@ const REASSIGN_ERROR_MESSAGES = {
  * @param {Function} props.onCancel     back to the event, nothing changed
  * @param {Function} props.onReassigned called with (updatedEvent, chosenCoordinator)
  *                                      once the server has accepted the handover
+ * @param {number} [props.headingLevel] its title's level: 1 on the event's own page
  */
 export default function ReassignEventPanel({
   request,
   outgoingCoordinatorId = request.assignedCoordinatorId,
   onCancel,
   onReassigned,
+  headingLevel = 2,
 }) {
+  const Title = `h${headingLevel}`;
   const [coordinators, setCoordinators] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null); // { message, retryable }
@@ -126,6 +129,11 @@ export default function ReassignEventPanel({
   }
   const { headingRef, retry: retryLoad } = useFocusAfterRetry(reloadCoordinators);
 
+  // The button that opened this panel has gone, so focus starts on its title.
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, [headingRef]);
+
   // Whoever holds the event is left out: handing an event to its current
   // holder is refused by the server (23514, a confusing 400). Done here and
   // not on the server, because "everyone but the holder" is this picker's
@@ -165,7 +173,7 @@ export default function ReassignEventPanel({
           this codebase, and two stacked back buttons read as a bug. Going
           back to the event, rather than out to the list, is the form's Cancel
           button, and the Cancel below the messages when there is no form. */}
-      <h2 ref={headingRef} tabIndex={-1}>Hand over {request.eventName}</h2>
+      <Title ref={headingRef} tabIndex={-1}>Hand over {request.eventName}</Title>
       {/* SCRUM-444 AC4, said before the Lead commits: the coordinator who
           holds it now loses it, view and all. */}
       <p>

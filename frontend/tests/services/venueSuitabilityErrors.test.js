@@ -41,7 +41,7 @@ describe("SCRUM-191 suitabilityErrorMessage", () => {
     ["no response at all", new Error("network")],
     ["nothing", undefined],
   ])("SCRUM188_AC1_falls_back_to_the_default_for_%s", (_label, err) => {
-    expect(suitabilityErrorMessage(err)).toBe("Could not check this venue. Please try again.");
+    expect(suitabilityErrorMessage(err)).toBe("Could not check this venue.");
   });
 
   it("SCRUM188_AC1_never_shows_the_servers_error_text", () => {

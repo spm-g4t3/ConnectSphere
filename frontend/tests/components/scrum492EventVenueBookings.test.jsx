@@ -12,7 +12,6 @@ import userEvent from "@testing-library/user-event";
 import EventVenueBookings from "../../src/components/EventVenueBookings.jsx";
 import { getMyBookingRequests, releaseVenueBooking } from "../../src/services/bookingRequestService";
 import { formatVenuePeriod } from "../../src/services/datetimeFormat";
-import { formatTimestamp } from "../../src/services/displayFormat";
 
 vi.mock("../../src/services/bookingRequestService", () => ({
   getMyBookingRequests: vi.fn(),
@@ -95,7 +94,7 @@ describe("SCRUM492 what the section lists", () => {
     const released = await screen.findByRole("listitem", { name: "Hall R" });
 
     expect(within(released).getByText("Released")).toBeInTheDocument();
-    expect(within(released).getByText(`${formatTimestamp(RELEASED_AT)}: Moved to Hall B`)).toBeInTheDocument();
+    expect(within(released).getByText("18 Oct 2026, 11:00 am: Moved to Hall B")).toBeInTheDocument();
     expect(within(released).queryByRole("button")).not.toBeInTheDocument();
   });
 

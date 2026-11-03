@@ -15,7 +15,6 @@ import { MemoryRouter } from "react-router-dom";
 
 import MyBookingRequests from "../../src/components/MyBookingRequests.jsx";
 import { getMyBookingRequests, withdrawBookingRequest } from "../../src/services/bookingRequestService";
-import { formatRange, formatTimestamp } from "../../src/services/displayFormat.js";
 import { deferred } from "../helpers/async.js";
 import { setVisibility } from "../helpers/visibility.js";
 
@@ -159,18 +158,18 @@ describe("statuses and details", () => {
   ];
 
   it.each([
-    ["Event 1", "Pending", "status--booking-pending"],
-    ["Event 2", "Approved", "status--booking-approved"],
-    ["Event 3", "Rejected", "status--booking-rejected"],
-    ["Event 4", "Withdrawn", "status--booking-withdrawn"],
-    ["Event 5", "Cancelled", "status--booking-cancelled"],
-    ["Event 6", "Flagged for review", "status--booking-flagged"],
+    ["Event 1", "Pending", "ui-status-badge--warning"],
+    ["Event 2", "Approved", "ui-status-badge--success"],
+    ["Event 3", "Rejected", "ui-status-badge--danger"],
+    ["Event 4", "Withdrawn", "ui-status-badge--neutral"],
+    ["Event 5", "Cancelled", "ui-status-badge--neutral"],
+    ["Event 6", "Flagged for review", "ui-status-badge--danger"],
   ])("SCRUM255_%s_shows_the_%s_badge_in_its_own_style", async (eventName, label, className) => {
     vi.mocked(getMyBookingRequests).mockResolvedValue(ALL);
     renderList();
     await screen.findByText(eventName);
 
-    const badge = within(rowFor(eventName)).getByText(label, { selector: ".status-badge" });
+    const badge = within(rowFor(eventName)).getByText(label, { selector: ".ui-status-badge" });
     expect(badge).toHaveClass(className);
   });
 
@@ -190,7 +189,8 @@ describe("statuses and details", () => {
 
     const row = rowFor("Event 1");
     expect(within(row).getByText("Hall 1, Level 2")).toBeInTheDocument();
-    expect(within(row).getByText(formatRange(START, END))).toBeInTheDocument();
+    // 09:00Z to 17:00Z is 5 pm to 1 am the next day in Singapore.
+    expect(within(row).getByText("2026-12-01 17:00 – 2026-12-02 01:00 (Singapore time)")).toBeInTheDocument();
     expect(within(row).getByText(/^Requested /)).toBeInTheDocument();
   });
 
@@ -222,7 +222,7 @@ describe("statuses and details", () => {
 
     const flag = rowFor("Event 6").querySelector(".my-booking-requests__flag");
     expect(flag.textContent).toBe(
-      `Flagged for review on ${formatTimestamp(flaggedAt)} (Setup or turnaround time changed). It needs to be resolved.`,
+      "Flagged for review on 5 Oct 2026, 5:00 pm (Setup or turnaround time changed). It needs to be resolved.",
     );
   });
 
@@ -264,7 +264,7 @@ describe("statuses and details", () => {
     await screen.findByText("Event 6");
 
     expect(rowFor("Event 6").querySelector(".my-booking-requests__flag").textContent).toBe(
-      `Flagged for review on ${formatTimestamp(flaggedAt)}. It needs to be resolved.`,
+      "Flagged for review on 5 Oct 2026, 5:00 pm. It needs to be resolved.",
     );
     expect(rowFor("Event 7").querySelector(".my-booking-requests__flag").textContent).toBe(
       "Flagged for review. It needs to be resolved.",
@@ -307,7 +307,7 @@ describe("statuses and details", () => {
 
     expect(await screen.findByText("Unnamed event")).toBeInTheDocument();
     expect(screen.getByText("Unknown venue")).toBeInTheDocument();
-    expect(screen.getByText("unknown – unknown")).toBeInTheDocument();
+    expect(screen.getByText("Not set")).toBeInTheDocument();
     expect(screen.getByText("Requested at an unknown time")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Withdraw the request for this event at this venue" })).toBeInTheDocument();
   });
@@ -317,7 +317,7 @@ describe("statuses and details", () => {
     renderList();
 
     const badge = await screen.findByText("Status Unavailable");
-    expect(badge).toHaveClass("status--booking-unknown");
+    expect(badge).toHaveClass("ui-status-badge--neutral");
   });
 
   it("SCRUM258_AC3_a_conflicting_request_shows_the_conflicting_badge_in_its_own_style", async () => {
@@ -325,9 +325,10 @@ describe("statuses and details", () => {
     renderList();
     await screen.findByText("Event 1");
 
-    const badge = within(rowFor("Event 1")).getByText("Conflicting", { selector: ".status-badge" });
-    expect(badge).toHaveClass("status--booking-conflicting");
-    expect(badge).not.toHaveClass("status--booking-pending");
+    // Same amber as Pending (both await a decision); the label tells them apart.
+    const badge = within(rowFor("Event 1")).getByText("Conflicting", { selector: ".ui-status-badge" });
+    expect(badge).toHaveClass("ui-status-badge--warning");
+    expect(within(rowFor("Event 1")).queryByText("Pending")).not.toBeInTheDocument();
   });
 
   it("SCRUM258_AC6_a_rejected_request_shows_the_reason_and_suggested_alternative", async () => {

@@ -54,19 +54,20 @@ describe("SCRUM-363: confirmation panel", () => {
     const pending = deferred();
     vi.mocked(getEventReadiness).mockReturnValue(pending.promise);
     setup();
-    expect(screen.getByRole("status")).toHaveTextContent("Loading the readiness checklist");
+    expect(screen.getByRole("status")).toHaveTextContent(/^Loading\.\.\.$/);
     expect(button()).toBeDisabled();
     await act(async () => pending.resolve(READY));
     await ready();
     expect(getEventReadiness).toHaveBeenCalledWith(EVENT.id, { noEquipmentConfirmed: false });
   });
 
-  it.each([null, failure(401), failure(403), failure(404)])("SCRUM363_AC4_failed_read_%j_can_be_retried", async (error) => {
+  // 403 and 404 answer the same again, so they offer no Try again (scrum586EventPanels).
+  it.each([null, failure(401)])("SCRUM363_AC4_failed_read_%j_can_be_retried", async (error) => {
     vi.mocked(getEventReadiness).mockRejectedValueOnce(error);
     setup();
     expect(await screen.findByRole("alert")).not.toBeEmptyDOMElement();
     expect(button()).toBeDisabled();
-    await userEvent.click(screen.getByRole("button", { name: "Retry checklist" }));
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
     await ready();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
@@ -77,7 +78,7 @@ describe("SCRUM-363: confirmation panel", () => {
       setup();
       expect(await screen.findByRole("alert")).toHaveTextContent("checklist could not be loaded");
       expect(button()).toBeDisabled();
-      expect(screen.getByRole("button", { name: "Retry checklist" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
     },
   );
 
@@ -201,7 +202,7 @@ describe("SCRUM-363: confirmation panel", () => {
     vi.mocked(getEventReadiness).mockRejectedValue(new Error("offline"));
     await userEvent.click(button());
     expect(await screen.findByRole("table", { name: "Still outstanding" })).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: "Retry checklist" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Try again" })).toBeInTheDocument();
     expect(button()).toBeDisabled();
   });
 

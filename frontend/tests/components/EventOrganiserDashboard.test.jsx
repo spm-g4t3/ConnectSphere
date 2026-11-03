@@ -120,7 +120,7 @@ describe("SCRUM-266 AC4: Needs attention on the Organiser's dashboard", () => {
     ]);
 
     const row = async (name) => (await screen.findByText(name)).closest("li");
-    expect(within(await row("Flagged event")).getByText("Needs attention")).toHaveClass("status-badge", "status--action-required");
+    expect(within(await row("Flagged event")).getByText("Needs attention")).toHaveClass("ui-status-badge", "ui-status-badge--danger");
     expect(within(await row("Fine event")).queryByText("Needs attention")).not.toBeInTheDocument();
   });
 });

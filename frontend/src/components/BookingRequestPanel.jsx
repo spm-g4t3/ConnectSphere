@@ -82,7 +82,7 @@
 // booking, and onReplacementRefused(code) reports one the server says can no
 // longer be replaced.
 
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { createBookingRequest } from "../services/bookingRequestService";
 import {
   bookingRequestErrorMessage,
@@ -108,6 +108,10 @@ import {
 } from "../services/occupiedPeriodDisplay";
 import { criterionDetailText, labelFor } from "../services/venueSuitabilityDisplay";
 import { ROOM_LAYOUTS } from "../services/venueLookups";
+import { BLOCK_PHASE_TONES, BOOKING_GROUP_TONES, HOLD_TONE } from "../services/venueStatusTones";
+import Button from "./ui/Button";
+import ErrorNotice from "./ui/ErrorNotice";
+import StatusBadge from "./ui/StatusBadge";
 
 /** Mirrors bookings_setup_notes_length in migration 030. */
 const SETUP_NOTES_MAX_LENGTH = 1000;
@@ -202,6 +206,11 @@ function requirementsBody(requirements) {
   };
 }
 
+/**
+ * @param {object} props
+ * @param {number} [props.headingLevel]  the panel title's level: one under the
+ *   section it opens in
+ */
 export default function BookingRequestPanel({
   event,
   venue,
@@ -212,6 +221,7 @@ export default function BookingRequestPanel({
   replacesBookingId,
   onReplacementRefused,
   onClose,
+  headingLevel = 3,
 }) {
   const idPrefix = useId();
   const [setupNotes, setSetupNotes] = useState("");
@@ -235,6 +245,16 @@ export default function BookingRequestPanel({
   const [fieldErrors, setFieldErrors] = useState([]);
   const [submitted, setSubmitted] = useState(null);
   const sending = useRef(false);
+  const Title = `h${headingLevel}`;
+  const SubHeading = `h${headingLevel + 1}`;
+  const titleRef = useRef(null);
+  const successRef = useRef(null);
+
+  // The panel opens away from the button that opened it, so focus starts on
+  // its title; once sent, the form is gone, so focus moves to what happened.
+  useEffect(() => {
+    (submitted ? successRef : titleRef).current?.focus();
+  }, [submitted]);
 
   const attendance = parseAttendance(attendanceText);
   const checking = recheck.status === "checking";
@@ -358,7 +378,9 @@ export default function BookingRequestPanel({
 
   return (
     <section className="booking-request" aria-label={`Request ${venue.name}`}>
-      <h3>Request {venue.name}</h3>
+      <Title ref={titleRef} tabIndex={-1}>
+        Request {venue.name}
+      </Title>
 
       <dl className="booking-request__details">
         <dt>Event</dt>
@@ -385,13 +407,14 @@ export default function BookingRequestPanel({
 
       {submitted ? (
         <div className="booking-request__success" role="status">
-          <p>
-            Request sent to Venue Staff for {venue.name}. Its status is <strong>Pending</strong>.
+          <p ref={successRef} tabIndex={-1}>
+            Request sent to Venue Staff for {venue.name}. Its status is{" "}
+            <StatusBadge tone={BOOKING_GROUP_TONES.PENDING}>Pending</StatusBadge>.
           </p>
           {onClose && (
-            <button type="button" onClick={onClose}>
+            <Button variant="secondary" onClick={onClose}>
               Close
-            </button>
+            </Button>
           )}
         </div>
       ) : (
@@ -461,20 +484,19 @@ export default function BookingRequestPanel({
 
           {checking && (
             <p className="booking-request__checking" role="status">
-              Checking {venue.name} for {judgedAttendance} people…
+              Checking {venue.name} for {judgedAttendance} people...
             </p>
           )}
 
+          {/* No Try again: sending the request checks the venue again. */}
           {recheck.status === "error" && (
-            <p className="booking-request__error" role="alert">
-              {`${recheck.error} It will be checked again when you send the request.`}
-            </p>
+            <ErrorNotice message={`${recheck.error} It will be checked again when you send the request.`} />
           )}
 
           {needsConfirmation && (
             <div className="booking-request__warning" role="alert">
               {/* SCRUM-525: the request's, since Capacity is judged on its own number. */}
-              <h4>This venue does not meet this request&apos;s requirements</h4>
+              <SubHeading>This venue does not meet this request&apos;s requirements</SubHeading>
               {unmet.length > 0 && (
                 <ul>
                   {unmet.map((criterion, i) => (
@@ -501,11 +523,8 @@ export default function BookingRequestPanel({
             </div>
           )}
 
-          {error && (
-            <p className="booking-request__error" role="alert">
-              {error}
-            </p>
-          )}
+          {/* A failed send: sending again is the retry. */}
+          {error && <ErrorNotice message={error} />}
 
           {conflicts.length > 0 && (
             <ul className="booking-request__conflicts" aria-label="What is in the way">
@@ -516,7 +535,7 @@ export default function BookingRequestPanel({
                   const note = requestPaddingNote(conflict);
                   return (
                     <li key={conflict.blockId ?? i}>
-                      <strong>Blocked</strong>
+                      <StatusBadge tone={BLOCK_PHASE_TONES.in_effect}>Blocked</StatusBadge>
                       <span>{formatVenuePeriod(conflict.startsAt, conflict.endsAt)}</span>
                       {note && <span className="booking-request__conflict-note">{note}</span>}
                     </li>
@@ -531,7 +550,7 @@ export default function BookingRequestPanel({
                 const held = conflict.kind === "hold";
                 return (
                   <li key={(held ? conflict.holdId : conflict.bookingId) ?? i}>
-                    {held && <strong>Tentatively held</strong>}
+                    {held && <StatusBadge tone={HOLD_TONE}>Tentatively held</StatusBadge>}
                     <strong>{conflict.eventName || "Unnamed event"}</strong>
                     <span>{venueOccupiedPeriod(conflict)}</span>
                     {bookingNote && (
@@ -547,7 +566,7 @@ export default function BookingRequestPanel({
           )}
 
           <div className="booking-request__actions">
-            <button
+            <Button
               type="submit"
               disabled={
                 submitting ||
@@ -559,11 +578,11 @@ export default function BookingRequestPanel({
               }
             >
               {submitting ? "Requesting..." : "Request this venue"}
-            </button>
+            </Button>
             {onClose && (
-              <button type="button" onClick={onClose} disabled={submitting}>
+              <Button variant="secondary" onClick={onClose} disabled={submitting}>
                 Cancel
-              </button>
+              </Button>
             )}
           </div>
         </form>

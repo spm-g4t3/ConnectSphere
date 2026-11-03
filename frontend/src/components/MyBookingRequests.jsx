@@ -6,9 +6,9 @@
 //
 // Built the way MyAssignedEvents is, so the coordinator's screens behave alike:
 // a useCallback fetch, a refetch when the tab regains focus, a status-keyed
-// error table, a "Loading..." line, an empty-state sentence, and a <section>
-// root that takes its card styling and badge colours from the
-// .dashboard--coordinator wrapper App.jsx's route supplies.
+// error table, the shared loading, error and empty states, and a <section>
+// root that takes its card styling from the .dashboard--coordinator wrapper
+// App.jsx's route supplies.
 //
 // What is listed is decided by the backend, not here: every booking on an event
 // assigned to the signed-in coordinator, newest first. Nothing in this file
@@ -29,20 +29,26 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { getMyBookingRequests, withdrawBookingRequest } from "../services/bookingRequestService";
+import { canRetryRead } from "../services/apiErrors";
 import { isStaleWithdrawError, withdrawErrorMessage } from "../services/bookingRequestErrors";
-import {
-  bookingStatusClassName,
-  readBookingStatusDisplay,
-} from "../services/bookingRequestStatusDisplay";
-import { formatRange, formatTimestamp } from "../services/displayFormat";
+import { readBookingStatusDisplay } from "../services/bookingRequestStatusDisplay";
+import { formatVenuePeriod } from "../services/datetimeFormat";
+import { formatDateTime } from "../services/displayFormat";
 import { reviewReasonLabel } from "../services/flaggedBookingDisplay";
+import { BOOKING_GROUP_TONES, toneFor } from "../services/venueStatusTones";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
+import Button from "./ui/Button";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import LoadingText from "./ui/LoadingText";
+import StatusBadge from "./ui/StatusBadge";
+import useFocusAfterRetry from "./useFocusAfterRetry";
 
 // Keyed by status, the same shape as MyAssignedEvents' table. GET /mine is gated
 // on the coordinator role, so a 403 means the account's role is wrong.
 const LIST_ERROR_MESSAGES = {
   403: "Only Event Coordinators have a list of venue requests.",
-  500: "Your venue requests could not be loaded. Please try again.",
+  500: "Your venue requests could not be loaded.",
 };
 
 // A conflicting request is still open, so its coordinator can withdraw it too.
@@ -62,21 +68,19 @@ function RequestRow({ item, confirming, withdrawing, busy, onAsk, onCancel, onCo
       <div className="my-booking-requests__summary">
         <span className="my-booking-requests__title">
           <strong>{item.eventName || "Unnamed event"}</strong>
-          <span className={`status-badge ${bookingStatusClassName(display.group)}`}>
-            {display.label}
-          </span>
+          <StatusBadge tone={toneFor(BOOKING_GROUP_TONES, display.group)}>{display.label}</StatusBadge>
         </span>
         <span className="my-booking-requests__meta">
           <span>
             {item.venueName || "Unknown venue"}
             {item.venueLocation ? `, ${item.venueLocation}` : ""}
           </span>
-          <span>{formatRange(item.startsAt, item.endsAt)}</span>
-          <span>Requested {formatTimestamp(item.createdAt, "at an unknown time")}</span>
+          <span>{formatVenuePeriod(item.startsAt, item.endsAt)}</span>
+          <span>Requested {formatDateTime(item.createdAt, "at an unknown time")}</span>
         </span>
         {item.status === FLAGGED_FOR_REVIEW && (
           <span className="my-booking-requests__flag">
-            Flagged for review{item.flaggedAt ? ` on ${formatTimestamp(item.flaggedAt)}` : ""}
+            Flagged for review{item.flaggedAt ? ` on ${formatDateTime(item.flaggedAt)}` : ""}
             {reason ? ` (${reason})` : ""}. It needs to be resolved.
           </span>
         )}
@@ -100,37 +104,43 @@ function RequestRow({ item, confirming, withdrawing, busy, onAsk, onCancel, onCo
         )}
       </div>
 
+      {/* Only asks; the danger colour is kept for the step that withdraws. */}
       {canWithdraw && !confirming && (
-        <button
-          type="button"
-          className="my-booking-requests__withdraw"
+        <Button
+          variant="secondary"
           onClick={() => onAsk(item.id)}
           disabled={busy}
           aria-label={`Withdraw the request for ${item.eventName || "this event"} at ${item.venueName || "this venue"}`}
         >
           Withdraw
-        </button>
+        </Button>
       )}
 
       {canWithdraw && confirming && (
         <div className="my-booking-requests__confirm">
           <span>Withdraw this request? Venue Staff will be told.</span>
-          <button type="button" onClick={() => onConfirm(item)} disabled={busy}>
+          <Button variant="danger" onClick={() => onConfirm(item)} disabled={busy}>
             {withdrawing ? "Withdrawing..." : "Yes, withdraw"}
-          </button>
-          <button type="button" onClick={onCancel} disabled={busy}>
+          </Button>
+          <Button variant="secondary" onClick={onCancel} disabled={busy}>
             Keep it
-          </button>
+          </Button>
         </div>
       )}
     </li>
   );
 }
 
-export default function MyBookingRequests() {
+/**
+ * @param {object} props
+ * @param {boolean} [props.asPage]  true at /my-venue-requests, where the title
+ *                                  is the page's h1
+ */
+export default function MyBookingRequests({ asPage = false } = {}) {
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [retryable, setRetryable] = useState(false);
   // The request whose withdraw is awaiting confirmation, and the one being sent.
   const [confirmingId, setConfirmingId] = useState(null);
   const [withdrawingId, setWithdrawingId] = useState(null);
@@ -147,8 +157,9 @@ export default function MyBookingRequests() {
     } catch (err) {
       setError(
         LIST_ERROR_MESSAGES[err.response?.status] ||
-          "Your venue requests could not be loaded. Please try again.",
+          "Your venue requests could not be loaded.",
       );
+      setRetryable(canRetryRead(err));
     } finally {
       setLoading(false);
     }
@@ -161,6 +172,10 @@ export default function MyBookingRequests() {
   // Refetch when the coordinator comes back to the tab, for MyAssignedEvents'
   // reason: Venue Staff decide these while the coordinator is not looking.
   useRefetchOnReturn(fetchRequests);
+
+  // Try again goes away as its read starts, so focus moves to the title.
+  const { headingRef, retry } = useFocusAfterRetry(fetchRequests);
+  const Title = asPage ? "h1" : "h2";
 
   async function handleWithdraw(item) {
     if (sending.current) return;
@@ -188,19 +203,15 @@ export default function MyBookingRequests() {
 
   return (
     <section className="my-booking-requests">
-      <h2>Venue requests</h2>
+      <Title ref={headingRef} tabIndex={-1}>
+        Venue requests
+      </Title>
 
-      {loading && <p>Loading...</p>}
-      {error && (
-        <p className="review-queue__error" role="alert">
-          {error}
-        </p>
-      )}
-      {withdrawError && (
-        <p className="review-queue__error" role="alert">
-          {withdrawError}
-        </p>
-      )}
+      {loading && <LoadingText />}
+      {/* Hidden while a read is in flight, so Try again cannot start a second one. */}
+      {error && !loading && <ErrorNotice message={error} onRetry={retryable ? retry : undefined} />}
+      {/* No Try again: this is not a failed read, and asking again is the row's own Withdraw. */}
+      {withdrawError && <ErrorNotice message={withdrawError} />}
       {notice && (
         <p className="my-booking-requests__notice" role="status">
           {notice}
@@ -208,10 +219,15 @@ export default function MyBookingRequests() {
       )}
       {/* Nothing requested is the good state, not a missing resource. */}
       {!loading && !error && requests.length === 0 && (
-        <p>
-          You have not requested a venue yet. <Link to="/my-events">Open one of your events</Link> to
-          find a venue for it.
-        </p>
+        <EmptyState
+          message="You have not requested a venue yet."
+          nextStep="Find a venue from one of your events."
+          action={
+            <Link className="ui-button ui-button--primary" to="/my-events">
+              Open one of your events
+            </Link>
+          }
+        />
       )}
 
       {requests.length > 0 && (

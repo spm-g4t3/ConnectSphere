@@ -384,7 +384,7 @@ describe("SCRUM178_AC1 retired venue calendar from search (SCRUM-185)", () => {
     const row = (await screen.findByText("Old Annex")).closest("li");
     expect(venueService.searchActiveVenues).toHaveBeenCalledTimes(2);
     expect(venueService.searchActiveVenues.mock.calls[1][0]).toMatchObject({ includeRetired: true });
-    expect(within(row).getByText("Retired")).toHaveClass("venue-search__badge");
+    expect(within(row).getByText("Retired")).toHaveClass("ui-status-badge", "ui-status-badge--neutral");
 
     // ---- 3. View calendar opens on the week it retired ---------------------
     await user.click(within(row).getByRole("link", { name: "View calendar" }));

@@ -16,9 +16,15 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { canRetryRead } from "../services/apiErrors";
 import { getNeedsAttention } from "../services/eventRequestService";
 import { formatVenuePeriod } from "../services/datetimeFormat";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
+import Button from "./ui/Button";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import LoadingText from "./ui/LoadingText";
+import useFocusAfterRetry from "./useFocusAfterRetry";
 
 const LOAD_ERROR_MESSAGES = {
   403: "Only Event Coordinators have a Needs attention list.",
@@ -28,6 +34,7 @@ export default function CoordinatorAttentionList({ refreshKey = 0 }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [retryable, setRetryable] = useState(false);
   const navigate = useNavigate();
 
   const load = useCallback(async () => {
@@ -38,8 +45,9 @@ export default function CoordinatorAttentionList({ refreshKey = 0 }) {
     } catch (err) {
       setError(
         LOAD_ERROR_MESSAGES[err.response?.status] ||
-          "Your Needs attention list could not be loaded. Please try again.",
+          "Your Needs attention list could not be loaded.",
       );
+      setRetryable(canRetryRead(err));
     } finally {
       setLoading(false);
     }
@@ -51,23 +59,31 @@ export default function CoordinatorAttentionList({ refreshKey = 0 }) {
 
   useRefetchOnReturn(load);
 
+  // Only Try again shows Loading: a refetch on return keeps the list and its count
+  // on screen. The button goes as the read starts, so focus moves to the heading.
+  const reload = useCallback(() => {
+    setLoading(true);
+    return load();
+  }, [load]);
+  const { headingRef, retry } = useFocusAfterRetry(reload);
+
   return (
     <section className="coordinator-attention" aria-labelledby="coordinator-attention-heading">
-      <h2 id="coordinator-attention-heading">
+      <h2 id="coordinator-attention-heading" ref={headingRef} tabIndex={-1}>
         Needs attention
         {!loading && !error && items.length > 0 && (
           <span className="coordinator-attention__count">{` (${items.length})`}</span>
         )}
       </h2>
 
-      {loading && <p>Loading...</p>}
-      {error && (
-        <p className="review-queue__error" role="alert">
-          {error}
-        </p>
-      )}
+      {loading && <LoadingText />}
+      {/* Hidden while a read is in flight, so Try again cannot start a second one. */}
+      {error && !loading && <ErrorNotice message={error} onRetry={retryable ? retry : undefined} />}
       {!loading && !error && items.length === 0 && (
-        <p>Nothing needs your attention right now.</p>
+        <EmptyState
+          message="Nothing needs your attention right now."
+          nextStep="Your events appear here when one needs you to act."
+        />
       )}
       {!error && items.length > 0 && (
         <ul>
@@ -81,9 +97,9 @@ export default function CoordinatorAttentionList({ refreshKey = 0 }) {
                   {item.organiserName && <span>Organiser: {item.organiserName}</span>}
                 </span>
               </div>
-              <button type="button" aria-label={`Open ${item.eventName}`} onClick={() => navigate(item.link)}>
+              <Button aria-label={`Open ${item.eventName}`} onClick={() => navigate(item.link)}>
                 Open
-              </button>
+              </Button>
             </li>
           ))}
         </ul>

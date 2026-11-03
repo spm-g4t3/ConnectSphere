@@ -26,6 +26,10 @@ import {
   getEventDecisionHistory,
   getMyEventRequests,
 } from "../../src/services/eventRequestService";
+import { stubDialogElement } from "../helpers/dialog.js";
+
+// The completion panel's confirmation is a ConfirmDialog, which calls showModal and close.
+stubDialogElement();
 
 vi.mock("../../src/auth/AuthContext", () => ({
   useAuth: vi.fn(),
@@ -131,7 +135,9 @@ function renderDetail(user, request = eventRequest(), props = {}) {
 }
 
 const markButton = () => screen.queryByRole("button", { name: "Mark as completed" });
-const closingNotesSection = () => screen.queryByRole("heading", { name: "Closing notes" });
+// Hidden too: the notes sit in the Details tab, and these tests are about who
+// is given them, not about which tab is open.
+const closingNotesSection = () => screen.queryByRole("heading", { name: "Closing notes", hidden: true });
 const refusal = (status, data = {}) => Object.assign(new Error("request failed"), { response: { status, data } });
 
 beforeEach(() => {
@@ -201,7 +207,7 @@ describe("SCRUM379 when Mark as completed is offered", () => {
     renderDetail(COORDINATOR_USER, eventRequest({ proposedStart: at(-3600), proposedEnd: "2030-06-15T10:00:00Z" }));
 
     expect(markButton()).not.toBeInTheDocument();
-    expect(screen.getByText(/You can mark this event as completed once it has ended \(2030-06-15 18:00 \(Singapore time\)\)\./)).toBeInTheDocument();
+    expect(screen.getByText(/You can mark this event as completed once it has ended \(15 Jun 2030, 6:00 pm\)\./)).toBeInTheDocument();
   });
 
   it("SCRUM379_AC1_an_event_with_no_end_time_is_not_offered_and_the_hint_names_no_time", () => {
@@ -272,7 +278,7 @@ describe("SCRUM379 completing from the event screen", () => {
 
     await openPanel(harness);
 
-    expect(screen.getByRole("heading", { level: 1, name: "Mark IS212 Industry Night as completed" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Mark IS212 Industry Night as completed" })).toBeInTheDocument();
     expect(screen.queryByText("The request")).not.toBeInTheDocument();
     expect(completeEventRequest).not.toHaveBeenCalled();
   });
@@ -298,7 +304,7 @@ describe("SCRUM379 completing from the event screen", () => {
     await harness.user.click(screen.getByRole("button", { name: "Continue" }));
     await harness.user.click(screen.getByRole("button", { name: "Yes, mark as completed" }));
 
-    expect(await screen.findByText("Completed", { selector: ".status-badge" })).toBeInTheDocument();
+    expect(await screen.findByText("Completed", { selector: ".ui-status-badge" })).toBeInTheDocument();
     expect(completeEventRequest).toHaveBeenCalledExactlyOnceWith(REQUEST_ID, { closingNotes: "Attendance 180." });
     expect(screen.getByRole("status")).toHaveTextContent("Marked as completed.");
     expect(closingNotesSection()).toBeInTheDocument();

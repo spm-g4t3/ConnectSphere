@@ -106,7 +106,8 @@ function renderPage(request, props = {}) {
   return { user };
 }
 
-const section = () => screen.queryByRole("heading", { name: "Venue bookings" });
+// Hidden too, so "not offered" holds whichever tab the event opens on.
+const section = () => screen.queryByRole("heading", { name: "Venue bookings", hidden: true });
 
 beforeEach(() => {
   vi.clearAllMocks();

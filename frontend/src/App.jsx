@@ -170,7 +170,7 @@ function AppRoutes() {
           path="/venue-search"
           element={
             <ProtectedRoute allowedRoles={["event_coordinator", "venue_staff"]}>
-              <VenueSearch role={user?.role} userId={user?.id} />
+              <VenueSearch asPage role={user?.role} userId={user?.id} />
             </ProtectedRoute>
           }
         />
@@ -209,7 +209,7 @@ function AppRoutes() {
           element={
             <ProtectedRoute allowedRoles={["event_coordinator"]}>
               <div className="dashboard dashboard--coordinator">
-                <ReviewQueue />
+                <ReviewQueue asPage />
               </div>
             </ProtectedRoute>
           }
@@ -228,7 +228,7 @@ function AppRoutes() {
           element={
             <ProtectedRoute allowedRoles={["event_coordinator"]}>
               <div className="dashboard dashboard--coordinator">
-                <MyAssignedEvents />
+                <MyAssignedEvents asPage />
               </div>
             </ProtectedRoute>
           }
@@ -275,13 +275,14 @@ function AppRoutes() {
             /assigned-events above, the list SCRUM-486 built and SCRUM-487
             extended into the coordinator overview (see the page's header).
 
-            The coordinator wrapper for both roles, because App.css colours the
-            status badge under .dashboard--coordinator only. */}
+            The coordinator wrapper for both roles, because App.css styles the
+            event screen under .dashboard--coordinator. --event-page widens this
+            page only, so the screen has room for its rail. */}
         <Route
           path="/event-requests/:eventRequestId"
           element={
             <ProtectedRoute allowedRoles={["event_coordinator", "event_coordinator_lead"]}>
-              <div className="dashboard dashboard--coordinator">
+              <div className="dashboard dashboard--coordinator dashboard--event-page">
                 <EventRequestReviewPage />
               </div>
             </ProtectedRoute>
@@ -290,13 +291,13 @@ function AppRoutes() {
         {/* SCRUM-255: the coordinator's venue booking requests and their
             statuses. Gated and wrapped as /my-events is, for the same reasons:
             GET /booking-requests/mine is role-checked server-side, and the
-            wrapper is what colours the status badges. */}
+            wrapper gives the list its card styling. */}
         <Route
           path="/my-venue-requests"
           element={
             <ProtectedRoute allowedRoles={["event_coordinator"]}>
               <div className="dashboard dashboard--coordinator">
-                <MyBookingRequests />
+                <MyBookingRequests asPage />
               </div>
             </ProtectedRoute>
           }

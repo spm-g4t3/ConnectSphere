@@ -14,7 +14,6 @@ import userEvent from "@testing-library/user-event";
 import EventFlaggedBookings from "../../src/components/EventFlaggedBookings.jsx";
 import { cancelFlaggedBooking, getEventFlaggedBookings } from "../../src/services/flaggedBookingService";
 import { formatVenuePeriod } from "../../src/services/datetimeFormat.js";
-import { formatTimestamp } from "../../src/services/displayFormat.js";
 import { deferred } from "../helpers/async.js";
 
 vi.mock("../../src/services/flaggedBookingService", () => ({
@@ -152,7 +151,7 @@ describe("what each flagged booking shows (AC1)", () => {
 
     const card = await screen.findByRole("listitem", { name: "Hall 1, Level 2" });
     expect(within(card).getByText(formatVenuePeriod(STARTS, ENDS))).toBeInTheDocument();
-    expect(within(card).getByText(formatTimestamp(FLAGGED_AT, "at an unknown time"))).toBeInTheDocument();
+    expect(within(card).getByText("20 Nov 2026, 10:30 am")).toBeInTheDocument();
     expect(within(card).getByText("Alternative arrangements are required.")).toBeInTheDocument();
   });
 

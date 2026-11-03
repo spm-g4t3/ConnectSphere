@@ -219,7 +219,7 @@ describe("SCRUM379 Needs attention: failures", () => {
     renderList();
 
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("Your Needs attention list could not be loaded. Please try again.");
+    expect(alert).toHaveTextContent("Your Needs attention list could not be loaded.");
     expect(alert).not.toHaveTextContent(/session/i);
   });
 
@@ -234,7 +234,7 @@ describe("SCRUM379 Needs attention: failures", () => {
     vi.mocked(getNeedsAttention).mockRejectedValue(refusal(500));
     renderList();
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Your Needs attention list could not be loaded. Please try again.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Your Needs attention list could not be loaded.");
     expect(screen.queryByText("Nothing needs your attention right now.")).not.toBeInTheDocument();
   });
 

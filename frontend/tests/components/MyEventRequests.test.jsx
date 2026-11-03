@@ -589,7 +589,7 @@ describe("SCRUM266_AC4 Needs attention on the Organiser's list", () => {
 
     const row = (name) => screen.getByText(name).closest("li");
     await screen.findByText("Flagged event");
-    expect(within(row("Flagged event")).getByText("Needs attention")).toHaveClass("status-badge", "status--action-required");
+    expect(within(row("Flagged event")).getByText("Needs attention")).toHaveClass("ui-status-badge", "ui-status-badge--danger");
     expect(within(row("Fine event")).queryByText("Needs attention")).not.toBeInTheDocument();
     expect(within(row("Older payload")).queryByText("Needs attention")).not.toBeInTheDocument();
   });

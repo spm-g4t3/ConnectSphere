@@ -12,7 +12,8 @@
 //     for each check, so what is shown always matches what was sent, and an
 //     edit to the form afterwards never silently changes the answer.
 //   - A venue that is not suitable is an answer, not an error: it shows as a
-//     result. Only a failed call shows role="alert", with "Check again".
+//     result. Only a failed call shows role="alert", with Try again when
+//     checking again could go differently.
 //   - "Request this venue" hands the result to the parent (onRequest), which
 //     opens BookingRequestPanel with it, so the unsuitable warning and its
 //     confirmation are there up front rather than after a refused send. It is
@@ -39,9 +40,12 @@
 //     user knows the check opened and what it answered (AC1).
 
 import { useEffect, useRef, useState } from "react";
+import { canRetryRead } from "../services/apiErrors";
 import { checkVenueSuitability } from "../services/venueSuitabilityService";
 import { suitabilityErrorMessage } from "../services/venueSuitabilityErrors";
 import VenueSuitabilityResult from "./VenueSuitabilityResult";
+import Button from "./ui/Button";
+import ErrorNotice from "./ui/ErrorNotice";
 
 const UNAVAILABLE_MESSAGE =
   "This venue is not available for this event's period, so it can't be requested.";
@@ -60,10 +64,13 @@ export default function VenueSuitabilityPanel({
   requestBlockedReason,
   onRequest,
   onClose,
+  // The panel title's level: one under the section it opens in.
+  headingLevel = 3,
 }) {
+  const Title = `h${headingLevel}`;
   // Starts as loading, so the effect never has to set state before its call.
-  const [state, setState] = useState({ status: "loading", result: null, error: null });
-  // Bumped by "Check again" to run the effect once more.
+  const [state, setState] = useState({ status: "loading", result: null, error: null, retryable: false });
+  // Bumped by Try again to run the effect once more.
   const [attempt, setAttempt] = useState(0);
 
   const headingRef = useRef(null);
@@ -86,10 +93,12 @@ export default function VenueSuitabilityPanel({
     let cancelled = false;
     checkVenueSuitability(eventId, venueId, requirements)
       .then((result) => {
-        if (!cancelled) setState({ status: "done", result, error: null });
+        if (!cancelled) setState({ status: "done", result, error: null, retryable: false });
       })
       .catch((err) => {
-        if (!cancelled) setState({ status: "error", result: null, error: suitabilityErrorMessage(err) });
+        if (!cancelled) {
+          setState({ status: "error", result: null, error: suitabilityErrorMessage(err), retryable: canRetryRead(err) });
+        }
       });
     // A check answered after the panel closed or rechecked is dropped.
     return () => {
@@ -99,16 +108,18 @@ export default function VenueSuitabilityPanel({
 
   const unavailable = state.status === "done" && availabilityUnmet(state.result);
 
+  // Try again goes away as the check starts, so focus goes back to the title.
   function checkAgain() {
-    setState({ status: "loading", result: null, error: null });
+    setState({ status: "loading", result: null, error: null, retryable: false });
     setAttempt((n) => n + 1);
+    headingRef.current?.focus();
   }
 
   return (
     <section className="venue-suitability-panel" aria-label={`Suitability of ${venue.name}`}>
-      <h3 ref={headingRef} tabIndex={-1}>
+      <Title ref={headingRef} tabIndex={-1}>
         Suitability of {venue.name}
-      </h3>
+      </Title>
       <p className="venue-suitability-panel__note">
         Checked against this event&apos;s saved date, time and expected attendance, not the search
         form&apos;s. The layout, accessibility features and facilities are the ones chosen in the
@@ -123,12 +134,12 @@ export default function VenueSuitabilityPanel({
       )}
 
       {state.status === "error" && (
-        <p className="venue-suitability-panel__error" role="alert">
-          {state.error}
-        </p>
+        <ErrorNotice message={state.error} onRetry={state.retryable ? checkAgain : undefined} />
       )}
 
-      {state.status === "done" && <VenueSuitabilityResult result={state.result} subject={venue.name} />}
+      {state.status === "done" && (
+        <VenueSuitabilityResult result={state.result} subject={venue.name} headingLevel={headingLevel + 1} />
+      )}
 
       {state.status === "done" && canRequest && unavailable && (
         <p className="venue-suitability-panel__unavailable">{UNAVAILABLE_MESSAGE}</p>
@@ -138,19 +149,12 @@ export default function VenueSuitabilityPanel({
 
       <div className="venue-suitability-panel__actions">
         {state.status === "done" && canRequest && !unavailable && (
-          <button type="button" onClick={() => onRequest?.(venue, state.result)}>
-            Request this venue
-          </button>
-        )}
-        {state.status === "error" && (
-          <button type="button" onClick={checkAgain}>
-            Check again
-          </button>
+          <Button onClick={() => onRequest?.(venue, state.result)}>Request this venue</Button>
         )}
         {onClose && (
-          <button type="button" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose}>
             Close
-          </button>
+          </Button>
         )}
       </div>
     </section>

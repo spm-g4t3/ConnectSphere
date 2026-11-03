@@ -10,11 +10,12 @@
 // EventFlaggedBookings does; after a release the list is refetched, not patched.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { formatTimestamp } from "../services/displayFormat";
+import { formatDateTime } from "../services/displayFormat";
 import { formatVenuePeriod } from "../services/datetimeFormat";
 import { getMyBookingRequests, releaseVenueBooking } from "../services/bookingRequestService";
 import { releaseErrorMessage } from "../services/bookingRequestErrors";
 import { SERVER_TEXT_MAX_LENGTH } from "../services/textLimits";
+import Button from "./ui/Button";
 
 const LIST_ERROR = "Venue bookings could not be loaded.";
 
@@ -57,25 +58,26 @@ function ReleaseForm({ id, busy, onConfirm, onKeep }) {
         {length.toLocaleString("en-US")} / {SERVER_TEXT_MAX_LENGTH.toLocaleString("en-US")}
       </p>
       <div className="event-venue-bookings__actions">
-        <button type="submit" disabled={busy || reason.trim() === ""}>
+        <Button type="submit" variant="danger" disabled={busy || reason.trim() === ""}>
           {busy ? "Releasing..." : "Confirm release"}
-        </button>
-        <button type="button" disabled={busy} onClick={onKeep}>
+        </Button>
+        <Button variant="secondary" disabled={busy} onClick={onKeep}>
           Keep this venue
-        </button>
+        </Button>
       </div>
     </form>
   );
 }
 
-function VenueBooking({ row, open, busy, error, onOpen, onKeep, onConfirm }) {
+function VenueBooking({ row, headingLevel, open, busy, error, onOpen, onKeep, onConfirm }) {
+  const Heading = `h${headingLevel}`;
   const headingId = `event-venue-booking-${row.id}`;
   const released = row.status === "released";
 
   return (
     <li className="pending-bookings__card" aria-labelledby={headingId}>
       <div className="pending-bookings__detail">
-        <h4 id={headingId}>{venueOf(row)}</h4>
+        <Heading id={headingId}>{venueOf(row)}</Heading>
         <dl>
           <dt>Booking period</dt>
           <dd>{formatVenuePeriod(row.startsAt, row.endsAt)}</dd>
@@ -85,7 +87,7 @@ function VenueBooking({ row, open, busy, error, onOpen, onKeep, onConfirm }) {
             <>
               <dt>Released on</dt>
               <dd>
-                {`${formatTimestamp(row.releasedAt, "at an unknown time")}: ${row.releaseReason || "No reason recorded"}`}
+                {`${formatDateTime(row.releasedAt, "at an unknown time")}: ${row.releaseReason || "No reason recorded"}`}
               </dd>
             </>
           )}
@@ -96,9 +98,9 @@ function VenueBooking({ row, open, busy, error, onOpen, onKeep, onConfirm }) {
           </p>
         )}
         {!released && !open && (
-          <button type="button" disabled={busy} onClick={() => onOpen(row)}>
+          <Button variant="secondary" disabled={busy} onClick={() => onOpen(row)}>
             Release this venue
-          </button>
+          </Button>
         )}
         {!released && open && (
           <ReleaseForm id={`${headingId}-reason`} busy={busy} onConfirm={(reason) => onConfirm(row, reason)} onKeep={onKeep} />
@@ -108,7 +110,9 @@ function VenueBooking({ row, open, busy, error, onOpen, onKeep, onConfirm }) {
   );
 }
 
-export default function EventVenueBookings({ eventRequestId, onReleased, onStale }) {
+// headingLevel: the section's own heading; the event screen's section level.
+export default function EventVenueBookings({ eventRequestId, onReleased, onStale, headingLevel = 3 }) {
+  const Heading = `h${headingLevel}`;
   const [rows, setRows] = useState([]);
   const [error, setError] = useState(null);
   const [openId, setOpenId] = useState(null);
@@ -181,14 +185,14 @@ export default function EventVenueBookings({ eventRequestId, onReleased, onStale
 
   return (
     <section className="event-flagged-bookings event-venue-bookings">
-      <h3>Venue bookings</h3>
+      <Heading>Venue bookings</Heading>
       <p>To use another venue, request it from Find a venue below.</p>
       {error && (
         <div className="pending-bookings__error" role="alert">
           <p>{error}</p>
-          <button type="button" onClick={load}>
+          <Button variant="secondary" onClick={load}>
             Try again
-          </button>
+          </Button>
         </div>
       )}
       {listError && (
@@ -207,6 +211,7 @@ export default function EventVenueBookings({ eventRequestId, onReleased, onStale
             <VenueBooking
               key={row.id}
               row={row}
+              headingLevel={headingLevel + 1}
               open={openId === row.id}
               busy={releasingId !== null}
               error={cardError?.id === row.id ? cardError.message : null}

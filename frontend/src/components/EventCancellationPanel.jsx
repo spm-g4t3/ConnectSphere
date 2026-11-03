@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   cancelEventRequest,
   getEventCancellationImpact,
 } from "../services/eventRequestService";
 import { CANCELLABLE_STATUSES } from "../services/eventRequestStatusDisplay";
-import { formatTimestamp } from "../services/displayFormat";
+import { formatDateTime, formatDateTimeRange } from "../services/displayFormat";
+import Button from "./ui/Button";
+import ErrorNotice from "./ui/ErrorNotice";
 
 const CANCEL_ERROR_MESSAGES = {
   400: "Enter a cancellation reason and select who initiated it.",
@@ -47,11 +49,12 @@ function cancellationPreviewErrorMessage(error, eventRequestId) {
   return "The cancellation preview request could not reach the server. Check your connection and try again.";
 }
 
-function ImpactSection({ title, impact }) {
+function ImpactSection({ title, impact, headingLevel }) {
+  const Heading = `h${headingLevel}`;
   const details = impact?.details ?? [];
   return (
     <section>
-      <h4>{title}: {impact?.count ?? 0}</h4>
+      <Heading>{title}: {impact?.count ?? 0}</Heading>
       {details.length > 0 && (
         <ul>
           {details.map((item) => (
@@ -59,9 +62,10 @@ function ImpactSection({ title, impact }) {
               {item.venueName || item.equipmentName || item.status || "Item"}
               {item.venueLocation ? ` — ${item.venueLocation}` : ""}
               {item.quantity !== undefined ? ` (quantity ${item.quantity})` : ""}
-              {item.startsAt && `, ${formatTimestamp(item.startsAt, "Not recorded")}`}
-              {item.endsAt && `–${formatTimestamp(item.endsAt, "Not recorded")}`}
-              {item.expiresAt && `, expires ${formatTimestamp(item.expiresAt, "Not recorded")}`}
+              {item.startsAt && item.endsAt && `, ${formatDateTimeRange(item.startsAt, item.endsAt, "Not recorded")}`}
+              {item.startsAt && !item.endsAt && `, ${formatDateTime(item.startsAt, "Not recorded")}`}
+              {!item.startsAt && item.endsAt && `–${formatDateTime(item.endsAt, "Not recorded")}`}
+              {item.expiresAt && `, expires ${formatDateTime(item.expiresAt, "Not recorded")}`}
               {item.lines?.length > 0 &&
                 ` — ${item.lines.map((line) => `${line.equipmentName || "Equipment"} (quantity ${line.quantity})`).join(", ")}`}
             </li>
@@ -72,15 +76,21 @@ function ImpactSection({ title, impact }) {
   );
 }
 
-export function CancellationImpact({ impact }) {
+/**
+ * @param {object} props
+ * @param {number} [props.headingLevel]  its heading's level; each section's is one under
+ */
+export function CancellationImpact({ impact, headingLevel = 3 }) {
+  const Heading = `h${headingLevel}`;
+  const sectionLevel = headingLevel + 1;
   return (
     <div className="event-cancellation__impact" aria-label="Cancellation impact preview">
-      <h3>What cancellation will affect</h3>
-      <ImpactSection title="Venue bookings to cancel" impact={impact.venueBookings} />
-      <ImpactSection title="Pending venue booking requests to withdraw" impact={impact.bookingRequests} />
-      <ImpactSection title="Tentative venue holds to release" impact={impact.venueHolds} />
-      <ImpactSection title="Equipment requests to cancel" impact={impact.equipmentRequests} />
-      <ImpactSection title="Active equipment reservations to release" impact={impact.equipmentReservations} />
+      <Heading>What cancellation will affect</Heading>
+      <ImpactSection title="Venue bookings to cancel" impact={impact.venueBookings} headingLevel={sectionLevel} />
+      <ImpactSection title="Pending venue booking requests to withdraw" impact={impact.bookingRequests} headingLevel={sectionLevel} />
+      <ImpactSection title="Tentative venue holds to release" impact={impact.venueHolds} headingLevel={sectionLevel} />
+      <ImpactSection title="Equipment requests to cancel" impact={impact.equipmentRequests} headingLevel={sectionLevel} />
+      <ImpactSection title="Active equipment reservations to release" impact={impact.equipmentReservations} headingLevel={sectionLevel} />
       <p>
         This preview includes arrangements currently recorded in ConnectSphere.
         Registrations and on-site support assignments are not yet available in
@@ -90,11 +100,19 @@ export function CancellationImpact({ impact }) {
   );
 }
 
+/**
+ * @param {object} props
+ * @param {number} [props.headingLevel]  the page title's level: 1 on the event's
+ *   own page, 2 inside a list whose title is the h1
+ */
 export default function EventCancellationPanel({
   eventRequest,
   onCancelled,
   onBack,
+  headingLevel = 1,
 }) {
+  const Title = `h${headingLevel}`;
+  const SectionHeading = `h${headingLevel + 1}`;
   const [reason, setReason] = useState("");
   const [initiator, setInitiator] = useState("");
   const [attendeeMessage, setAttendeeMessage] = useState("");
@@ -103,20 +121,28 @@ export default function EventCancellationPanel({
   const [loadingImpact, setLoadingImpact] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState(null);
+  const headingRef = useRef(null);
+  const cancelled = eventRequest.status === "cancelled";
 
-  if (eventRequest.status === "cancelled") {
+  // The opener has gone, and on success so has the confirm button, so focus
+  // starts on the title each time the page changes.
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, [cancelled]);
+
+  if (cancelled) {
     return (
       <main className="event-cancellation-page">
-        {onBack && <button className="event-cancellation-page__back" type="button" onClick={onBack}>Back to event</button>}
+        {onBack && <Button variant="link" onClick={onBack}>Back to event</Button>}
         <p className="eyebrow">Cancellation recorded</p>
-        <h1>{eventRequest.eventName}</h1>
+        <Title ref={headingRef} tabIndex={-1}>{eventRequest.eventName}</Title>
         <section className="event-cancellation">
-          <h2>Event cancelled</h2>
+          <SectionHeading>Event cancelled</SectionHeading>
           <dl>
             <dt>Reason</dt>
             <dd>{eventRequest.cancellationReason || "No reason recorded."}</dd>
             <dt>Cancelled on</dt>
-            <dd>{formatTimestamp(eventRequest.cancelledAt, "Not recorded")}</dd>
+            <dd>{formatDateTime(eventRequest.cancelledAt, "Not recorded")}</dd>
           </dl>
         </section>
       </main>
@@ -174,9 +200,9 @@ export default function EventCancellationPanel({
 
   return (
     <main className="event-cancellation-page">
-      {onBack && <button className="event-cancellation-page__back" type="button" onClick={onBack}>Back to event</button>}
+      {onBack && <Button variant="link" onClick={onBack}>Back to event</Button>}
       <p className="eyebrow">Coordinator action</p>
-      <h1>Cancel {eventRequest.eventName}</h1>
+      <Title ref={headingRef} tabIndex={-1}>Cancel {eventRequest.eventName}</Title>
       <p className="event-cancellation-page__intro">
         Review the arrangements this will affect before confirming. Cancellation is final.
       </p>
@@ -225,14 +251,14 @@ export default function EventCancellationPanel({
               rows={3}
             />
           </label>
-          <button type="submit" disabled={loadingImpact || cancelling}>
+          <Button type="submit" disabled={loadingImpact || cancelling}>
             {loadingImpact ? "Loading impact..." : impact ? "Refresh impact preview" : "Preview cancellation"}
-          </button>
+          </Button>
         </form>
 
         {impact && (
           <>
-            <CancellationImpact impact={impact} />
+            <CancellationImpact impact={impact} headingLevel={headingLevel + 2} />
             <div className="event-cancellation__confirmation">
               <label>
                 <input
@@ -242,17 +268,18 @@ export default function EventCancellationPanel({
                 />
                 I have reviewed the impact and explicitly confirm cancelling this event.
               </label>
-              <button
-                type="button"
+              <Button
+                variant="danger"
                 onClick={handleCancel}
                 disabled={!confirmed || cancelling || loadingImpact}
               >
                 {cancelling ? "Cancelling..." : "Confirm event cancellation"}
-              </button>
+              </Button>
             </div>
           </>
         )}
-        {error && <p role="alert">{error}</p>}
+        {/* No Try again: the preview and the cancellation are both resent from this form. */}
+        {error && <ErrorNotice message={error} />}
       </section>
     </main>
   );
