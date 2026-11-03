@@ -40,7 +40,7 @@
 // Confirmed event that has ended (EventCompletionPanel), and "Closing notes" on a completed
 // event, shown to coordinators only.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { normaliseRole } from "../auth/normaliseRole";
@@ -68,6 +68,7 @@ import SafetyApprovalNotice from "./SafetyApprovalNotice";
 import EventConfirmationPanel from "./EventConfirmationPanel";
 import EventCompletionPanel from "./EventCompletionPanel";
 import RegistrationCounts from "./RegistrationCounts";
+import Button from "./ui/Button";
 import StatusBadge from "./ui/StatusBadge";
 import { isRegistrationConfigurable } from "../services/registrationStatuses";
 import {
@@ -90,6 +91,7 @@ import {
 import { STATUSES_ALLOWING_ORDINARY_EDITS, detailFieldList } from "../services/eventDetailFields";
 import { formatVenueTimestamp, isReplyOverdue, venueTomorrow } from "../services/datetimeFormat";
 import { canMarkCompleted, closingNotesOf, eventHasEnded } from "../services/eventCompletion";
+import { attentionReasonsOf } from "../services/equipmentFlagDisplay";
 
 const CLARIFICATION_FIELDS = [
   ["eventName", "Event name"],
@@ -187,6 +189,78 @@ function liveRequestsFrom(items) {
   }
   return venues;
 }
+
+const PROGRESS_STEPS = [
+  ["submitted", "Submitted"],
+  ["under_review", "Under review"],
+  ["approved", "Approved"],
+  ["safety", "Safety check"],
+  ["confirmed", "Confirmed"],
+  ["completed", "Completed"],
+];
+
+// Where each status sits on PROGRESS_STEPS. A status missing here (a draft, or
+// one this build does not know) marks no step, rather than guessing one.
+const STEP_BY_STATUS = {
+  submitted: 0,
+  under_review: 1,
+  pending_clarification: 1,
+  approved: 2,
+  safety_review: 3,
+  safety_approved: 3,
+  confirmed: 4,
+  completed: 5,
+};
+
+// The status alone cannot say how far a closed event got, so these show only
+// the steps it must have passed: a rejection always follows a review, and a
+// cancellation can come straight after submission.
+const TERMINAL_STATUSES = {
+  rejected: { reached: 2, label: "Rejected" },
+  cancelled: { reached: 1, label: "Cancelled" },
+};
+
+/** The progress stepper's items for a status, each "done", "current" or "upcoming". */
+function progressSteps(status) {
+  const terminal = TERMINAL_STATUSES[status];
+  if (terminal) {
+    return [
+      ...PROGRESS_STEPS.slice(0, terminal.reached).map(([key, label]) => ({ key, label, state: "done" })),
+      { key: status, label: terminal.label, state: "current" },
+    ];
+  }
+  const index = STEP_BY_STATUS[status] ?? -1;
+  return PROGRESS_STEPS.map(([key, label], i) => ({
+    key,
+    label: status === "pending_clarification" && i === index ? `${label}: waiting for the organiser` : label,
+    state: i < index ? "done" : i === index ? "current" : "upcoming",
+  }));
+}
+
+// The three outcomes of a review, each sent by the handler its old button called.
+const DECISION_CHOICES = [
+  {
+    value: "approve",
+    label: "Approve",
+    hint: "Accept the request. The note is optional.",
+    submitLabel: "Approve request",
+    variant: "primary",
+  },
+  {
+    value: "reject",
+    label: "Reject",
+    hint: "Turn the request down. The note is the reason, and is required.",
+    submitLabel: "Reject request",
+    variant: "danger",
+  },
+  {
+    value: "return",
+    label: "Return for amendment",
+    hint: "Send it back to the Organiser to change. The note is the instructions, and is required.",
+    submitLabel: "Return for amendment",
+    variant: "primary",
+  },
+];
 
 /**
  * @param {object} props
@@ -297,6 +371,9 @@ export default function CoordinatorRequestDetail({
   // the row lock, whatever this screen shows. docs/SCRUM-327.md makes the
   // same argument for the hand-over button.
 
+  // Nothing is chosen at first, so no outcome is sent by accident.
+  const [decisionChoice, setDecisionChoice] = useState(null);
+  const decisionIds = useId();
   const [startingReview, setStartingReview] = useState(false);
   const [startReviewError, setStartReviewError] = useState(null);
   const [decisionError, setDecisionError] = useState(null);
@@ -414,6 +491,13 @@ export default function CoordinatorRequestDetail({
     } finally {
       setProcessingReviewDecision(false);
     }
+  }
+
+  function handleSubmitDecision() {
+    if (decisionChoice === "approve") return handleDecision("approved");
+    if (decisionChoice === "reject") return handleDecision("rejected");
+    if (decisionChoice === "return") return handleReturnForAmendment();
+    return undefined;
   }
 
   async function handleCloseClarification(event) {
@@ -555,12 +639,45 @@ export default function CoordinatorRequestDetail({
   const Title = asPage ? "h1" : "h2";
   const sectionLevel = asPage ? 2 : 3;
   const SectionHeading = `h${sectionLevel}`;
+  const SubHeading = `h${sectionLevel + 1}`;
   // A queue row has no organiser name (see Provenance), so the line leaves it out.
   const facts = [
     formatDateTimeRangeOrFallback(current.proposedStart, current.proposedEnd, "Date not set"),
     capacity === null ? null : pluralise(capacity, "attendee"),
     request.organiserName || null,
   ].filter(Boolean).join(" · ");
+
+  const canRevise = isAssignedCoordinator && [
+    "approved",
+    "confirmed",
+    "safety_review",
+    "safety_approved",
+  ].includes(current.status);
+  const canCancel = isAssignedCoordinator && CANCELLABLE_STATUSES.has(current.status);
+  // Only an Approved event is rejected (Confirmed ones are cancelled), and only
+  // an Approved one goes for its safety check.
+  const isHolderOfApproved = isAssignedCoordinator && current.status === "approved";
+  const hasOpeners = canRevise || canEditDetails || canComplete || canCancel || isHolderOfApproved;
+
+  // The panel shows a refusal only for the revision it refused; once a
+  // refetch moves the event on, or unmounts the panel, show it here.
+  const showConfirmationFeedback = confirmationFeedback?.eventId === current.id && (confirmationFeedback.success
+    ? current.status === "confirmed"
+    : !canConfirm || confirmationFeedback.updatedAt !== current.updatedAt);
+  const showDetailsSaved = detailsSaved?.eventId === current.id;
+  const showCompletedNotice = completedNotice?.eventId === current.id && current.status === "completed";
+  // A recorded decision is shown under Decision whatever the status now is, so
+  // the review steps apply only while there is none.
+  const reviewStep = !current.decision
+    && ["submitted", "under_review", "pending_clarification"].includes(current.status)
+    ? current.status
+    : null;
+  const hasNextStep = Boolean(display.description)
+    || attentionReasonsOf(current).length > 0
+    || current.status === "safety_approved"
+    || showConfirmationFeedback || canConfirm || showDetailsSaved || awaitingEnd
+    || showCompletedNotice || isHolderOfApproved || reviewStep !== null;
+  const chosenDecision = DECISION_CHOICES.find((choice) => choice.value === decisionChoice);
 
   return (
     <div className="coordinator-request-detail">
@@ -571,120 +688,282 @@ export default function CoordinatorRequestDetail({
           <NeedsAttentionBadge event={current} />
         </p>
         <p className="coordinator-request-detail__facts">{facts}</p>
-        <p>{display.description}</p>
-        <NeedsAttentionReasons event={current} />
-        <SafetyApprovalNotice status={current.status} />
-        {/* The panel shows a refusal only for the revision it refused; once a
-            refetch moves the event on, or unmounts the panel, show it here. */}
-        {confirmationFeedback?.eventId === current.id && (confirmationFeedback.success
-          ? current.status === "confirmed"
-          : !canConfirm || confirmationFeedback.updatedAt !== current.updatedAt) && (
-          <p role={confirmationFeedback.success ? "status" : "alert"}>{confirmationFeedback.message}</p>
-        )}
-        {canConfirm && (
-          <EventConfirmationPanel
-            key={current.id}
-            eventRequest={current}
-            headingLevel={sectionLevel}
-            onConfirmed={(updated) => {
-              setUpdatedRequest(updated);
-              setConfirmationFeedback({ eventId: updated.id, success: true, message: "Event confirmed successfully." });
-              onChangeRequestProcessed?.();
-            }}
-            onStale={(message) => {
-              setUpdatedRequest(null);
-              setConfirmationFeedback({ eventId: current.id, updatedAt: current.updatedAt, success: false, message });
-              return onChangeRequestProcessed?.();
-            }}
-          />
-        )}
-        {/* SCRUM-460 AC6: the assigned Coordinator sees the waiting-list count. */}
-        {isAssignedCoordinator && isRegistrationConfigurable(current.status) && (
-          <RegistrationCounts eventId={current.id} headingLevel={sectionLevel} />
-        )}
-        {isAssignedCoordinator && [
-          "approved",
-          "confirmed",
-          "safety_review",
-          "safety_approved",
-        ].includes(current.status) && (
-          <button
-            className="coordinator-request-detail__significant-change"
-            type="button"
-            onClick={() => setSignificantChangePage(true)}
-          >
-            Revise event details
-          </button>
-        )}
-        {canEditDetails && (
-          <button
-            className="coordinator-request-detail__edit-details"
-            type="button"
-            onClick={() => setDetailsEditPage(true)}
-          >
-            Edit event information
-          </button>
-        )}
-        {detailsSaved?.eventId === current.id && (
-          <p className="coordinator-request-detail__edit-saved" role="status">{detailsSaved.message}</p>
-        )}
-        {canComplete && (
-          <button
-            className="coordinator-request-detail__complete"
-            type="button"
-            onClick={() => setCompletionPage(true)}
-          >
-            Mark as completed
-          </button>
-        )}
-        {awaitingEnd && (
-          <p className="coordinator-request-detail__complete-hint">
-            You can mark this event as completed once it has ended
-            {current.proposedEnd ? ` (${formatVenueTimestamp(current.proposedEnd)})` : ""}.
-          </p>
-        )}
-        {completedNotice?.eventId === current.id && current.status === "completed" && (
-          <p className="coordinator-request-detail__completed-notice" role="status">
-            Marked as completed.
-          </p>
-        )}
-        {isAssignedCoordinator && CANCELLABLE_STATUSES.has(current.status) && (
-          <button
-            className="coordinator-request-detail__cancel"
-            type="button"
-            onClick={() => setCancellationPage(true)}
-          >
-            Cancel event
-          </button>
-        )}
-        {/* SCRUM-347: only an Approved event is rejected; Confirmed ones are cancelled. */}
-        {isAssignedCoordinator && current.status === "approved" && (
-          <button
-            className="coordinator-request-detail__reject"
-            type="button"
-            onClick={() => setRejectionPage(true)}
-          >
-            Reject event
-          </button>
-        )}
-        {/* SCRUM-489 AC1: the holder, while Approved. The server checks both again. */}
-        {isAssignedCoordinator && current.status === "approved" && (
-          <SafetyCheckSubmissionPanel
-            key={current.id}
-            eventRequest={current}
-            headingLevel={sectionLevel}
-            onSubmitted={(updated) => {
-              setUpdatedRequest(updated);
-              onChangeRequestProcessed?.();
-            }}
-            onStale={() => onChangeRequestProcessed?.()}
-          />
+        {/* Reject and Cancel only open their pages, where the final step is the danger one. */}
+        {hasOpeners && (
+          <div className="coordinator-request-detail__actions">
+            {canRevise && (
+              <Button
+                variant="secondary"
+                className="coordinator-request-detail__significant-change"
+                onClick={() => setSignificantChangePage(true)}
+              >
+                Revise event details
+              </Button>
+            )}
+            {canEditDetails && (
+              <Button
+                variant="secondary"
+                className="coordinator-request-detail__edit-details"
+                onClick={() => setDetailsEditPage(true)}
+              >
+                Edit event information
+              </Button>
+            )}
+            {canComplete && (
+              <Button className="coordinator-request-detail__complete" onClick={() => setCompletionPage(true)}>
+                Mark as completed
+              </Button>
+            )}
+            {canCancel && (
+              <Button
+                variant="secondary"
+                className="coordinator-request-detail__cancel"
+                onClick={() => setCancellationPage(true)}
+              >
+                Cancel event
+              </Button>
+            )}
+            {isHolderOfApproved && (
+              <Button
+                variant="secondary"
+                className="coordinator-request-detail__reject"
+                onClick={() => setRejectionPage(true)}
+              >
+                Reject event
+              </Button>
+            )}
+          </div>
         )}
       </header>
 
       {/* Main column, then the rail: one column until the screen itself is wide. */}
       <div className="coordinator-request-detail__body">
         <div className="coordinator-request-detail__main">
+          {/* What happens now for this status. Read-only viewers see the waiting
+              texts; the status and ownership checks are a convenience, not the
+              gate, and the error tables above say in words why the server refused. */}
+          {hasNextStep && (
+            <section className="coordinator-request-detail__next-step" aria-labelledby={`${decisionIds}-next`}>
+              <SectionHeading id={`${decisionIds}-next`}>Next step</SectionHeading>
+              {display.description && <p>{display.description}</p>}
+              <NeedsAttentionReasons event={current} />
+              <SafetyApprovalNotice status={current.status} />
+              {showConfirmationFeedback && (
+                <p role={confirmationFeedback.success ? "status" : "alert"}>{confirmationFeedback.message}</p>
+              )}
+              {canConfirm && (
+                <EventConfirmationPanel
+                  key={current.id}
+                  eventRequest={current}
+                  headingLevel={sectionLevel + 1}
+                  onConfirmed={(updated) => {
+                    setUpdatedRequest(updated);
+                    setConfirmationFeedback({ eventId: updated.id, success: true, message: "Event confirmed successfully." });
+                    onChangeRequestProcessed?.();
+                  }}
+                  onStale={(message) => {
+                    setUpdatedRequest(null);
+                    setConfirmationFeedback({ eventId: current.id, updatedAt: current.updatedAt, success: false, message });
+                    return onChangeRequestProcessed?.();
+                  }}
+                />
+              )}
+              {showDetailsSaved && (
+                <p className="coordinator-request-detail__edit-saved" role="status">{detailsSaved.message}</p>
+              )}
+              {awaitingEnd && (
+                <p className="coordinator-request-detail__complete-hint">
+                  You can mark this event as completed once it has ended
+                  {current.proposedEnd ? ` (${formatVenueTimestamp(current.proposedEnd)})` : ""}.
+                </p>
+              )}
+              {showCompletedNotice && (
+                <p className="coordinator-request-detail__completed-notice" role="status">
+                  Marked as completed.
+                </p>
+              )}
+              {/* The holder, while Approved. The server checks both again. */}
+              {isHolderOfApproved && (
+                <SafetyCheckSubmissionPanel
+                  key={current.id}
+                  eventRequest={current}
+                  headingLevel={sectionLevel + 1}
+                  onSubmitted={(updated) => {
+                    setUpdatedRequest(updated);
+                    onChangeRequestProcessed?.();
+                  }}
+                  onStale={() => onChangeRequestProcessed?.()}
+                />
+              )}
+
+              {reviewStep === "pending_clarification" && (
+                <div className="coordinator-request-detail__waiting">
+                  <SubHeading>Waiting for organiser reply</SubHeading>
+                  <div className="clarification-current">
+                    <strong>Current question</strong>
+                    <p>{current.clarificationNote || "No clarification question was recorded."}</p>
+                    {current.clarificationReplyByDate && (
+                      <span>
+                        Reply by {formatTimestamp(current.clarificationReplyByDate, "Not recorded")}
+                        {isReplyOverdue(current.clarificationReplyByDate) && (
+                          <strong className="clarification-overdue"> · Overdue</strong>
+                        )}
+                      </span>
+                    )}
+                  </div>
+                  <ClarificationHistoryDialog
+                    eventRequestId={request.id}
+                    eventName={request.eventName}
+                    isOpenQuestion
+                    latestQuestion={current.clarificationNote}
+                  />
+                  {isAssignedCoordinator && (
+                    <form className="coordinator-clarification" onSubmit={handleCloseClarification}>
+                      <label>
+                        Note explaining why you are closing this request
+                        <textarea
+                          value={closureNote}
+                          onChange={(event) => setClosureNote(event.target.value)}
+                          rows={3}
+                          maxLength={2000}
+                          required
+                        />
+                      </label>
+                      {closureError && <p role="alert">{closureError}</p>}
+                      <Button type="submit" disabled={closingClarification || !closureNote.trim()}>
+                        {closingClarification ? "Closing..." : "Close clarification"}
+                      </Button>
+                    </form>
+                  )}
+                </div>
+              )}
+
+              {reviewStep === "submitted" && (isAssignedCoordinator ? (
+                <div className="coordinator-start-review">
+                  <p>
+                    Start the review to approve, reject, or return this request for
+                    amendment. You will be recorded as its reviewer.
+                  </p>
+                  {startReviewError && (
+                    <p className="coordinator-clarification__error" role="alert">
+                      {startReviewError}
+                    </p>
+                  )}
+                  <Button disabled={startingReview} onClick={handleStartReview}>
+                    {startingReview ? "Starting..." : "Start review"}
+                  </Button>
+                </div>
+              ) : current.assignedCoordinatorId == null ? (
+                // Since 052 a submitted request can have no coordinator: it is in
+                // the Lead's unassigned queue, and "waiting for the assigned
+                // coordinator" would name someone who does not exist.
+                <p>Waiting for the Event Coordinator Lead to assign this request to a coordinator.</p>
+              ) : (
+                <p>Waiting for the assigned coordinator to start the review.</p>
+              ))}
+
+              {reviewStep === "under_review" && (isAssignedCoordinator ? (
+                <div className="coordinator-clarification">
+                  <fieldset className="coordinator-decision" disabled={processingReviewDecision}>
+                    <legend>Your decision</legend>
+                    {DECISION_CHOICES.map((choice) => {
+                      const id = `${decisionIds}-${choice.value}`;
+                      return (
+                        <label
+                          key={choice.value}
+                          className={`coordinator-decision__option${decisionChoice === choice.value ? " coordinator-decision__option--selected" : ""}`}
+                        >
+                          <input
+                            type="radio"
+                            name={`${decisionIds}-decision`}
+                            value={choice.value}
+                            checked={decisionChoice === choice.value}
+                            onChange={() => setDecisionChoice(choice.value)}
+                            aria-labelledby={`${id}-label`}
+                            aria-describedby={`${id}-hint`}
+                          />
+                          <span className="coordinator-decision__text">
+                            <span id={`${id}-label`} className="coordinator-decision__label">{choice.label}</span>
+                            <span id={`${id}-hint`} className="coordinator-decision__hint">{choice.hint}</span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </fieldset>
+                  {/* One note for all three outcomes. Whichever is chosen, the note
+                      is read by the Organiser: as the rejection reason, the
+                      approval note, or the amendment instructions. */}
+                  <label>
+                    Note for the Organiser
+                    <textarea
+                      value={reviewNote}
+                      onChange={(event) => setReviewNote(event.target.value)}
+                      rows={4}
+                      maxLength={2000}
+                      placeholder="Required to reject or to return for amendment; optional when approving."
+                    />
+                  </label>
+                  {/* Only a return for amendment sends the fields and the reply-by date. */}
+                  {decisionChoice === "return" && (
+                    <>
+                      <details className="coordinator-clarification__amendments" open>
+                        <summary>Let the Organiser amend specific fields (optional)</summary>
+                        <fieldset className="coordinator-clarification__fields">
+                          <legend>Fields that need changing</legend>
+                          <p>Leave all fields unchecked for a question-only clarification.</p>
+                          {CLARIFICATION_FIELDS.map(([field, label]) => (
+                            <label key={field}>
+                              <input
+                                type="checkbox"
+                                checked={requestedFields.includes(field)}
+                                onChange={(event) => {
+                                  setRequestedFields((previous) => event.target.checked
+                                    ? [...previous, field]
+                                    : previous.filter((item) => item !== field));
+                                }}
+                              />
+                              {label}
+                            </label>
+                          ))}
+                        </fieldset>
+                      </details>
+                      <label>
+                        Optional reply-by date
+                        <input
+                          type="date"
+                          min={minReplyByDate}
+                          value={replyByDate}
+                          onChange={(event) => setReplyByDate(event.target.value)}
+                        />
+                      </label>
+                    </>
+                  )}
+                  {(decisionError || reviewDecisionError) && (
+                    <p className="coordinator-clarification__error" role="alert">
+                      {decisionError || reviewDecisionError}
+                    </p>
+                  )}
+                  <div className="coordinator-review-actions">
+                    <Button
+                      variant={chosenDecision?.variant ?? "primary"}
+                      disabled={processingReviewDecision || !chosenDecision}
+                      onClick={handleSubmitDecision}
+                    >
+                      {processingReviewDecision ? "Saving..." : chosenDecision?.submitLabel ?? "Submit decision"}
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <p>Only the assigned coordinator can decide this request.</p>
+              ))}
+            </section>
+          )}
+
+          {/* The assigned Coordinator sees the waiting-list count. */}
+          {isAssignedCoordinator && isRegistrationConfigurable(current.status) && (
+            <RegistrationCounts eventId={current.id} headingLevel={sectionLevel} />
+          )}
+
           {closingNotes && (
             <section className="coordinator-request-detail__closing-notes">
               <SectionHeading>Closing notes</SectionHeading>
@@ -774,168 +1053,16 @@ export default function CoordinatorRequestDetail({
             </p>
           )}
 
-          {/* SCRUM-19. What the decision section shows, in order:
-
-                1. A recorded decision, read-only, whatever the status now is. An
-                   approved event later confirmed or cancelled still carries its
-                   decision, and AC9 says it is not edited. Checked on the decision
-                   itself rather than a list of "decided" statuses, so no status
-                   vocabulary is copied here for it.
-                2. Pending clarification: the existing waiting panel.
-                3. Submitted: Start review, for the assigned coordinator.
-                4. Under review: Approve, Reject and Return for amendment, for the
-                   assigned coordinator.
-                Anyone else sees what is happening but nothing to press.
-
-                The status and ownership checks here are a convenience, not the
-                gate: the server refuses regardless, and the error tables above say
-                why in words. */}
-          {current.decision ? (
+          {/* A recorded decision, read-only, whatever the status now is: an
+              approved event later confirmed or cancelled still carries it, and
+              it is not edited. Checked on the decision itself, so no list of
+              "decided" statuses is copied here. */}
+          {current.decision && (
             <section>
               <SectionHeading>Decision</SectionHeading>
               <DecisionOutcome request={current} view="coordinator" />
             </section>
-          ) : current.status === "pending_clarification" ? (
-            <section>
-              <SectionHeading>Waiting for organiser reply</SectionHeading>
-              <div className="clarification-current">
-                <strong>Current question</strong>
-                <p>{current.clarificationNote || "No clarification question was recorded."}</p>
-                {current.clarificationReplyByDate && (
-                  <span>
-                    Reply by {formatTimestamp(current.clarificationReplyByDate, "Not recorded")}
-                    {isReplyOverdue(current.clarificationReplyByDate) && (
-                      <strong className="clarification-overdue"> · Overdue</strong>
-                    )}
-                  </span>
-                )}
-              </div>
-              <ClarificationHistoryDialog
-                eventRequestId={request.id}
-                eventName={request.eventName}
-                isOpenQuestion
-                latestQuestion={current.clarificationNote}
-              />
-              {isAssignedCoordinator && (
-                <form className="coordinator-clarification" onSubmit={handleCloseClarification}>
-                  <label>
-                    Note explaining why you are closing this request
-                    <textarea
-                      value={closureNote}
-                      onChange={(event) => setClosureNote(event.target.value)}
-                      rows={3}
-                      maxLength={2000}
-                      required
-                    />
-                  </label>
-                  {closureError && <p role="alert">{closureError}</p>}
-                  <button type="submit" disabled={closingClarification || !closureNote.trim()}>
-                    {closingClarification ? "Closing..." : "Close clarification"}
-                  </button>
-                </form>
-              )}
-            </section>
-          ) : current.status === "submitted" ? (
-            <section>
-              <SectionHeading>Review</SectionHeading>
-              {isAssignedCoordinator ? (
-                <div className="coordinator-start-review">
-                  <p>
-                    Start the review to approve, reject, or return this request for
-                    amendment. You will be recorded as its reviewer.
-                  </p>
-                  {startReviewError && (
-                    <p className="coordinator-clarification__error" role="alert">
-                      {startReviewError}
-                    </p>
-                  )}
-                  <button type="button" disabled={startingReview} onClick={handleStartReview}>
-                    {startingReview ? "Starting..." : "Start review"}
-                  </button>
-                </div>
-              ) : current.assignedCoordinatorId == null ? (
-                // SCRUM-486 AC8-04 (SCRUM-519). Since 052 a submitted request can
-                // have no coordinator: it is in the Lead's unassigned queue. Every
-                // coordinator can still open it (SCRUM-332), and "waiting for the
-                // assigned coordinator" would name someone who does not exist.
-                // isAssignedCoordinator is false for everyone here, so nobody is
-                // offered Start review, which 052 would refuse anyway.
-                <p>Waiting for the Event Coordinator Lead to assign this request to a coordinator.</p>
-              ) : (
-                <p>Waiting for the assigned coordinator to start the review.</p>
-              )}
-            </section>
-          ) : current.status === "under_review" ? (
-            <section>
-              <SectionHeading>Coordinator decision</SectionHeading>
-              {isAssignedCoordinator ? (
-                <div className="coordinator-clarification">
-                  {/* One note for all three actions. Whichever is chosen, the note
-                      is read by the Organiser: as the rejection reason, the
-                      approval note, or the amendment instructions. One box means
-                      the note cannot be typed into the wrong one. */}
-                  <label>
-                    Note for the Organiser
-                    <textarea
-                      value={reviewNote}
-                      onChange={(event) => setReviewNote(event.target.value)}
-                      rows={4}
-                      maxLength={2000}
-                      placeholder="Required to reject or to return for amendment; optional when approving."
-                    />
-                  </label>
-                  <details className="coordinator-clarification__amendments" open>
-                    <summary>Let the Organiser amend specific fields (optional)</summary>
-                    <fieldset className="coordinator-clarification__fields">
-                      <legend>Fields that need changing</legend>
-                      <p>Leave all fields unchecked for a question-only clarification.</p>
-                      {CLARIFICATION_FIELDS.map(([field, label]) => (
-                        <label key={field}>
-                          <input
-                            type="checkbox"
-                            checked={requestedFields.includes(field)}
-                            onChange={(event) => {
-                              setRequestedFields((previous) => event.target.checked
-                                ? [...previous, field]
-                                : previous.filter((item) => item !== field));
-                            }}
-                          />
-                          {label}
-                        </label>
-                      ))}
-                    </fieldset>
-                  </details>
-                  <label>
-                    Optional reply-by date
-                    <input
-                      type="date"
-                      min={minReplyByDate}
-                      value={replyByDate}
-                      onChange={(event) => setReplyByDate(event.target.value)}
-                    />
-                  </label>
-                  {(decisionError || reviewDecisionError) && (
-                    <p className="coordinator-clarification__error" role="alert">
-                      {decisionError || reviewDecisionError}
-                    </p>
-                  )}
-                  <div className="coordinator-review-actions">
-                    <button className="coordinator-review-actions__approve" type="button" disabled={processingReviewDecision} onClick={() => handleDecision("approved")}>
-                      {processingReviewDecision ? "Saving..." : "Approve request"}
-                    </button>
-                    <button className="coordinator-review-actions__reject" type="button" disabled={processingReviewDecision} onClick={() => handleDecision("rejected")}>
-                      Reject request
-                    </button>
-                    <button className="coordinator-review-actions__return" type="button" disabled={processingReviewDecision} onClick={handleReturnForAmendment}>
-                      Return for amendment
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <p>Only the assigned coordinator can decide this request.</p>
-              )}
-            </section>
-          ) : null}
+          )}
 
           {/* SCRUM-355 AC5: a resubmission says so, with the decisions before this
               one. Only its coordinator and the Lead may read them, as the server rules. */}
@@ -1077,6 +1204,19 @@ export default function CoordinatorRequestDetail({
         </div>
 
         <aside className="coordinator-request-detail__rail" aria-label="Event facts">
+          <ol className="coordinator-request-detail__stepper" aria-label="Progress">
+            {progressSteps(current.status).map((step) => (
+              <li
+                key={step.key}
+                className={`coordinator-request-detail__step coordinator-request-detail__step--${step.state}`}
+                aria-current={step.state === "current" ? "step" : undefined}
+              >
+                {step.label}
+                {step.state === "done" && <span className="visually-hidden"> (done)</span>}
+              </li>
+            ))}
+          </ol>
+
           <section>
             <SectionHeading>Provenance</SectionHeading>
             <ul>

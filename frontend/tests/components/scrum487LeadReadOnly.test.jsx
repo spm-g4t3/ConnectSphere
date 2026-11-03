@@ -75,6 +75,7 @@ const HOLDERS_ACTIONS = [
   "Approve request",
   "Reject request",
   "Return for amendment",
+  "Submit decision",
   "Cancel event",
   "Close clarification",
   // A pending change request's decision.
@@ -181,5 +182,7 @@ describe("SCRUM487_AC5 the Lead opens any event read-only", () => {
     for (const action of HOLDERS_ACTIONS) {
       expect(screen.queryByRole("button", { name: action })).not.toBeInTheDocument();
     }
+    // The review decision is chosen with radios before its button is named.
+    expect(screen.queryByRole("group", { name: "Your decision" })).not.toBeInTheDocument();
   });
 });

@@ -16,6 +16,7 @@ import { MemoryRouter } from "react-router-dom";
 
 import CoordinatorRequestDetail from "../../src/components/CoordinatorRequestDetail.jsx";
 import { useAuth } from "../../src/auth/AuthContext";
+import { decide } from "../helpers/coordinatorDecision.js";
 import { decideEventRequest } from "../../src/services/eventRequestService";
 import { getActiveEquipmentTypes, getEventEquipment } from "../../src/services/eventEquipmentService";
 
@@ -129,7 +130,7 @@ describe("SCRUM21 the equipment section in the coordinator panel", () => {
     }));
     await screen.findByText("Equipment can be recorded once the request is approved.");
 
-    await user.click(await screen.findByRole("button", { name: "Approve request" }));
+    await decide(user, "Approve request");
 
     expect(await screen.findByRole("button", { name: "Add equipment" })).toBeInTheDocument();
   });

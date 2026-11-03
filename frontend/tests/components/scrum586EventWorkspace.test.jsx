@@ -129,7 +129,9 @@ describe("SCRUM586_AC2 the event screen's headings", () => {
 
     expect(screen.getAllByRole("heading", { level: 1 })).toEqual([title(1)]);
     expect(screen.getByRole("heading", { level: 2, name: "The request" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 2, name: "Submit for the safety check" })).toBeInTheDocument();
+    // The safety check panel now sits inside the Next step card, one level down.
+    expect(screen.getByRole("heading", { level: 2, name: "Next step" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 3, name: "Submit for the safety check" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 3, name: "Assignment history" })).toBeInTheDocument();
     const levels = headingLevels();
     levels.forEach((level, i) => {

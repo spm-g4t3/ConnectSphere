@@ -64,6 +64,7 @@ import { getEventVenueSuitability } from "../../src/services/venueSuitabilitySer
 import { cancelFlaggedBooking, getEventFlaggedBookings } from "../../src/services/flaggedBookingService";
 import { httpError } from "../helpers/async.js";
 import { sgTime } from "../helpers/singaporeTime.js";
+import { chooseDecision, decide } from "../helpers/coordinatorDecision.js";
 
 vi.mock("../../src/auth/AuthContext", () => ({
   useAuth: vi.fn(),
@@ -239,11 +240,15 @@ function renderAsLead(request) {
   );
 }
 
-/** The decision section: the one whose heading names what can happen next. */
-const ACTION_BUTTONS = ["Start review", "Approve request", "Reject request", "Return for amendment"];
+/** The review actions: Start review, then the decision's three choices and its submit. */
+const ACTION_BUTTONS = ["Start review", "Submit decision"];
+const DECISION_RADIOS = ["Approve", "Reject", "Return for amendment"];
 
 function actionButtonsShown() {
-  return ACTION_BUTTONS.filter((name) => screen.queryByRole("button", { name }));
+  return [
+    ...ACTION_BUTTONS.filter((name) => screen.queryByRole("button", { name })),
+    ...DECISION_RADIOS.filter((name) => screen.queryByRole("radio", { name })),
+  ];
 }
 
 beforeEach(() => {
@@ -484,7 +489,7 @@ describe("SCRUM19_AC1 starting the review", () => {
 
     expect(startEventReview).toHaveBeenCalledWith(REQUEST_ID);
     // The panel stays open on the updated request, with the next step in place.
-    expect(await screen.findByRole("button", { name: "Approve request" })).toBeInTheDocument();
+    expect(await screen.findByRole("radio", { name: "Approve" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Start review" })).not.toBeInTheDocument();
   });
 
@@ -554,8 +559,8 @@ describe("SCRUM19 deciding a request under review", () => {
   it("SCRUM19_AC7_under_review_offers_approve_reject_and_return", async () => {
     renderAs(ASSIGNED, underReview());
 
-    await screen.findByRole("button", { name: "Approve request" });
-    expect(actionButtonsShown()).toEqual(["Approve request", "Reject request", "Return for amendment"]);
+    await screen.findByRole("radio", { name: "Approve" });
+    expect(actionButtonsShown()).toEqual(["Submit decision", "Approve", "Reject", "Return for amendment"]);
   });
 
   it("SCRUM19_AC7_approving_sends_the_decision_and_shows_it_read_only", async () => {
@@ -571,7 +576,7 @@ describe("SCRUM19 deciding a request under review", () => {
     renderAs(ASSIGNED, underReview());
 
     await user.type(await screen.findByLabelText("Note for the Organiser"), "Approved as submitted.");
-    await user.click(screen.getByRole("button", { name: "Approve request" }));
+    await decide(user, "Approve request");
 
     expect(decideEventRequest).toHaveBeenCalledWith(REQUEST_ID, {
       decision: "approved",
@@ -591,7 +596,7 @@ describe("SCRUM19 deciding a request under review", () => {
     const user = userEvent.setup();
     renderAs(ASSIGNED, underReview());
 
-    await user.click(await screen.findByRole("button", { name: "Reject request" }));
+    await decide(user, "Reject request");
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Add a reason before rejecting this request.");
     expect(decideEventRequest).not.toHaveBeenCalled();
@@ -609,7 +614,7 @@ describe("SCRUM19 deciding a request under review", () => {
     renderAs(ASSIGNED, underReview());
 
     await user.type(await screen.findByLabelText("Note for the Organiser"), "Venue capacity cannot meet the expected attendance.");
-    await user.click(screen.getByRole("button", { name: "Reject request" }));
+    await decide(user, "Reject request");
 
     expect(decideEventRequest).toHaveBeenCalledWith(REQUEST_ID, {
       decision: "rejected",
@@ -626,7 +631,7 @@ describe("SCRUM19 deciding a request under review", () => {
     const user = userEvent.setup();
     renderAs(ASSIGNED, eventRequest({ status: "under_review", proposedStart: past() }));
 
-    await user.click(await screen.findByRole("button", { name: "Approve request" }));
+    await decide(user, "Approve request");
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(/start date has passed/i);
@@ -640,7 +645,7 @@ describe("SCRUM19 deciding a request under review", () => {
     const user = userEvent.setup();
     renderAs(ASSIGNED, underReview());
 
-    await user.click(await screen.findByRole("button", { name: "Approve request" }));
+    await decide(user, "Approve request");
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(/changed since you opened it/i);
@@ -652,7 +657,7 @@ describe("SCRUM19 deciding a request under review", () => {
     const user = userEvent.setup();
     renderAs(ASSIGNED, underReview());
 
-    await user.click(await screen.findByRole("button", { name: "Approve request" }));
+    await decide(user, "Approve request");
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/no longer assigned to you/i);
   });
@@ -663,7 +668,7 @@ describe("SCRUM19 deciding a request under review", () => {
     renderAs(ASSIGNED, underReview());
 
     await user.type(await screen.findByLabelText("Note for the Organiser"), "Please confirm numbers.");
-    await user.click(screen.getByRole("button", { name: "Return for amendment" }));
+    await decide(user, "Return for amendment");
 
     // SCRUM-162 added the reply-by date and the fields to amend, which the
     // screen sends as the third and fourth arguments. Neither is chosen here,
@@ -682,6 +687,8 @@ describe("SCRUM19 deciding a request under review", () => {
       vi.useFakeTimers({ toFake: ["Date"] });
       vi.setSystemTime(new Date("2026-10-20T23:30:00Z"));
       renderAs(ASSIGNED, underReview());
+      // The date is sent only with a return for amendment, so it shows once that is chosen.
+      await chooseDecision(userEvent.setup(), "Return for amendment");
 
       expect(await screen.findByLabelText("Optional reply-by date")).toHaveAttribute("min", "2026-10-22");
     });
@@ -701,7 +708,7 @@ describe("SCRUM19 deciding a request under review", () => {
     const user = userEvent.setup();
     renderAs(ASSIGNED, underReview());
     await user.type(await screen.findByLabelText("Note for the Organiser"), "Please confirm numbers.");
-    await user.click(screen.getByRole("button", { name: "Return for amendment" }));
+    await decide(user, "Return for amendment");
     return screen.findByRole("alert");
   }
 
@@ -871,7 +878,7 @@ describe("SCRUM254 requesting a venue from the event view", () => {
     renderAs(ASSIGNED, eventRequest({ ...PERIOD, status: "under_review", reviewingCoordinatorId: ASSIGNED }));
 
     await user.type(await screen.findByLabelText("Note for the Organiser"), "Approved.");
-    await user.click(screen.getByRole("button", { name: "Approve request" }));
+    await decide(user, "Approve request");
     await screen.findByText("Outcome");
 
     expect(await searchInFinder(user)).toBeEnabled();
