@@ -125,10 +125,6 @@ export default function EventRequestForm({
   }
 
   async function handleSubmit() {
-    if (!requestId) {
-      setSaveError("Save the draft before submitting it.");
-      return;
-    }
     if (!form.eventName.trim()) {
       setSaveError("Event name is required, even for a draft.");
       return;

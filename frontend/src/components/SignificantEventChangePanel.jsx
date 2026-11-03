@@ -154,7 +154,6 @@ export default function SignificantEventChangePanel({
   }
 
   async function handleApply() {
-    if (!impact || !previewedChanges || !confirmed) return;
     setSaving(true);
     setError(null);
     try {

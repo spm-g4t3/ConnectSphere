@@ -319,6 +319,24 @@ const COVERAGE_SERVICE_FILES = [
   'src/services/equipmentReviewErrors.js',
 ]
 
+// Components brought to 100% by the coverage push, gated for the same reason.
+const COVERAGE_COMPONENT_FILES = [
+  'src/App.jsx',
+  'src/components/ClarificationReplyForm.jsx',
+  'src/components/ClarificationHistory.jsx',
+  'src/components/MyEventRequests.jsx',
+  'src/components/ReviewQueue.jsx',
+  'src/components/EventOrganiserDashboard.jsx',
+  'src/components/VenueForm.jsx',
+  'src/components/VenueDetail.jsx',
+  'src/components/ReassignEventPanel.jsx',
+  'src/components/SignificantEventChangePanel.jsx',
+  'src/components/EquipmentReview.jsx',
+  'src/components/EventCancellationPanel.jsx',
+  'src/components/EventRequestForm.jsx',
+  'src/components/CoordinatorRequestDetail.jsx',
+]
+
 // https://vite.dev/config/
 //
 // defineConfig comes from vitest/config rather than vite so the `test` block
@@ -383,6 +401,7 @@ export default defineConfig({
         ...SCRUM591_FILES.map((file) => [file, FULL]),
         ...SCRUM586_FILES.map((file) => [file, FULL]),
         ...COVERAGE_SERVICE_FILES.map((file) => [file, FULL]),
+        ...COVERAGE_COMPONENT_FILES.map((file) => [file, FULL]),
       ]),
     },
   },

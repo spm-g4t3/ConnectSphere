@@ -149,3 +149,29 @@ describe("Open in My Events lands on the event", () => {
     expect(screen.getByTestId("landed")).toHaveTextContent(JSON.stringify({ focusEventRequestId: "e1" }));
   });
 });
+
+describe("SCRUM-162 AC3: Needs your response lists the nearest deadline first", () => {
+  it("SCRUM162_AC3_orders_clarifications_by_reply_by_day_else_event_start_with_no_date_last", async () => {
+    const clarification = (id, eventName, extra) => ({
+      ...event(id, "approved", eventName),
+      status: "pending_clarification",
+      statusDisplay: { status: "pending_clarification", label: "Awaiting your response", group: "UNDER_REVIEW", description: "" },
+      ...extra,
+    });
+    renderDashboard([
+      clarification("e2", "Reply by 2099", { clarificationReplyByDate: "2099-03-01" }),
+      clarification("e1", "No date at all", { proposedStart: null }),
+      clarification("e3", "Starts 2098", { proposedStart: "2098-06-01T10:00:00+08:00" }),
+      clarification("e4", "Reply by 2097", { clarificationReplyByDate: "2097-01-01" }),
+      clarification("e5", "Also no date", { proposedStart: null }),
+    ]);
+
+    const section = (await screen.findByRole("heading", { name: "Needs your response" })).closest("section");
+    await within(section).findByText("Reply by 2097");
+    expect(within(section).getAllByRole("listitem").map((row) => row.querySelector("strong").textContent))
+      .toEqual(["Reply by 2097", "Starts 2098", "Reply by 2099", "No date at all", "Also no date"]);
+    const noDateRow = within(section).getByText("No date at all").closest("li");
+    expect(within(noDateRow).getByText("Amend before event starts")).toBeInTheDocument();
+    expect(within(noDateRow).getByText("Date not set")).toBeInTheDocument();
+  });
+});

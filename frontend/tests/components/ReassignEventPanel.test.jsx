@@ -13,7 +13,8 @@
 // asserted the old caller-based filter, so no existing test moved with it.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { StrictMode } from "react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import ReassignEventPanel from "../../src/components/ReassignEventPanel.jsx";
@@ -22,7 +23,7 @@ import {
   listCoordinatorWorkload,
   reassignEventRequest,
 } from "../../src/services/eventRequestService";
-import { httpError } from "../helpers/async.js";
+import { deferred, httpError } from "../helpers/async.js";
 
 vi.mock("../../src/auth/AuthContext", () => ({ useAuth: vi.fn() }));
 vi.mock("../../src/services/eventRequestService", () => ({
@@ -206,5 +207,89 @@ describe("SCRUM444_AC3 every message on the path, true for the Lead", () => {
       expect(alert).not.toHaveTextContent(/yours|assigned to you/i);
       view.unmount();
     }
+  });
+});
+
+
+describe("SCRUM486_AC6 a load that is no longer wanted", () => {
+  // StrictMode runs the load effect twice, as the app does in development: the
+  // first load is cancelled, so its answer must be dropped whenever it lands.
+  function renderStrict() {
+    vi.mocked(useAuth).mockReturnValue({ user: { id: LEAD, role: "event_coordinator_lead" } });
+    render(
+      <StrictMode>
+        <ReassignEventPanel request={REQUEST} onCancel={vi.fn()} onReassigned={vi.fn()} />
+      </StrictMode>,
+    );
+  }
+
+  it("SCRUM486_AC6_a_superseded_list_arriving_late_does_not_replace_the_current_one", async () => {
+    const stale = deferred();
+    vi.mocked(listCoordinatorWorkload)
+      .mockReturnValueOnce(stale.promise)
+      .mockResolvedValueOnce(WORKLOAD);
+    renderStrict();
+
+    expect(await optionNames()).toEqual(["Omar Okafor, 1 active event", "Mei Tan, 0 active events"]);
+    await act(async () => stale.resolve([{ id: THIRD, fullName: "Stale Name", activeEvents: 9 }]));
+
+    expect(await optionNames()).toEqual(["Omar Okafor, 1 active event", "Mei Tan, 0 active events"]);
+    expect(listCoordinatorWorkload).toHaveBeenCalledTimes(2);
+  });
+
+  it("SCRUM486_AC6_a_superseded_load_failing_late_shows_no_error", async () => {
+    const stale = deferred();
+    vi.mocked(listCoordinatorWorkload)
+      .mockReturnValueOnce(stale.promise)
+      .mockResolvedValueOnce(WORKLOAD);
+    renderStrict();
+
+    await screen.findByLabelText("Hand over to");
+    await act(async () => stale.reject(httpError(500)));
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Hand over to")).toBeInTheDocument();
+  });
+});
+
+
+describe("SCRUM444_AC3 failures with no server answer", () => {
+  it("SCRUM444_AC3_a_list_that_fails_without_a_status_says_so_and_offers_try_again", async () => {
+    vi.mocked(listCoordinatorWorkload).mockRejectedValueOnce(new Error("Network Error"));
+    const user = userEvent.setup();
+    renderAs(LEAD, "event_coordinator_lead");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("The list of coordinators could not be loaded.");
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+
+    expect(await optionNames()).toEqual(["Omar Okafor, 1 active event", "Mei Tan, 0 active events"]);
+    expect(listCoordinatorWorkload).toHaveBeenCalledTimes(2);
+  });
+
+  it("SCRUM444_AC3_a_handover_that_fails_without_a_status_says_try_again", async () => {
+    vi.mocked(reassignEventRequest).mockRejectedValue(new Error("Network Error"));
+    const user = userEvent.setup();
+    renderAs(LEAD, "event_coordinator_lead");
+
+    await user.selectOptions(await screen.findByLabelText("Hand over to"), OTHER);
+    await user.click(screen.getByRole("button", { name: "Confirm handover" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("The event could not be handed over. Please try again.");
+    expect(screen.getByRole("button", { name: "Confirm handover" })).toBeEnabled();
+  });
+});
+
+
+describe("SCRUM334 the handover needs a coordinator", () => {
+  it("SCRUM334_submitting_without_a_choice_sends_nothing_and_asks_for_one", async () => {
+    renderAs(LEAD, "event_coordinator_lead");
+    const select = await screen.findByLabelText("Hand over to");
+    expect(screen.getByRole("button", { name: "Confirm handover" })).toBeDisabled();
+
+    // The disabled button is the first guard; this is the one behind it.
+    fireEvent.submit(select.closest("form"));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Choose who to hand this event to.");
+    expect(reassignEventRequest).not.toHaveBeenCalled();
   });
 });

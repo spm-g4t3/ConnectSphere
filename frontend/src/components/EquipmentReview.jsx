@@ -365,7 +365,7 @@ export default function EquipmentReview() {
     setNotice(null);
     try {
       setReview(await action());
-      if (success) setNotice(success);
+      setNotice(success);
       return true;
     } catch (err) {
       (onError ?? setError)(reviewErrorMessage(err));
@@ -469,20 +469,20 @@ export default function EquipmentReview() {
     setEditorError(null);
     const actions = {
       reduce: [
-        () => reduceEquipmentReservation(eventId, reservation?.id, quantity, reason),
+        () => reduceEquipmentReservation(eventId, reservation.id, quantity, reason),
         `Reduced the ${line.name} reservation to ${quantity}.`,
       ],
       change: reducing
         ? [
-            () => reduceEquipmentReservation(eventId, reservation?.id, quantity, reason),
+            () => reduceEquipmentReservation(eventId, reservation.id, quantity, reason),
             `Reduced the ${line.name} reservation to ${quantity}.`,
           ]
         : [
-            () => reserveEquipment(eventId, line.id, quantity - (reservation?.quantity ?? 0)),
-            `Reserved ${quantity - (reservation?.quantity ?? 0)} more ${line.name}.`,
+            () => reserveEquipment(eventId, line.id, quantity - (reservation.quantity)),
+            `Reserved ${quantity - (reservation.quantity)} more ${line.name}.`,
           ],
       release: [
-        () => releaseEquipmentReservation(eventId, reservation?.id, reason),
+        () => releaseEquipmentReservation(eventId, reservation.id, reason),
         `Released the ${line.name} reservation.`,
       ],
     };

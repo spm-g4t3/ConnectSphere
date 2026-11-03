@@ -108,37 +108,33 @@ function fieldLabel(key) {
  * rows that may predate any given shape. IT MUST NOT THROW -- a single
  * unexpected value would otherwise blank the whole history panel, which is
  * the one place a Venue Staff member can find out what happened to a venue.
- * Hence the outermost try/catch and the String() of last resort.
+ * Every branch below handles any value JSON can carry, so none can throw.
  */
 function fmt(value) {
-  try {
-    if (value === null || value === undefined) return "not set";
+  if (value === null || value === undefined) return "not set";
 
-    if (Array.isArray(value)) {
-      if (value.length === 0) return "none";
+  if (Array.isArray(value)) {
+    if (value.length === 0) return "none";
 
-      // operating_hours: [{day_of_week, opens_at, closes_at}, ...]
-      if (value.every((entry) => entry && typeof entry === "object")) {
-        return value
-          .map((entry) => {
-            if (entry.opens_at === undefined || entry.closes_at === undefined) {
-              return JSON.stringify(entry);
-            }
-            return formatHoursEntry(entry);
-          })
-          .join("; ");
-      }
-
-      // The code arrays: layouts, accessibility features, facilities.
-      return value.join(", ");
+    // operating_hours: [{day_of_week, opens_at, closes_at}, ...]
+    if (value.every((entry) => entry && typeof entry === "object")) {
+      return value
+        .map((entry) => {
+          if (entry.opens_at === undefined || entry.closes_at === undefined) {
+            return JSON.stringify(entry);
+          }
+          return formatHoursEntry(entry);
+        })
+        .join("; ");
     }
 
-    if (typeof value === "object") return JSON.stringify(value);
-
-    return String(value);
-  } catch {
-    return String(value);
+    // The code arrays: layouts, accessibility features, facilities.
+    return value.join(", ");
   }
+
+  if (typeof value === "object") return JSON.stringify(value);
+
+  return String(value);
 }
 
 // Per-field renderers, for a column whose raw value reads badly through fmt:
@@ -155,17 +151,12 @@ const HISTORY_VALUE_FORMATTERS = {
 
 /**
  * One history value, rendered with its field's formatter when it has one.
- * Wrapped for the same reason fmt is: a formatter that throws must cost one
- * prettier string, not the panel.
+ * The formatters handle any value themselves (formatTurnaround catches its
+ * own errors), so there is nothing here to catch.
  */
 function fmtField(key, value) {
   const formatter = HISTORY_VALUE_FORMATTERS[key];
-  if (!formatter) return fmt(value);
-  try {
-    return formatter(value);
-  } catch {
-    return fmt(value);
-  }
+  return formatter ? formatter(value) : fmt(value);
 }
 
 export default function VenueDetail({ venue, headingRef }) {
