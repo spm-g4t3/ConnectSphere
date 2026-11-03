@@ -11,7 +11,7 @@
 //
 // Timezone-safe: dates are built from fixed instants via toDatetimeLocalValue
 // and set with fireEvent.change; payloads are checked by offset shape and
-// getTime(); expected text comes from formatRange, never a hard-coded
+// getTime(); expected text comes from formatVenuePeriod, never a hard-coded
 // wall-clock string.
 //
 // SCRUM-185 (for SCRUM-178 AC1) adds "Include retired venues": shown by role,
@@ -28,8 +28,7 @@ import { MemoryRouter, Route, Routes, useLocation, useParams } from "react-route
 
 import VenueSearch from "../../src/components/VenueSearch.jsx";
 import { searchActiveVenues } from "../../src/services/venueService";
-import { deviceTimeZoneLabel, toDatetimeLocalValue } from "../../src/services/datetimeFormat.js";
-import { formatRange } from "../../src/services/displayFormat.js";
+import { deviceTimeZoneLabel, formatVenuePeriod, toDatetimeLocalValue } from "../../src/services/datetimeFormat.js";
 import { toCalendarDateParam } from "../../src/services/calendarRange.js";
 import { deferred, httpError } from "../helpers/async.js";
 
@@ -38,7 +37,7 @@ vi.mock("../../src/services/venueService", () => ({
 }));
 
 const OFFSET_SUFFIX = /[+-]\d{2}:\d{2}$|Z$/;
-const GENERIC_ERROR = "Could not load venues. Please try again.";
+const GENERIC_ERROR = "Could not load venues.";
 const EMPTY_STATE = "No active venues match your search.";
 
 const HALL = { id: "v1", name: "Hall A", location: "Level 2", maxCapacity: 200 };
@@ -56,7 +55,7 @@ function local(iso) {
 function noteFor(startIso, endIso) {
   // SCRUM-484 (AC7): the note now names bookings and the venues' setup and
   // turnaround, which search counts too.
-  return `Venues booked or blocked between ${formatRange(startIso, endIso)} are not shown, including each venue's setup and turnaround.`;
+  return `Venues booked or blocked between ${formatVenuePeriod(startIso, endIso)} are not shown, including each venue's setup and turnaround.`;
 }
 
 function ReviewQueueProbe() {
@@ -1061,9 +1060,9 @@ describe("SCRUM178_AC1 VenueSearch include retired venues (SCRUM-185)", () => {
 
       const badge = within(resultFor("Old Annex")).getByText("Retired");
       expect(badge.tagName).toBe("SPAN");
-      expect(badge).toHaveClass("venue-search__badge");
+      expect(badge).toHaveClass("ui-status-badge", "ui-status-badge--neutral");
       expect(within(resultFor("Hall A")).queryByText("Retired")).not.toBeInTheDocument();
-      expect(document.querySelectorAll(".venue-search__badge")).toHaveLength(1);
+      expect(document.querySelectorAll(".ui-status-badge")).toHaveLength(1);
       expect(resultFor("Old Annex")).toHaveTextContent(`— ${OLD.location}, seats up to ${OLD.maxCapacity}`);
     });
 

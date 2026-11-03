@@ -1,7 +1,7 @@
 // VenueSuitabilityPanel.test.jsx
 //
 // SCRUM-191 (SCRUM-188 AC1/AC2). The panel that runs one suitability check:
-// loading, then the result; a failure with "Check again"; and "Request this
+// loading, then the result; a failure with "Try again"; and "Request this
 // venue", which hands the result to the parent. venueSuitabilityService is
 // mocked, so nothing touches the network.
 
@@ -118,7 +118,7 @@ describe("SCRUM-191 a failed check", () => {
     const { user } = renderPanel();
 
     await screen.findByRole("alert");
-    await user.click(screen.getByRole("button", { name: "Check again" }));
+    await user.click(screen.getByRole("button", { name: "Try again" }));
 
     expect(await screen.findByText("Not suitable")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();

@@ -151,7 +151,7 @@ function BookingSuitability({ item, headingLevel }) {
       {current && (
         <details className="event-venue-suitability__details" open={!suitable}>
           <summary>Criteria for {name}</summary>
-          <VenueSuitabilityResult result={current} overridden={overridden} />
+          <VenueSuitabilityResult result={current} overridden={overridden} headingLevel={headingLevel + 1} />
         </details>
       )}
     </li>

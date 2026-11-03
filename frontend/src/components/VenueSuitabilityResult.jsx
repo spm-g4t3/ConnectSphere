@@ -59,7 +59,9 @@ function metText(criterion, overriddenNames) {
     : "Not met";
 }
 
-export default function VenueSuitabilityResult({ result, overridden, subject }) {
+// headingLevel: "Checked against", one under the heading this result sits under.
+export default function VenueSuitabilityResult({ result, overridden, subject, headingLevel = 4 }) {
+  const Heading = `h${headingLevel}`;
   const overriddenNames = Array.isArray(overridden) ? overridden : [];
   const criteria = Array.isArray(result?.criteria) ? result.criteria : [];
   const checked = result?.checked ?? {};
@@ -109,7 +111,7 @@ export default function VenueSuitabilityResult({ result, overridden, subject }) 
         })}
       </ul>
 
-      <h4>Checked against</h4>
+      <Heading>Checked against</Heading>
       <dl className="venue-suitability__checked">
         {checkedRows.map(({ term, value }) => (
           <div key={term} className="venue-suitability__checked-row">

@@ -406,8 +406,8 @@ describe("SCRUM586 AC7 focus after a step that replaces its own button", () => {
 
 const SRC = resolve(dirname(fileURLToPath(import.meta.url)), "../../src");
 
-// Every file this story aligned: the list screens, the event screen and the
-// pages it swaps in.
+// Every file this story aligned: the list screens, the event screen, the
+// pages it swaps in and the Find a Venue screens.
 const SCOPED_FILES = [
   "components/EventCoordinatorDashboard.jsx",
   "components/ReviewQueue.jsx",
@@ -425,6 +425,11 @@ const SCOPED_FILES = [
   "components/EventConfirmationPanel.jsx",
   "components/SafetyCheckSubmissionPanel.jsx",
   "components/ui/Tabs.jsx",
+  "components/VenueSearch.jsx",
+  "components/EventVenueFinder.jsx",
+  "components/BookingRequestPanel.jsx",
+  "components/VenueSuitabilityPanel.jsx",
+  "components/VenueSuitabilityResult.jsx",
 ];
 
 /** Calls to the browser's own dialogs, bare or through window, comments left out. */
@@ -498,6 +503,27 @@ describe("SCRUM586 AC8 the 360px rules", () => {
     expect(rulesFor(".dashboard--coordinator .reassign-event__form label", APP_CSS)).toMatch(/min-width:\s*0/);
     expect(rulesFor(".dashboard--coordinator .reassign-event__form select", APP_CSS)).toMatch(/min-width:\s*0/);
     expect(rulesFor(".dashboard--coordinator .ui-confirm-dialog .ui-confirm-dialog__actions", narrowRules(APP_CSS))).toMatch(/flex-wrap:\s*wrap/);
+  });
+
+  it("SCRUM586_AC8_find_a_venue_controls_are_44px_targets_at_phone_width", () => {
+    const narrow = narrowRules(APP_CSS);
+    // /venue-search sits outside the coordinator's dashboard wrapper, so it has rules of its own.
+    expect(rulesFor(".venue-search :is(button, select, input:not([type=\"checkbox\"], [type=\"radio\"]))", narrow)).toMatch(/min-height:\s*44px/);
+    expect(rulesFor(".venue-search :is(.venue-search__calendar-link, .venue-search__context > .ui-button--link)", narrow)).toMatch(/min-height:\s*44px/);
+    const checkboxRows = narrow.split("\n").filter((line) => line.includes('label:has(> input') && /min-height:\s*44px/.test(line)).join("\n");
+    for (const group of [".event-venue-finder__group", ".booking-request__warning", ".venue-search__retired"]) {
+      expect(checkboxRows).toContain(group);
+    }
+  });
+
+  it("SCRUM586_AC8_find_a_venue_rows_and_panels_fit_the_width", () => {
+    for (const selector of [".venue-search__results li", ".booking-request", ".venue-suitability-panel"]) {
+      expect(rulesFor(selector, APP_CSS)).toMatch(/overflow-wrap:\s*anywhere/);
+    }
+    const narrow = narrowRules(APP_CSS);
+    expect(rulesFor(".booking-request__details", narrow)).toMatch(/grid-template-columns:\s*1fr/);
+    expect(rulesFor(".venue-search__window", narrow)).toMatch(/grid-template-columns:\s*1fr/);
+    expect(rulesFor(".dashboard--coordinator .coordinator-request-detail .event-venue-finder__result-row", narrow)).toMatch(/grid-template-columns:\s*1fr/);
   });
 
   it("SCRUM586_AC8_the_list_screen_sections_carry_the_class_the_rules_target", async () => {

@@ -1,6 +1,6 @@
 // scrum586CoordinatorPageRoutes.test.jsx
 //
-// Pins App.jsx's `asPage` on the Coordinator's three list routes, and the
+// Pins App.jsx's `asPage` on the Coordinator's list routes and Find a Venue, and the
 // event page's h1 and wide wrapper: the component tests pass asPage
 // themselves, so only the real routes can show a page lost its h1. A page the
 // event screen swaps in keeps that one h1: it is the h1 on the event's own
@@ -102,6 +102,14 @@ describe("SCRUM586_AC2 the Coordinator's page routes", () => {
     const titles = screen.getAllByRole("heading", { level: 1 });
     expect(titles).toHaveLength(1);
     expect(titles[0]).toHaveTextContent(title);
+  });
+
+  // Venue Staff share the page, so it keeps its one h1 for them too.
+  it.each(["event_coordinator", "venue_staff"])("SCRUM586_AC2_the_find_a_venue_route_renders_one_h1 (%s)", async (role) => {
+    renderAppAt("/venue-search", role);
+
+    const title = await screen.findByRole("heading", { level: 1, name: "Find a venue" });
+    expect(screen.getAllByRole("heading", { level: 1 })).toEqual([title]);
   });
 
   it("SCRUM586_AC2_the_event_route_renders_the_event_name_as_its_one_h1", async () => {

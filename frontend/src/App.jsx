@@ -170,7 +170,7 @@ function AppRoutes() {
           path="/venue-search"
           element={
             <ProtectedRoute allowedRoles={["event_coordinator", "venue_staff"]}>
-              <VenueSearch role={user?.role} userId={user?.id} />
+              <VenueSearch asPage role={user?.role} userId={user?.id} />
             </ProtectedRoute>
           }
         />

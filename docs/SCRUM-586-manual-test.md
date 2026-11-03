@@ -87,6 +87,25 @@ Check each row on a laptop browser. Mark ✅ or ❌ and write a note for anythin
 | 37 | Each action sends what it did before: the same status changes, the same people are told, and nothing is cancelled or un-booked on its own. | |
 | 38 | No step opens the browser's own confirm, alert or prompt box. | |
 
+## Find a Venue
+
+The shared project has a venue named "Meeting room" in Singapore; if yours does not, add one in Venue Catalogue as Venue Staff first. Use the approved event with a venue request for the event-page rows.
+
+| # | Check | Result |
+|---|---|---|
+| 39 | `/venue-search` has one large title, "Find a venue". Type "meeting" in "Venue name or location" and press Search venues: "Meeting room" is listed. "MEETING ROOM" and "singapore" find it too. | |
+| 40 | Search "nothing-matches": "No active venues match your search." with what to try next. Tick Include retired venues and search again: a retired venue shows a grey Retired badge. | |
+| 41 | Set From and To and search: the note under the form gives the period with "(Singapore time)". Clear dates empties both. | |
+| 42 | With the backend stopped, search: "Could not load venues." with Try again and no "Please try again." Start the backend: Try again lists the venues. | |
+| 43 | Signed in as Venue Staff, `/venue-search` looks and searches the same, with one large title. | |
+| 44 | Event page, Venues tab: "Find a venue" is a section heading; each result's name, "Suitability of (venue)" and "Request (venue)" are one level under it. Search venues is the filled button; Check suitability, Request this venue, Check another venue, Close and Cancel are outlined. | |
+| 45 | Check suitability on a too-small venue: the result shows Not suitable and "Checked against". Request this venue from there shows the warning and the tick box; nothing is sent until you tick it. | |
+| 46 | Send a request: "Request sent to Venue Staff for (venue). Its status is Pending" with an amber Pending badge. That row's Request this venue is now off with its reason. | |
+| 47 | With the backend stopped, open Check another venue: "Could not load the list of venues." with Try again. Check suitability on a result: "Could not check this venue." with Try again. Send a request: the error has no Try again. | |
+| 48 | Keyboard: Check suitability or Request this venue puts focus on the panel's title. Close or Cancel puts it back on the button you pressed (Cancel after a check goes to that row's Request this venue). After a request is sent, focus is on "Request sent…"; Close then puts it on the results list (the row's button is off). | |
+| 49 | Keyboard: pressing Search venues on either screen leaves focus on Search venues; the results are not jumped to. | |
+| 50 | At 360px wide: `/venue-search` and the Venues tab have no sideways scrolling. The inputs, date and time fields, each Accessibility features and Facilities checkbox row, Include retired venues, View calendar and every button are at least 44px tall. A long venue name wraps, and the request panel's details stack. | |
+
 ## Found and fixed during the test
 
 -
