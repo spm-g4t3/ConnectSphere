@@ -49,7 +49,11 @@
 .equipment-catalogue { overflow-wrap: anywhere; }
 /* In the table only a long name may break mid-word; other cells wrap at spaces. */
 .equipment-table :is(th, td) { overflow-wrap: break-word; }
-.equipment-table td:first-child { min-width: 8em; overflow-wrap: anywhere; }
+.equipment-table:where(:not(.equipment-table--history)) td:first-child { min-width: 8em; overflow-wrap: anywhere; }
+/* A history note and a change (it can carry a user-entered type name) are free text, so one very long word
+   must wrap inside the card at every width, not push the page wider. Only the change and note columns break
+   mid-word, so the date and name columns keep their width. */
+.equipment-table--history td:is(:nth-child(2), :nth-child(3)) { overflow-wrap: anywhere; }
 
 /* Eight columns and the actions cannot fit a narrow screen, so up to 1080px wide each type is a
    card: the name on top, then each figure with its column name (data-label). The
@@ -60,8 +64,6 @@
   .equipment-catalogue > section > .equipment-table :is(tbody, tr, td) { display: block; }
   .equipment-catalogue > section > .equipment-table tr { border-top: 1px solid var(--color-line); padding: var(--space-3) 0; }
   .equipment-catalogue > section > .equipment-table td { border: 0; min-width: 0; padding: 2px 0; text-align: left; }
-  /* The history table keeps its columns, so long words in it break anywhere too. */
-  .equipment-catalogue .equipment-table td { overflow-wrap: anywhere; }
   .equipment-catalogue > section > .equipment-table td[data-label]::before { color: var(--color-muted); content: attr(data-label) ": "; font-size: var(--font-size-sm); }
   .equipment-catalogue > section > .equipment-table .equipment-table__actions { margin-top: var(--space-2); min-width: 0; }
 }
