@@ -90,33 +90,38 @@ function AvailabilityResult({ result }) {
           {reservations.length === 0 ? (
             <p>No reservations overlap this period.</p>
           ) : (
-            <div className="availability-reservations__scroll" role="region" aria-label="Overlapping reservations" tabIndex={0}>
-            <table className="availability-reservations">
-              <thead>
-                <tr>
-                  <th>Event</th>
-                  <th>Period</th>
-                  <th className="availability-reservations__number">Quantity</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {reservations.map((reservation) => (
-                  <tr key={reservation.id}>
-                    <td>{reservation.eventName}</td>
-                    <td>{formatDateTimeRange(reservation.startAt, reservation.endAt)}</td>
-                    <td className="availability-reservations__number">{reservation.quantity}</td>
-                    <td>
-                      {reservation.flagged ? (
-                        <StatusBadge tone="danger">Flagged for review</StatusBadge>
-                      ) : (
-                        <StatusBadge tone="success">Reserved</StatusBadge>
-                      )}
-                    </td>
+            <div
+              className="availability-reservations__scroll"
+              role="region"
+              aria-label="Overlapping reservations"
+              tabIndex={0}
+            >
+              <table className="availability-reservations">
+                <thead>
+                  <tr>
+                    <th>Event</th>
+                    <th>Period</th>
+                    <th className="availability-reservations__number">Quantity</th>
+                    <th>Status</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {reservations.map((reservation) => (
+                    <tr key={reservation.id}>
+                      <td>{reservation.eventName}</td>
+                      <td>{formatDateTimeRange(reservation.startAt, reservation.endAt)}</td>
+                      <td className="availability-reservations__number">{reservation.quantity}</td>
+                      <td>
+                        {reservation.flagged ? (
+                          <StatusBadge tone="danger">Flagged for review</StatusBadge>
+                        ) : (
+                          <StatusBadge tone="success">Reserved</StatusBadge>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </>
