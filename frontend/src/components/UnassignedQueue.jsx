@@ -25,26 +25,38 @@
 
 import { useState } from "react";
 import { listUnassignedEventRequests } from "../services/eventRequestService";
-import { formatRange } from "../services/displayFormat";
+import { formatDateTimeRange } from "../services/displayFormat";
 import { describeWaiting } from "../services/waitingTime";
 import AssignCoordinatorPanel from "./AssignCoordinatorPanel";
+import Button from "./ui/Button";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import LoadingText from "./ui/LoadingText";
 import UnassignedRequestCancelPanel from "./UnassignedRequestCancelPanel";
+import useFocusAfterRetry from "./useFocusAfterRetry";
 import useListRead from "./useListRead";
+import useReturnFocus from "./useReturnFocus";
 import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
 
 // 403 has its own words, as in ReviewQueue: it means the account is not a
 // Lead, an administration problem, not a breakage.
 const QUEUE_ERROR_MESSAGES = {
   403: "Only the Event Coordinator Lead can see the unassigned queue.",
-  500: "The unassigned queue could not be loaded. Please try again.",
+  500: "The unassigned queue could not be loaded.",
 };
+
+function openerKey(panel) {
+  return `${panel.kind}:${panel.request.id}`;
+}
 
 /**
  * @param {object} props
  * @param {Function} [props.now]  the clock "waiting" is measured against;
  *                                injected by tests, the reader's otherwise
+ * @param {boolean} [props.asPage]  true at /unassigned-queue, where the title
+ *                                  is the page's h1; on the dashboard it is h2
  */
-export default function UnassignedQueue({ now = () => new Date() }) {
+export default function UnassignedQueue({ now = () => new Date(), asPage = false }) {
   // The open panel, { kind: "assign" | "cancel", request }, or null for the
   // list: one state, so only one panel can be open.
   const [panel, setPanel] = useState(null);
@@ -55,71 +67,96 @@ export default function UnassignedQueue({ now = () => new Date() }) {
     data: queue,
     loading,
     error,
+    retryable,
     load: fetchQueue,
   } = useListRead(listUnassignedEventRequests, {
     messages: QUEUE_ERROR_MESSAGES,
-    fallback: "The unassigned queue could not be loaded. Please try again.",
+    fallback: "The unassigned queue could not be loaded.",
   });
 
   // Refetch when the Lead comes back to the tab, as ReviewQueue does: new
   // requests arrive, and other Leads assign them, while nobody is looking.
   useRefetchOnReturn(fetchQueue);
 
+  // Keyed by "assign:id" or "cancel:id", so focus goes back to the button that
+  // opened the panel, or to the title once that row has left the list.
+  const { listHeadingRef, rowRef, returnFocusTo } = useReturnFocus(panel && openerKey(panel), loading);
+  const { headingRef: retryHeadingRef, retry } = useFocusAfterRetry(fetchQueue);
+  function titleRef(node) {
+    listHeadingRef.current = node;
+    retryHeadingRef.current = node;
+  }
+
   // Back to the list, re-read either way. After an assignment the row has
   // gone; after a cancel the list may still be stale, and after a lost race
   // (AC4) the row the Lead was looking at belongs to someone else now.
   function closePanel(message = null) {
+    returnFocusTo(openerKey(panel));
     setPanel(null);
     setConfirmation(message);
     fetchQueue();
   }
 
-  if (panel?.kind === "assign") {
-    return (
-      <section>
-        <button className="unassigned-queue__back" onClick={() => closePanel()}>
-          &larr; Back to the unassigned queue
-        </button>
-        <AssignCoordinatorPanel
-          request={panel.request}
-          onCancel={() => closePanel()}
-          onAssigned={(_updated, chosen) =>
-            closePanel(
-              `${panel.request.eventName} was assigned to ${chosen?.fullName ?? "the coordinator you chose"}.`,
-            )
-          }
-        />
-      </section>
-    );
-  }
+  const Title = asPage ? "h1" : "h2";
 
-  if (panel?.kind === "cancel") {
+  // Both panels share one back link, drawn here. On its own page the h1 stays
+  // above the panel, so the page keeps its one h1 and the panel's h2 sits under it.
+  if (panel) {
     return (
       <section>
-        <UnassignedRequestCancelPanel
-          request={panel.request}
-          onCancel={() => closePanel()}
-          onCancelled={() => closePanel(`${panel.request.eventName} was cancelled. The organiser has been told.`)}
-        />
+        {asPage && <h1>Unassigned queue</h1>}
+        <Button variant="link" onClick={() => closePanel()}>
+          &larr; Back to the unassigned queue
+        </Button>
+        {panel.kind === "assign" ? (
+          <AssignCoordinatorPanel
+            request={panel.request}
+            now={now}
+            onCancel={() => closePanel()}
+            onAssigned={(_updated, chosen) =>
+              closePanel(
+                `${panel.request.eventName} was assigned to ${chosen?.fullName ?? "the coordinator you chose"}.`,
+              )
+            }
+          />
+        ) : (
+          <UnassignedRequestCancelPanel
+            request={panel.request}
+            onCancelled={() => closePanel(`${panel.request.eventName} was cancelled. The organiser has been told.`)}
+          />
+        )}
       </section>
     );
   }
 
   return (
     <section className="unassigned-queue">
-      <h2>Unassigned queue</h2>
+      {/* Counted only after a read succeeds, so a loading or failed list is never counted. */}
+      <Title ref={titleRef} tabIndex={-1}>
+        Unassigned queue
+        {!loading && !error && (
+          <>
+            {" "}
+            <span className="unassigned-queue__count">({queue.length})</span>
+          </>
+        )}
+      </Title>
 
-      {confirmation && <p role="status">{confirmation}</p>}
-      {loading && <p>Loading...</p>}
-      {error && (
-        <p className="unassigned-queue__error" role="alert">
-          {error}
+      {confirmation && (
+        <p role="status" className="unassigned-queue__confirmation">
+          {confirmation}
         </p>
       )}
+      {loading && <LoadingText />}
+      {/* Hidden while a read is in flight, so Try again cannot start a second one. */}
+      {error && !loading && <ErrorNotice message={error} onRetry={retryable ? retry : undefined} />}
       {/* AC2-08. Nothing waiting is the good state, and it is said, never
           left as an empty card that could be mistaken for a failed load. */}
       {!loading && !error && queue.length === 0 && (
-        <p>No event requests are waiting for a coordinator.</p>
+        <EmptyState
+          message="No event requests are waiting for a coordinator."
+          nextStep="New requests appear here when organisers submit them."
+        />
       )}
 
       {/* Oldest submission first, as the server orders it; not re-sorted. */}
@@ -129,13 +166,13 @@ export default function UnassignedQueue({ now = () => new Date() }) {
             <div>
               <strong>{request.eventName}</strong>
               <p>Organiser: {request.organiserName ?? "No name on record"}</p>
-              <p>{formatRange(request.proposedStart, request.proposedEnd, "not set")}</p>
+              <p>{formatDateTimeRange(request.proposedStart, request.proposedEnd, "not set")}</p>
               <p>Expected attendance: {request.expectedAttendance ?? "not given"}</p>
               <p className="unassigned-queue__waiting">{describeWaiting(request.submittedAt, now())}</p>
             </div>
             <div className="unassigned-queue__actions">
-              <button
-                type="button"
+              <Button
+                ref={rowRef(`assign:${request.id}`)}
                 aria-label={`Assign ${request.eventName}`}
                 onClick={() => {
                   setConfirmation(null);
@@ -143,10 +180,10 @@ export default function UnassignedQueue({ now = () => new Date() }) {
                 }}
               >
                 Assign
-              </button>
-              <button
-                type="button"
-                className="unassigned-queue__cancel"
+              </Button>
+              <Button
+                ref={rowRef(`cancel:${request.id}`)}
+                variant="danger"
                 aria-label={`Cancel ${request.eventName}`}
                 onClick={() => {
                   setConfirmation(null);
@@ -154,7 +191,7 @@ export default function UnassignedQueue({ now = () => new Date() }) {
                 }}
               >
                 Cancel request
-              </button>
+              </Button>
             </div>
           </li>
         ))}

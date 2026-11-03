@@ -12,11 +12,14 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 import AssignedEvents from "../../src/components/AssignedEvents.jsx";
 import { listAssignedEventsForLead } from "../../src/services/eventRequestService";
-import { formatTimestamp } from "../../src/services/displayFormat";
+import { formatDateTime } from "../../src/services/displayFormat";
 import { httpError } from "../helpers/async.js";
 
+// The page's other two reads, answered so that only the list is under test here.
 vi.mock("../../src/services/eventRequestService", () => ({
   listAssignedEventsForLead: vi.fn(),
+  listCoordinatorOverview: vi.fn().mockResolvedValue({ statuses: [], coordinators: [] }),
+  listUnassignedEventRequests: vi.fn().mockResolvedValue([]),
 }));
 
 const HELD_BY_A = {
@@ -66,8 +69,8 @@ describe("SCRUM486_AC6 the Lead's list of assigned events", () => {
 
     expect(within(first).getByText("Organiser: Aisha Rahman")).toBeInTheDocument();
     expect(within(first).getByText("Coordinator: Priya Nair")).toBeInTheDocument();
-    expect(within(first).getByText("Planning")).toHaveClass("status-badge", "status--approved");
-    expect(within(first).getByText(formatTimestamp(HELD_BY_A.proposedStart))).toBeInTheDocument();
+    expect(within(first).getByText("Planning")).toHaveClass("ui-status-badge", "ui-status-badge--success");
+    expect(within(first).getByText(formatDateTime(HELD_BY_A.proposedStart))).toBeInTheDocument();
     // The server's order is kept: earliest first, undated last.
     expect(within(second).getByText("Freshers Welcome")).toBeInTheDocument();
     expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
@@ -101,6 +104,9 @@ describe("SCRUM486_AC6 the Lead's list of assigned events", () => {
     vi.mocked(listAssignedEventsForLead).mockReturnValue(new Promise((r) => { resolve = r; }));
 
     renderList();
+    // The count and the coordinators answer first, so the one left loading is the list.
+    await screen.findByText("No requests are waiting for a coordinator.");
+    await screen.findByText("There are no Event Coordinators.");
 
     expect(screen.getByText("Loading...")).toBeInTheDocument();
     resolve([]);
@@ -118,7 +124,7 @@ describe("SCRUM486_AC6 the Lead's list of assigned events", () => {
 
   it.each([
     [403, "Only the Event Coordinator Lead can see the assigned events."],
-    [502, "The assigned events could not be loaded. Please try again."],
+    [502, "The assigned events could not be loaded."],
   ])("SCRUM486_AC6_a_%s_is_said_and_shows_no_empty_state", async (status, message) => {
     vi.mocked(listAssignedEventsForLead).mockRejectedValue(httpError(status));
 
@@ -133,6 +139,6 @@ describe("SCRUM486_AC6 the Lead's list of assigned events", () => {
 
     renderList();
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("The assigned events could not be loaded. Please try again.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("The assigned events could not be loaded.");
   });
 });

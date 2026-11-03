@@ -85,7 +85,7 @@ describe("SCRUM487_AC4 the unassigned count at the top of the overview", () => {
 
     renderOverview();
 
-    expect(within(await countBlock()).getByText("Counting the requests waiting for a coordinator...")).toBeInTheDocument();
+    expect(within(await countBlock()).getByText("Loading...")).toBeInTheDocument();
   });
 
   it("SCRUM487_AC4_a_failed_count_is_said_and_the_events_list_still_loads", async () => {

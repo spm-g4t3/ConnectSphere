@@ -15,9 +15,13 @@
 // polite status, not an alert: the number is a pointer to another page, and
 // the alert on this page is kept for the events list it is about.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { canRetryRead } from "../services/apiErrors";
 import { listUnassignedEventRequests } from "../services/eventRequestService";
+import Button from "./ui/Button";
+import LoadingText from "./ui/LoadingText";
+import useFocusAfterRetry from "./useFocusAfterRetry";
 
 function describeCount(count) {
   if (count === 0) return "No requests are waiting for a coordinator.";
@@ -27,27 +31,43 @@ function describeCount(count) {
 
 export default function UnassignedCount() {
   const [count, setCount] = useState(null);
-  const [failed, setFailed] = useState(false);
+  const [error, setError] = useState(null); // { retryable }
+
+  // State is set only in the callbacks, so the first read sets none before it answers.
+  const load = useCallback(
+    () =>
+      listUnassignedEventRequests().then(
+        (requests) => setCount(requests.length),
+        (err) => setError({ retryable: canRetryRead(err) }),
+      ),
+    [],
+  );
 
   useEffect(() => {
-    async function load() {
-      try {
-        setCount((await listUnassignedEventRequests()).length);
-      } catch {
-        setFailed(true);
-      }
-    }
-
     load();
-  }, []);
+  }, [load]);
 
-  let text = "Counting the requests waiting for a coordinator...";
-  if (failed) text = "The number of waiting requests could not be loaded.";
-  else if (count !== null) text = describeCount(count);
+  function reload() {
+    setError(null);
+    return load();
+  }
+  // No heading of its own, so after Try again focus goes to this line's box.
+  const { headingRef, retry } = useFocusAfterRetry(reload);
 
   return (
-    <div className="assigned-events__unassigned">
-      <p role="status">{text}</p>
+    <div className="assigned-events__unassigned" ref={headingRef} tabIndex={-1}>
+      {error && (
+        <>
+          <p role="status">The number of waiting requests could not be loaded.</p>
+          {error.retryable && (
+            <Button variant="secondary" onClick={retry}>
+              Try again
+            </Button>
+          )}
+        </>
+      )}
+      {!error && count === null && <LoadingText />}
+      {!error && count !== null && <p role="status">{describeCount(count)}</p>}
       <Link to="/unassigned-queue">Open the Unassigned Queue</Link>
     </div>
   );

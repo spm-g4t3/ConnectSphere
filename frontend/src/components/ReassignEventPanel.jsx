@@ -13,18 +13,24 @@
 // checks it again under a lock. So every refusal the server can give is
 // handled below, including the ones the parent's check should make rare.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   listCoordinatorWorkload,
   reassignEventRequest,
 } from "../services/eventRequestService";
 import { coordinatorOptionLabel } from "../services/coordinatorDisplay";
+import { canRetryRead } from "../services/apiErrors";
+import Button from "./ui/Button";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import LoadingText from "./ui/LoadingText";
+import useFocusAfterRetry from "./useFocusAfterRetry";
 
 // The list is the Lead's (GET /coordinator-workload, leadOnly), so a 403 means
 // the caller is not the Lead.
 const LOAD_ERROR_MESSAGES = {
   403: "Only the Event Coordinator Lead can hand an event over.",
-  500: "The list of coordinators could not be loaded. Please try again.",
+  500: "The list of coordinators could not be loaded.",
 };
 
 // Keyed by status, as ReviewQueue's table is, and for a stronger reason: the
@@ -77,36 +83,48 @@ export default function ReassignEventPanel({
 }) {
   const [coordinators, setCoordinators] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(null);
+  const [loadError, setLoadError] = useState(null); // { message, retryable }
   const [newCoordinatorId, setNewCoordinatorId] = useState("");
   const [handoverNote, setHandoverNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState(null);
 
-  useEffect(() => {
-    let cancelled = false;
-
+  // State is set only in the callbacks, and only while isActive() holds, so an
+  // answer arriving after the panel has closed is dropped.
+  const loadCoordinators = useCallback((isActive = () => true) => {
     // The Lead's list (SCRUM-519), the only list of coordinators since SCRUM-444.
-    listCoordinatorWorkload()
+    return listCoordinatorWorkload()
       .then((data) => {
-        if (!cancelled) setCoordinators(data);
+        if (isActive()) setCoordinators(data);
       })
       .catch((err) => {
-        if (!cancelled) {
-          setLoadError(
-            LOAD_ERROR_MESSAGES[err.response?.status] ||
-              "The list of coordinators could not be loaded. Please try again.",
-          );
+        if (isActive()) {
+          setLoadError({
+            message: LOAD_ERROR_MESSAGES[err.response?.status] || "The list of coordinators could not be loaded.",
+            retryable: canRetryRead(err),
+          });
         }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (isActive()) setLoading(false);
       });
+  }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    loadCoordinators(() => !cancelled);
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [loadCoordinators]);
+
+  // Loading starts true, so only a retry needs to raise it.
+  function reloadCoordinators() {
+    setLoading(true);
+    setLoadError(null);
+    return loadCoordinators();
+  }
+  const { headingRef, retry: retryLoad } = useFocusAfterRetry(reloadCoordinators);
 
   // Whoever holds the event is left out: handing an event to its current
   // holder is refused by the server (23514, a confusing 400). Done here and
@@ -147,19 +165,25 @@ export default function ReassignEventPanel({
           this codebase, and two stacked back buttons read as a bug. Going
           back to the event, rather than out to the list, is the form's Cancel
           button, and the Cancel below the messages when there is no form. */}
-      <h2>Hand over {request.eventName}</h2>
+      <h2 ref={headingRef} tabIndex={-1}>Hand over {request.eventName}</h2>
       {/* SCRUM-444 AC4, said before the Lead commits: the coordinator who
           holds it now loses it, view and all. */}
       <p>
         The coordinator you choose becomes responsible for this event. The coordinator who holds it now will no longer be able to view or change it.
       </p>
 
-      {loading && <p>Loading coordinators...</p>}
+      {loading && <LoadingText />}
       {loadError && (
-        <p className="coordinator-clarification__error" role="alert">{loadError}</p>
+        <ErrorNotice
+          message={loadError.message}
+          onRetry={loadError.retryable ? retryLoad : undefined}
+        />
       )}
       {!loading && !loadError && choices.length === 0 && (
-        <p>There is no other Event Coordinator to hand this event to.</p>
+        <EmptyState
+          message="There is no other Event Coordinator to hand this event to."
+          nextStep="Another Event Coordinator account must be set up outside ConnectSphere before this event can be handed over."
+        />
       )}
 
       {/* When the list failed to load, or there is nobody to choose, there is
@@ -168,9 +192,9 @@ export default function ReassignEventPanel({
           instead of returning to it. */}
       {!loading && (loadError || choices.length === 0) && (
         <div className="reassign-event__actions">
-          <button type="button" onClick={onCancel}>
+          <Button variant="secondary" onClick={onCancel}>
             Back to the event
-          </button>
+          </Button>
         </div>
       )}
 
@@ -211,17 +235,16 @@ export default function ReassignEventPanel({
             Other coordinators can read this note. The Organiser cannot.
           </p>
 
-          {submitError && (
-            <p className="coordinator-clarification__error" role="alert">{submitError}</p>
-          )}
+          {/* Form errors have no Try again: submitting again is the retry. */}
+          {submitError && <ErrorNotice message={submitError} />}
 
           <div className="reassign-event__actions">
-            <button type="submit" disabled={submitting || !newCoordinatorId}>
+            <Button type="submit" disabled={submitting || !newCoordinatorId}>
               {submitting ? "Handing over..." : "Confirm handover"}
-            </button>
-            <button type="button" onClick={onCancel} disabled={submitting}>
+            </Button>
+            <Button variant="secondary" onClick={onCancel} disabled={submitting}>
               Cancel
-            </button>
+            </Button>
           </div>
         </form>
       )}

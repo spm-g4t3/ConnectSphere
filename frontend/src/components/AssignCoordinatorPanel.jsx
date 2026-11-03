@@ -25,13 +25,21 @@
 // assign_event_request (052) checks the caller is a Lead, the request is still
 // unassigned, and the person chosen is an Event Coordinator, under a lock.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { assignEventRequest, listCoordinatorWorkload } from "../services/eventRequestService";
 import { activeEventsText, coordinatorName } from "../services/coordinatorDisplay";
+import { canRetryRead } from "../services/apiErrors";
+import { formatDateTimeRange } from "../services/displayFormat";
+import { describeWaiting } from "../services/waitingTime";
+import Button from "./ui/Button";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import LoadingText from "./ui/LoadingText";
+import useFocusAfterRetry from "./useFocusAfterRetry";
 
 const LOAD_ERROR_MESSAGES = {
   403: "Only the Event Coordinator Lead can assign event requests.",
-  500: "The list of coordinators could not be loaded. Please try again.",
+  500: "The list of coordinators could not be loaded.",
 };
 
 // Keyed by status, as ReassignEventPanel's table is, and for the same reason:
@@ -65,14 +73,15 @@ function assignErrorMessage(err) {
 
 /**
  * @param {object} props
- * @param {object} props.request        the unassigned request
+ * @param {object} props.request        the unassigned request, as the queue row has it
  * @param {Function} props.onCancel     back to the queue, nothing changed
  * @param {Function} props.onAssigned   called with (updatedRequest, chosenCoordinator)
+ * @param {Function} [props.now]        the clock "waiting" is measured against, as the queue's
  */
-export default function AssignCoordinatorPanel({ request, onCancel, onAssigned }) {
+export default function AssignCoordinatorPanel({ request, onCancel, onAssigned, now = () => new Date() }) {
   const [coordinators, setCoordinators] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(null);
+  const [loadError, setLoadError] = useState(null); // { message, retryable }
   const [coordinatorId, setCoordinatorId] = useState("");
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -81,29 +90,45 @@ export default function AssignCoordinatorPanel({ request, onCancel, onAssigned }
   // taken, or no longer waiting. The form gives way to a way back.
   const [finished, setFinished] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-
+  // State is set only in the callbacks, and only while isActive() holds, so an
+  // answer arriving after the panel has closed is dropped.
+  const loadCoordinators = useCallback((isActive = () => true) =>
     listCoordinatorWorkload()
       .then((data) => {
-        if (!cancelled) setCoordinators(data);
+        if (isActive()) setCoordinators(data);
       })
       .catch((err) => {
-        if (!cancelled) {
-          setLoadError(
-            LOAD_ERROR_MESSAGES[err.response?.status] ||
-              "The list of coordinators could not be loaded. Please try again.",
-          );
+        if (isActive()) {
+          setLoadError({
+            message: LOAD_ERROR_MESSAGES[err.response?.status] || "The list of coordinators could not be loaded.",
+            retryable: canRetryRead(err),
+          });
         }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+        if (isActive()) setLoading(false);
+      }), []);
 
+  useEffect(() => {
+    let cancelled = false;
+    loadCoordinators(() => !cancelled);
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [loadCoordinators]);
+
+  // Loading starts true, so only a retry needs to raise it.
+  function reloadCoordinators() {
+    setLoading(true);
+    setLoadError(null);
+    return loadCoordinators();
+  }
+  const { headingRef, retry: retryLoad } = useFocusAfterRetry(reloadCoordinators);
+
+  // The button that opened this panel has gone, so focus starts on its title.
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, [headingRef]);
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -129,32 +154,56 @@ export default function AssignCoordinatorPanel({ request, onCancel, onAssigned }
 
   return (
     <div className="assign-coordinator">
-      <h2>Assign {request.eventName}</h2>
+      <h2 ref={headingRef} tabIndex={-1}>Assign {request.eventName}</h2>
       <p>
         The coordinator you choose becomes responsible for this request and is
         told it is theirs. The Organiser is told who their coordinator is.
       </p>
 
-      {loading && <p>Loading coordinators...</p>}
+      {/* The queue row's facts, in its words, so the Lead need not remember
+          them while choosing who should take the request. */}
+      <dl className="assign-coordinator__request">
+        <dt>Organiser</dt>
+        <dd>{request.organiserName ?? "No name on record"}</dd>
+        <dt>When</dt>
+        <dd>{formatDateTimeRange(request.proposedStart, request.proposedEnd, "not set")}</dd>
+        <dt>Expected attendance</dt>
+        <dd>{request.expectedAttendance ?? "not given"}</dd>
+        <dt>In the queue</dt>
+        <dd>{describeWaiting(request.submittedAt, now())}</dd>
+        {request.accessibilityRequirements?.trim() && (
+          <>
+            <dt>Accessibility needs</dt>
+            <dd>{request.accessibilityRequirements}</dd>
+          </>
+        )}
+      </dl>
+
+      {loading && <LoadingText />}
       {loadError && (
-        <p className="coordinator-clarification__error" role="alert">{loadError}</p>
+        <ErrorNotice
+          message={loadError.message}
+          onRetry={loadError.retryable ? retryLoad : undefined}
+        />
       )}
       {!loading && !loadError && coordinators.length === 0 && (
-        <p>There is no Event Coordinator to assign this request to.</p>
+        <EmptyState
+          message="There is no Event Coordinator to assign this request to."
+          nextStep="An Event Coordinator account must be set up outside ConnectSphere before this request can be assigned."
+        />
       )}
 
-      {finished && submitError && (
-        <p className="coordinator-clarification__error" role="alert">{submitError}</p>
-      )}
+      {/* Form errors have no Try again: submitting again is the retry. */}
+      {finished && submitError && <ErrorNotice message={submitError} />}
 
       {/* With no form there is no form Cancel, so the way back is offered on
           its own: after a failed load, an empty list, or a refusal nothing
           on the form can fix. */}
       {!loading && !showForm && (
         <div className="assign-coordinator__actions">
-          <button type="button" onClick={onCancel}>
+          <Button variant="secondary" onClick={onCancel}>
             Back to the queue
-          </button>
+          </Button>
         </div>
       )}
 
@@ -197,17 +246,15 @@ export default function AssignCoordinatorPanel({ request, onCancel, onAssigned }
             Coordinators can read this note. The Organiser cannot.
           </p>
 
-          {submitError && (
-            <p className="coordinator-clarification__error" role="alert">{submitError}</p>
-          )}
+          {submitError && <ErrorNotice message={submitError} />}
 
           <div className="assign-coordinator__actions">
-            <button type="submit" disabled={submitting || !coordinatorId}>
+            <Button type="submit" disabled={submitting || !coordinatorId}>
               {submitting ? "Assigning..." : "Confirm assignment"}
-            </button>
-            <button type="button" onClick={onCancel} disabled={submitting}>
+            </Button>
+            <Button variant="secondary" onClick={onCancel} disabled={submitting}>
               Cancel
-            </button>
+            </Button>
           </div>
         </form>
       )}

@@ -20,42 +20,69 @@
 //
 // A zero is shown as 0, never blank: blank would read as "not known".
 
+import Button from "./ui/Button";
+import EmptyState from "./ui/EmptyState";
+import LoadingText from "./ui/LoadingText";
+
 /**
  * @param {object} props
  * @param {Array<{id: string, fullName: string|null, activeEvents: number, byStatus: Object<string, number>}>} props.coordinators
  * @param {Array<{status: string, label: string}>} props.statuses  the active statuses, in the server's order
  * @param {boolean} props.loading
  * @param {boolean} props.failed
+ * @param {Function} [props.onRetry]  reads the overview again; left out when that cannot help
  */
-export default function CoordinatorWorkloadTable({ coordinators, statuses, loading, failed }) {
+export default function CoordinatorWorkloadTable({ coordinators, statuses, loading, failed, onRetry }) {
+  if (loading) return <LoadingText />;
   // Said as a polite status, not an alert: the events below still load, and
   // the page keeps its one alert for the list it is about (SCRUM-543).
-  if (loading) return <p role="status">Loading coordinators...</p>;
-  if (failed) return <p role="status">The coordinators&apos; workload could not be loaded.</p>;
-  if (coordinators.length === 0) return <p>There are no Event Coordinators.</p>;
+  if (failed) {
+    return (
+      <div>
+        <p role="status">The coordinators&apos; workload could not be loaded.</p>
+        {onRetry && (
+          <Button variant="secondary" onClick={onRetry}>
+            Try again
+          </Button>
+        )}
+      </div>
+    );
+  }
+  if (coordinators.length === 0) {
+    return (
+      <EmptyState
+        message="There are no Event Coordinators."
+        nextStep="Event Coordinator accounts are set up outside ConnectSphere."
+      />
+    );
+  }
 
+  // Wider than a phone, so it scrolls inside its own box. Focusable and named,
+  // so keyboard users can scroll it with the arrow keys.
   return (
-    <table className="coordinator-workload">
-      <thead>
-        <tr>
-          <th scope="col">Coordinator</th>
-          <th scope="col">Active events</th>
-          {statuses.map(({ status, label }) => (
-            <th key={status} scope="col">{label}</th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {coordinators.map((coordinator) => (
-          <tr key={coordinator.id}>
-            <th scope="row">{coordinator.fullName ?? "No name on record"}</th>
-            <td>{coordinator.activeEvents}</td>
-            {statuses.map(({ status }) => (
-              <td key={status}>{coordinator.byStatus[status] ?? 0}</td>
+    <div className="coordinator-workload__scroll" tabIndex={0} role="region" aria-label="Coordinators' workload">
+      <table className="coordinator-workload">
+        <thead>
+          <tr>
+            <th scope="col">Coordinator</th>
+            <th scope="col">Active events</th>
+            {statuses.map(({ status, label }) => (
+              <th key={status} scope="col">{label}</th>
             ))}
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {coordinators.map((coordinator) => (
+            <tr key={coordinator.id}>
+              <th scope="row">{coordinator.fullName ?? "No name on record"}</th>
+              <td>{coordinator.activeEvents}</td>
+              {statuses.map(({ status }) => (
+                <td key={status}>{coordinator.byStatus[status] ?? 0}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }

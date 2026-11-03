@@ -246,7 +246,7 @@ function AppRoutes() {
           element={
             <ProtectedRoute allowedRoles={["event_coordinator_lead"]}>
               <div className="dashboard dashboard--coordinator-lead">
-                <UnassignedQueue />
+                <UnassignedQueue asPage />
               </div>
             </ProtectedRoute>
           }
@@ -256,8 +256,7 @@ function AppRoutes() {
             Gated as /unassigned-queue is, for the same reason: GET
             /event-requests/assigned answers 403 to anyone else regardless.
             Wrapped in the coordinator class, not the Lead's, as the event page
-            below is: App.css colours the status badge under
-            .dashboard--coordinator only, and this list shows one per row. */}
+            below is, so its card and list take the coordinator layout. */}
         <Route
           path="/assigned-events"
           element={

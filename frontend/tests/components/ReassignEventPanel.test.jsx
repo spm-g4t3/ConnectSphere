@@ -171,7 +171,7 @@ describe("SCRUM444_AC3 every message on the path, true for the Lead", () => {
 
   it.each([
     [403, "Only the Event Coordinator Lead can hand an event over."],
-    [500, "The list of coordinators could not be loaded. Please try again."],
+    [500, "The list of coordinators could not be loaded."],
   ])("SCRUM444_AC3_loading_the_list_for_a_lead_fails_with_%s", async (status, message) => {
     // Was SCRUM486_AC6_loading_the_list_for_a_lead_fails_with_%s: the list is
     // leadOnly, so its 403 now names the Lead alone.
