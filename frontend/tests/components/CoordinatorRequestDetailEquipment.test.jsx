@@ -17,6 +17,7 @@ import { MemoryRouter } from "react-router-dom";
 import CoordinatorRequestDetail from "../../src/components/CoordinatorRequestDetail.jsx";
 import { useAuth } from "../../src/auth/AuthContext";
 import { decide } from "../helpers/coordinatorDecision.js";
+import { openTab } from "../helpers/eventTabs.js";
 import { decideEventRequest } from "../../src/services/eventRequestService";
 import { getActiveEquipmentTypes, getEventEquipment } from "../../src/services/eventEquipmentService";
 
@@ -89,6 +90,7 @@ beforeEach(() => {
 describe("SCRUM21 the equipment section in the coordinator panel", () => {
   it("SCRUM21_AC11_the_panel_shows_the_section_and_reads_this_events_equipment", async () => {
     renderAs(ASSIGNED, eventRequest());
+    await openTab(userEvent.setup(), "Equipment");
 
     expect(await screen.findByRole("heading", { name: "Equipment needed" })).toBeInTheDocument();
     expect(getEventEquipment).toHaveBeenCalledWith(REQUEST_ID);
@@ -96,6 +98,7 @@ describe("SCRUM21 the equipment section in the coordinator panel", () => {
 
   it("SCRUM21_AC1_the_assigned_coordinator_of_an_approved_event_is_offered_add", async () => {
     renderAs(ASSIGNED, eventRequest());
+    await openTab(userEvent.setup(), "Equipment");
 
     expect(await screen.findByRole("button", { name: "Add equipment" })).toBeInTheDocument();
   });
@@ -104,6 +107,7 @@ describe("SCRUM21 the equipment section in the coordinator panel", () => {
     // Was SCRUM21_AC1_another_coordinator_is_shown_the_reason_and_no_add: since
     // SCRUM-444 the non-holder who opens the screen is the Lead.
     renderAs(OTHER, eventRequest(), "event_coordinator_lead");
+    await openTab(userEvent.setup(), "Equipment");
 
     expect(await screen.findByText("Only the assigned coordinator can change this event's equipment.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add equipment" })).not.toBeInTheDocument();
@@ -114,6 +118,7 @@ describe("SCRUM21 the equipment section in the coordinator panel", () => {
       status: "submitted",
       statusDisplay: { status: "submitted", label: "Submitted", group: "AWAITING_REVIEW", description: "" },
     }));
+    await openTab(userEvent.setup(), "Equipment");
 
     expect(await screen.findByText("Equipment can be recorded once the request is approved.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add equipment" })).not.toBeInTheDocument();
@@ -131,6 +136,7 @@ describe("SCRUM21 the equipment section in the coordinator panel", () => {
     await screen.findByText("Equipment can be recorded once the request is approved.");
 
     await decide(user, "Approve request");
+    await openTab(user, "Equipment");
 
     expect(await screen.findByRole("button", { name: "Add equipment" })).toBeInTheDocument();
   });

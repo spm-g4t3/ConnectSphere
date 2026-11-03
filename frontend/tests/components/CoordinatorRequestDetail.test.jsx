@@ -65,6 +65,7 @@ import { cancelFlaggedBooking, getEventFlaggedBookings } from "../../src/service
 import { httpError } from "../helpers/async.js";
 import { sgTime } from "../helpers/singaporeTime.js";
 import { chooseDecision, decide } from "../helpers/coordinatorDecision.js";
+import { openTab, openTabNow } from "../helpers/eventTabs.js";
 
 vi.mock("../../src/auth/AuthContext", () => ({
   useAuth: vi.fn(),
@@ -285,8 +286,9 @@ describe("SCRUM-375 coordinator cancellation page", () => {
 
     expect(screen.getByRole("heading", { name: "Cancel IS212 Industry Night" })).toBeInTheDocument();
     expect(screen.getByText(/Review the arrangements this will affect before confirming/)).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "The request" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Find a venue" })).not.toBeInTheDocument();
+    // Hidden too: the event's tabs are gone, not just closed.
+    expect(screen.queryByRole("heading", { name: "The request", hidden: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Find a venue", hidden: true })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Back to event" })).toBeInTheDocument();
   });
 });
@@ -347,7 +349,8 @@ describe("SCRUM-347 reject an approved event", () => {
 
 describe("SCRUM20_AC2 the event view holds the venue search", () => {
   it("SCRUM20_AC2_find_a_venue_renders_the_form_prefilled_from_the_event", async () => {
-    renderDetail();
+    const { user } = renderDetail();
+    await openTab(user, "Venues");
 
     expect(screen.getByRole("heading", { name: "Find a venue" })).toBeInTheDocument();
     expect(inFinder.date()).toHaveValue("2026-11-11");
@@ -375,6 +378,7 @@ describe("SCRUM20_AC2 the event view holds the venue search", () => {
 
   it("SCRUM20_AC2_browse_all_venues_links_to_venue_search_without_filters", async () => {
     const { user } = renderDetail();
+    await openTab(user, "Venues");
 
     const link = within(finderSection()).getByRole("link", { name: "Browse all venues" });
     expect(link).toHaveAttribute("href", "/venue-search");
@@ -386,6 +390,7 @@ describe("SCRUM20_AC2 the event view holds the venue search", () => {
   it("SCRUM20_AC2_searching_stays_on_the_event_view", async () => {
     vi.mocked(findVenuesForEvent).mockResolvedValue([{ id: "v1", name: "Hall A" }]);
     const { user } = renderDetail();
+    await openTab(user, "Venues");
 
     await user.click(within(finderSection()).getByRole("button", { name: "Search venues" }));
 
@@ -399,6 +404,7 @@ describe("SCRUM20_AC2 the event view holds the venue search", () => {
 
   it("SCRUM20_AC2_an_event_with_no_attendance_leaves_the_field_empty", () => {
     renderDetail({ ...EVENT, expectedAttendance: null });
+    openTabNow("Venues");
 
     expect(inFinder.attendance()).toHaveValue(null);
     // The Requirements list still says so in words.
@@ -409,9 +415,12 @@ describe("SCRUM20_AC2 the event view holds the venue search", () => {
 describe("SCRUM20_AC2 re-seeding when the event changes", () => {
   it("SCRUM20_AC2_a_different_event_reseeds_the_form", () => {
     const { rerenderWith } = renderDetail();
+    openTabNow("Venues");
     fireEvent.change(inFinder.attendance(), { target: { value: "150" } });
 
     rerenderWith({ ...EVENT, id: "e2", eventName: "Gala", expectedAttendance: 30 });
+    // Another event opens on its own default tab.
+    openTabNow("Venues");
 
     expect(inFinder.attendance()).toHaveValue(30);
   });
@@ -420,6 +429,7 @@ describe("SCRUM20_AC2 re-seeding when the event changes", () => {
     // An approved change request moved the attendance: the edit is dropped
     // rather than shown as if it were the event's figure.
     const { rerenderWith } = renderDetail();
+    openTabNow("Venues");
     fireEvent.change(inFinder.attendance(), { target: { value: "150" } });
     fireEvent.change(inFinder.location(), { target: { value: "Level 2" } });
 
@@ -431,6 +441,7 @@ describe("SCRUM20_AC2 re-seeding when the event changes", () => {
 
   it("SCRUM20_AC2_a_changed_start_reseeds_the_form", () => {
     const { rerenderWith } = renderDetail();
+    openTabNow("Venues");
     fireEvent.change(inFinder.attendance(), { target: { value: "150" } });
 
     const movedStart = "2026-11-11T11:00:00+08:00";
@@ -442,6 +453,7 @@ describe("SCRUM20_AC2 re-seeding when the event changes", () => {
 
   it("SCRUM20_AC2_a_changed_end_reseeds_the_form", () => {
     const { rerenderWith } = renderDetail();
+    openTabNow("Venues");
     fireEvent.change(inFinder.attendance(), { target: { value: "150" } });
 
     const movedEnd = "2026-11-11T11:30:00+08:00";
@@ -455,6 +467,7 @@ describe("SCRUM20_AC2 re-seeding when the event changes", () => {
     // The parent refetches after a change request is processed; if the event's
     // period and attendance did not move, the coordinator's edits stay.
     const { rerenderWith } = renderDetail();
+    openTabNow("Venues");
     fireEvent.change(inFinder.attendance(), { target: { value: "150" } });
     fireEvent.change(inFinder.location(), { target: { value: "Level 2" } });
     fireEvent.change(inFinder.date(), { target: { value: "2026-11-12" } });
@@ -859,6 +872,7 @@ describe("SCRUM254 requesting a venue from the event view", () => {
   const PERIOD = { proposedStart: START_ISO, proposedEnd: END_ISO };
 
   async function searchInFinder(user) {
+    await openTab(user, "Venues");
     await user.click(within(finderSection()).getByRole("button", { name: "Search venues" }));
     return within(finderSection()).findByRole("button", { name: "Request this venue: Hall A" });
   }

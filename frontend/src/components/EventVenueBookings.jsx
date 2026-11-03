@@ -10,7 +10,7 @@
 // EventFlaggedBookings does; after a release the list is refetched, not patched.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { formatTimestamp } from "../services/displayFormat";
+import { formatDateTime } from "../services/displayFormat";
 import { formatVenuePeriod } from "../services/datetimeFormat";
 import { getMyBookingRequests, releaseVenueBooking } from "../services/bookingRequestService";
 import { releaseErrorMessage } from "../services/bookingRequestErrors";
@@ -86,7 +86,7 @@ function VenueBooking({ row, headingLevel, open, busy, error, onOpen, onKeep, on
             <>
               <dt>Released on</dt>
               <dd>
-                {`${formatTimestamp(row.releasedAt, "at an unknown time")}: ${row.releaseReason || "No reason recorded"}`}
+                {`${formatDateTime(row.releasedAt, "at an unknown time")}: ${row.releaseReason || "No reason recorded"}`}
               </dd>
             </>
           )}

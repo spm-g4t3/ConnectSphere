@@ -17,10 +17,12 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 
 import CoordinatorRequestDetail from "../../src/components/CoordinatorRequestDetail.jsx";
 import { useAuth } from "../../src/auth/AuthContext";
+import { openTab } from "../helpers/eventTabs.js";
 import {
   getAssignmentHistoryForReview,
   getCoordinatorChangeRequests,
@@ -170,19 +172,32 @@ describe("SCRUM487_AC5 the Lead opens any event read-only", () => {
     // hand-over. Not shown: any action that is the holder's.
     vi.mocked(getCoordinatorChangeRequests).mockResolvedValue(changeRequests);
 
+    const user = userEvent.setup();
     renderAsLead(eventRequest(overrides));
 
     expect(await screen.findByRole("button", { name: "Hand over to another coordinator" })).toBeInTheDocument();
     expect(await screen.findByText(HANDOVER_NOTE)).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Assignment history" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: clarificationButton })).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: /IS212 Industry Night/ })).toBeInTheDocument();
     if (changeRequests.length > 0) expect(await screen.findByText("A larger room.")).toBeInTheDocument();
 
-    for (const action of HOLDERS_ACTIONS) {
-      expect(screen.queryByRole("button", { name: action })).not.toBeInTheDocument();
+    // Every tab in turn, so an action in a hidden panel cannot slip past.
+    const tabs = screen.getAllByRole("tab").map((tab) => tab.textContent);
+    expect(tabs).toEqual(["Venues", "Equipment", "Details", "Activity"]);
+    for (const tab of tabs) {
+      await openTab(user, tab);
+      if (tab === "Activity" && clarificationButton === "View clarification history") {
+        expect(screen.getByRole("button", { name: clarificationButton })).toBeInTheDocument();
+      }
+      for (const action of HOLDERS_ACTIONS) {
+        expect(screen.queryByRole("button", { name: action })).not.toBeInTheDocument();
+      }
+      // The review decision is chosen with radios before its button is named.
+      expect(screen.queryByRole("group", { name: "Your decision" })).not.toBeInTheDocument();
     }
-    // The review decision is chosen with radios before its button is named.
-    expect(screen.queryByRole("group", { name: "Your decision" })).not.toBeInTheDocument();
+    // While waiting on the organiser, the question's thread sits in the Next step card.
+    if (clarificationButton !== "View clarification history") {
+      expect(screen.getByRole("button", { name: clarificationButton })).toBeInTheDocument();
+    }
   });
 });

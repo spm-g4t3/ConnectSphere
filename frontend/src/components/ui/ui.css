@@ -36,3 +36,12 @@
 .ui-confirm-dialog .ui-confirm-dialog__title { color: var(--color-ink); font-size: var(--font-size-h2); margin: 0 0 var(--space-3); }
 .ui-confirm-dialog .ui-confirm-dialog__message, .ui-confirm-dialog .ui-confirm-dialog__message p { color: var(--color-ink); }
 .ui-confirm-dialog .ui-confirm-dialog__actions { display: flex; gap: var(--space-2); justify-content: flex-end; margin-top: var(--space-5); }
+
+/* Doubled classes for the same reason as .ui-button: `.dashboard button` would
+   otherwise paint every tab as a primary button. */
+.ui-tabs__list { border-bottom: 1px solid var(--color-line); display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.ui-tabs__tab.ui-tabs__tab { background: none; border: 0; border-bottom: 3px solid transparent; border-radius: 0; color: var(--color-muted); font: inherit; font-weight: 600; margin-bottom: -1px; min-height: 44px; padding: 0 var(--space-4); }
+.ui-tabs__tab.ui-tabs__tab:hover { background: var(--color-accent-soft); color: var(--color-accent-dark); }
+.ui-tabs__tab.ui-tabs__tab[aria-selected="true"] { border-bottom-color: var(--color-accent); color: var(--color-accent-dark); }
+.ui-tabs__tab:focus-visible, .ui-tabs__panel:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.ui-tabs__panel { padding-top: var(--space-4); }

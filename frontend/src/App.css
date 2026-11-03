@@ -210,9 +210,12 @@ button { cursor: pointer; }
 .dashboard.dashboard--event-page { max-width: 1200px; }
 .dashboard--coordinator > section > ul { margin-top: 10px; }
 .dashboard--coordinator .coordinator-request-detail__main > section,
+.dashboard--coordinator .coordinator-request-detail__main .ui-tabs__panel > section,
 .dashboard--coordinator .coordinator-request-detail__rail > section { border-top: 1px solid var(--color-line); margin-top: 18px; padding-top: 18px; }
 .dashboard--coordinator .coordinator-request-detail__main > section:first-child,
+.dashboard--coordinator .coordinator-request-detail__main .ui-tabs__panel > section:first-child,
 .dashboard--coordinator .coordinator-request-detail__rail > section:first-child { border-top: 0; margin-top: 0; padding-top: 0; }
+.coordinator-request-detail__main > .ui-tabs { margin-top: var(--space-5); }
 .dashboard--coordinator .coordinator-request-detail h3 { color: var(--teal-dark); font-size: 1rem; margin: 0 0 12px; }
 .dashboard .coordinator-request-detail .coordinator-request-detail__title { line-height: 1.25; margin: 0 0 var(--space-2); overflow-wrap: anywhere; }
 .dashboard .coordinator-request-detail .coordinator-request-detail__badges { align-items: center; display: flex; flex-wrap: wrap; gap: var(--space-2); margin: 0 0 var(--space-2); }

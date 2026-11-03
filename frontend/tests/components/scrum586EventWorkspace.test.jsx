@@ -92,9 +92,9 @@ function renderPage(user = HOLDER) {
   return { user: userEvent.setup() };
 }
 
-/** Each heading's level, in reading order. */
+/** Each heading's level, in reading order, the closed tabs' panels included. */
 function headingLevels() {
-  return screen.getAllByRole("heading").map((heading) => Number(heading.tagName.slice(1)));
+  return screen.getAllByRole("heading", { hidden: true }).map((heading) => Number(heading.tagName.slice(1)));
 }
 
 /** Waits for the reads that add headings (the venue under suitability, the assignment history). */
@@ -128,7 +128,7 @@ describe("SCRUM586_AC2 the event screen's headings", () => {
     await settled();
 
     expect(screen.getAllByRole("heading", { level: 1 })).toEqual([title(1)]);
-    expect(screen.getByRole("heading", { level: 2, name: "The request" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "The request", hidden: true })).toBeInTheDocument();
     // The safety check panel now sits inside the Next step card, one level down.
     expect(screen.getByRole("heading", { level: 2, name: "Next step" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 3, name: "Submit for the safety check" })).toBeInTheDocument();
@@ -187,8 +187,8 @@ describe("SCRUM586_AC2 the event screen's frame", () => {
     expect(within(aside).getByRole("heading", { name: "Coordinator" })).toBeInTheDocument();
     expect(await within(aside).findByRole("heading", { name: "Assignment history" })).toBeInTheDocument();
     // Nothing else moved there.
-    expect(within(aside).queryByRole("heading", { name: "The request" })).not.toBeInTheDocument();
-    expect(within(aside).queryByRole("heading", { name: "Find a venue" })).not.toBeInTheDocument();
+    expect(within(aside).queryByRole("heading", { name: "The request", hidden: true })).not.toBeInTheDocument();
+    expect(within(aside).queryByRole("heading", { name: "Find a venue", hidden: true })).not.toBeInTheDocument();
   });
 
   it("SCRUM586_AC2_reads_header_then_main_column_then_rail", async () => {
@@ -196,14 +196,15 @@ describe("SCRUM586_AC2 the event screen's frame", () => {
     await settled();
 
     const header = title(1).closest("header");
-    const request = screen.getByRole("heading", { name: "The request" });
+    const request = screen.getByRole("heading", { name: "The request", hidden: true });
     const finder = screen.getByRole("heading", { name: "Find a venue" });
     expect(header).toContainElement(screen.getByRole("button", { name: "Reject event" }));
-    expect(precedes(header, request)).toBe(true);
+    expect(precedes(header, finder)).toBe(true);
     expect(header).not.toContainElement(request);
-    expect(precedes(request, finder)).toBe(true);
     expect(precedes(finder, rail())).toBe(true);
+    expect(precedes(request, rail())).toBe(true);
     expect(rail()).not.toContainElement(finder);
+    expect(rail()).not.toContainElement(request);
   });
 
   it("SCRUM586_AC2_the_header_shows_the_status_badge_and_the_facts_line", async () => {

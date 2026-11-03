@@ -135,7 +135,7 @@ describe("SCRUM586_AC2 the Next step card", () => {
   it("SCRUM586_AC2_a_decided_event_shows_its_decision_below_the_card_not_in_it", () => {
     renderDetail(HOLDER, eventRequest("rejected", { decision: "rejected", decisionNote: "Too large." }));
 
-    const decision = screen.getByRole("heading", { name: "Decision" });
+    const decision = screen.getByRole("heading", { name: "Decision", hidden: true });
     expect(nextStep()).not.toContainElement(decision);
     expect(nextStep().compareDocumentPosition(decision) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });

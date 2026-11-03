@@ -112,7 +112,10 @@ describe("SCRUM-402 on the coordinator's event screen", () => {
     await user.click(await screen.findByRole("button", { name: "Accept" }));
 
     expect(await screen.findByText("The organiser asked for this equipment change: Two more microphones")).toBeInTheDocument();
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText("Equipment")));
+    // The Equipment tab opens, and focus lands on the section, not on its tab panel.
+    expect(screen.getByRole("tab", { name: "Equipment" })).toHaveAttribute("aria-selected", "true");
+    await waitFor(() => expect(document.activeElement)
+      .toBe(screen.getByLabelText("Equipment", { selector: ".change-request-review__equipment" })));
     expect(onChangeRequestProcessed).toHaveBeenCalledTimes(1);
   });
 

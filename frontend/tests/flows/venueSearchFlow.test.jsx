@@ -28,6 +28,7 @@ import { MemoryRouter } from "react-router-dom";
 
 import CoordinatorRequestDetail from "../../src/components/CoordinatorRequestDetail.jsx";
 import { useAuth } from "../../src/auth/AuthContext";
+import { openTab } from "../helpers/eventTabs.js";
 import * as eventRequestService from "../../src/services/eventRequestService";
 import * as venueService from "../../src/services/venueService";
 
@@ -193,6 +194,7 @@ beforeEach(() => {
 describe("SCRUM20_AC2_AC7_AC8 venue search flow from the event view (SCRUM-144)", () => {
   it("SCRUM20_AC2_AC7_AC8_find_venue_prefill_no_match_adjust_results_flow", async () => {
     const { user } = renderEventView();
+    await openTab(user, "Venues");
 
     // ---- 1. AC2: the event view opens with the search pre-filled -----------
     expect(screen.getByRole("heading", { name: "Find a venue" })).toBeInTheDocument();

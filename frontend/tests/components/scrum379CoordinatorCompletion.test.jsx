@@ -135,7 +135,9 @@ function renderDetail(user, request = eventRequest(), props = {}) {
 }
 
 const markButton = () => screen.queryByRole("button", { name: "Mark as completed" });
-const closingNotesSection = () => screen.queryByRole("heading", { name: "Closing notes" });
+// Hidden too: the notes sit in the Details tab, and these tests are about who
+// is given them, not about which tab is open.
+const closingNotesSection = () => screen.queryByRole("heading", { name: "Closing notes", hidden: true });
 const refusal = (status, data = {}) => Object.assign(new Error("request failed"), { response: { status, data } });
 
 beforeEach(() => {
@@ -205,7 +207,7 @@ describe("SCRUM379 when Mark as completed is offered", () => {
     renderDetail(COORDINATOR_USER, eventRequest({ proposedStart: at(-3600), proposedEnd: "2030-06-15T10:00:00Z" }));
 
     expect(markButton()).not.toBeInTheDocument();
-    expect(screen.getByText(/You can mark this event as completed once it has ended \(2030-06-15 18:00 \(Singapore time\)\)\./)).toBeInTheDocument();
+    expect(screen.getByText(/You can mark this event as completed once it has ended \(15 Jun 2030, 6:00 pm\)\./)).toBeInTheDocument();
   });
 
   it("SCRUM379_AC1_an_event_with_no_end_time_is_not_offered_and_the_hint_names_no_time", () => {

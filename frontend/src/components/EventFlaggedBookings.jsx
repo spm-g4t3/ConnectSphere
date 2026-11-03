@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import FlaggedBookingFlagDetail from "./FlaggedBookingFlagDetail";
 import FlaggedBookingReasonForm from "./FlaggedBookingReasonForm";
-import { asList, formatTimestamp } from "../services/displayFormat";
+import { asList, formatDateTime } from "../services/displayFormat";
 import { formatVenuePeriod } from "../services/datetimeFormat";
 import { venueText } from "../services/flaggedBookingDisplay";
 import { cancelFlaggedBooking, getEventFlaggedBookings } from "../services/flaggedBookingService";
@@ -39,7 +39,7 @@ function FlaggedBooking({ item, headingLevel, busy, cancelling, error, replacing
           <dt>Booking period</dt>
           <dd>{formatVenuePeriod(item.startsAt, item.endsAt)}</dd>
           <dt>Flagged</dt>
-          <dd>{formatTimestamp(item.flaggedAt, "at an unknown time")}</dd>
+          <dd>{formatDateTime(item.flaggedAt, "at an unknown time")}</dd>
         </dl>
 
         <FlaggedBookingFlagDetail
