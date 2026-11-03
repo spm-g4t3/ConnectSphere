@@ -16,6 +16,7 @@ import {
   getRegistrationSettings,
   saveRegistrationSettings,
 } from "../../src/services/eventRegistrationService";
+import { stubDialogElement } from "../helpers/dialog.js";
 
 vi.mock("../../src/services/openEventService", () => ({ getOpenEvent: vi.fn() }));
 vi.mock("../../src/services/attendeeEventService", () => ({ getWaitlist: vi.fn(), leaveWaitlist: vi.fn() }));
@@ -58,6 +59,8 @@ function renderDetails(onJoinWaitlist) {
     </MemoryRouter>,
   );
 }
+
+stubDialogElement();
 
 beforeEach(() => {
   vi.clearAllMocks();

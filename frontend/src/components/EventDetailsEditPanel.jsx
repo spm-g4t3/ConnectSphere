@@ -70,7 +70,8 @@ const errorMessage = makeErrorMapper({
 /**
  * AC5 on screen: the status a refused save met, as the detail's badge names it.
  * Read again rather than taken from the server's message, which this screen
- * never shows; GET /:id/review answers any coordinator, the event's holder or not.
+ * never shows. GET /:id/review answers only the holder and the Lead (SCRUM-444), so
+ * after a handover the re-read fails and the general line below is used.
  */
 async function statusRefusalMessage(eventRequestId, err) {
   try {

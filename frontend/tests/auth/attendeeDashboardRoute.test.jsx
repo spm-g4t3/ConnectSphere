@@ -402,7 +402,7 @@ describe("SCRUM495_AC5 the details match the list row", () => {
     await userEvent.click(within(row).getByRole("link", { name: "Open Day" }));
 
     expect(await screen.findByRole("heading", { name: "Open Day", level: 1 })).toBeInTheDocument();
-    const facts = screen.getByText("Date").closest("dl").textContent;
+    const facts = screen.getByText("When").closest("dl").textContent;
     const date = within(row).getByText(/\d{4}/).textContent;
     expect(rowText).toContain(date);
     expect(facts).toContain(date);

@@ -156,7 +156,10 @@ describe("AC1: who is offered actions", () => {
     expect(screen.getByRole("button", { name: "Add equipment" })).toBeInTheDocument();
   });
 
-  it("SCRUM21_AC1_another_coordinator_sees_the_lines_and_the_reason_but_no_actions", async () => {
+  it("SCRUM444_AC1_the_lead_sees_the_lines_and_the_reason_but_no_actions", async () => {
+    // Was SCRUM21_AC1_another_coordinator_sees_the_lines_and_the_reason_but_no_actions.
+    // canEdit false is what the screen passes for anyone but the holder, which
+    // since SCRUM-444 means the Lead.
     renderSection({ canEdit: false });
 
     expect(await screen.findByText("Quantity: 2")).toBeInTheDocument();

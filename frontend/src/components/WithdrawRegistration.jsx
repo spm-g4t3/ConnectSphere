@@ -1,12 +1,14 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { withdrawRegistration } from "../services/attendeeEventService";
 import { withdrawalFailure } from "../services/withdrawalErrors";
 import { REGISTRATION_STATUS } from "../services/registrationStatus";
+import Button from "./ui/Button";
+import ConfirmDialog from "./ui/ConfirmDialog";
+import ErrorNotice from "./ui/ErrorNotice";
 
 /**
- * Asks first, inline, as the other destructive actions here do (there is no
- * modal in this frontend). Nothing on screen changes until the backend has
- * withdrawn the registration; onWithdrawn then gets its reply.
+ * Asks first, in a ConfirmDialog. Nothing on screen changes until the backend
+ * has withdrawn the registration; onWithdrawn then gets its reply.
  *
  * A final refusal goes to the page through onRefused and comes back as
  * `refusal`: a reload remounts this component, and must not bring the action back.
@@ -18,6 +20,30 @@ export default function WithdrawRegistration({ registrationId, refusal, onWithdr
   const [failure, setFailure] = useState(null);
   // State updates are async, so a fast second click could pass a disabled check.
   const sending = useRef(false);
+  const withdrawButtonRef = useRef(null);
+  const failureRef = useRef(null);
+  const refusalRef = useRef(null);
+  const refocusWithdraw = useRef(false);
+  const wasRefused = useRef(Boolean(refusal));
+
+  // Cancelling closes the dialog, so focus goes back to the button that opened it.
+  useEffect(() => {
+    if (confirming || !refocusWithdraw.current) return;
+    refocusWithdraw.current = false;
+    withdrawButtonRef.current?.focus();
+  }, [confirming]);
+
+  // The button that had focus is replaced by the failure, so focus moves to it.
+  useEffect(() => {
+    if (failure) failureRef.current?.focus();
+  }, [failure]);
+
+  // Only a refusal that arrives here moves focus; one already shown after a
+  // reload is part of the page as it loads.
+  useEffect(() => {
+    if (refusal && !wasRefused.current) refusalRef.current?.focus();
+    wasRefused.current = Boolean(refusal);
+  }, [refusal]);
 
   async function handleConfirm() {
     if (sending.current) return;
@@ -33,17 +59,20 @@ export default function WithdrawRegistration({ registrationId, refusal, onWithdr
       const outcome = withdrawalFailure(err);
       if (outcome.rejected) onRefused(outcome.message);
       else setFailure(outcome);
-      setConfirming(false);
     } finally {
+      setConfirming(false);
       sending.current = false;
       setSubmitting(false);
     }
   }
 
   if (refusal) {
+    // Final, so there is nothing to try again.
     return (
       <section className="withdraw-registration" aria-label="Withdraw registration">
-        <p className="pending-bookings__error" role="alert">{refusal}</p>
+        <div ref={refusalRef} tabIndex={-1}>
+          <ErrorNotice message={refusal} />
+        </div>
       </section>
     );
   }
@@ -51,30 +80,32 @@ export default function WithdrawRegistration({ registrationId, refusal, onWithdr
   return (
     <section className="withdraw-registration" aria-label="Withdraw registration">
       {failure && (
-        <div className="browse-open-events__error" role="alert">
-          <p>{failure.message}</p>
-          <button type="button" disabled={submitting} onClick={handleConfirm}>
-            {submitting ? "Withdrawing..." : "Try again"}
-          </button>
+        <div ref={failureRef} tabIndex={-1}>
+          <ErrorNotice message={failure.message} onRetry={handleConfirm} />
         </div>
       )}
-      {confirming ? (
-        <>
-          <p>Withdraw your registration? Your place will be released to other attendees.</p>
-          <div className="event-venue-bookings__actions">
-            <button type="button" disabled={submitting} onClick={handleConfirm}>
-              {submitting ? "Withdrawing..." : "Confirm withdrawal"}
-            </button>
-            <button type="button" disabled={submitting} onClick={() => setConfirming(false)}>
-              Keep my registration
-            </button>
-          </div>
-        </>
-      ) : !failure && (
-        <button type="button" onClick={() => setConfirming(true)}>
+      {/* A retry sends from here, outside the dialog, so its progress shows here too. */}
+      {submitting && !confirming && <p role="status">Withdrawing...</p>}
+      {!failure && !submitting && (
+        <Button ref={withdrawButtonRef} variant="danger" onClick={() => setConfirming(true)}>
           Withdraw registration
-        </button>
+        </Button>
       )}
+      <ConfirmDialog
+        open={confirming}
+        title="Withdraw your registration?"
+        confirmLabel={submitting ? "Withdrawing..." : "Confirm withdrawal"}
+        cancelLabel="Keep my registration"
+        danger
+        busy={submitting}
+        onConfirm={handleConfirm}
+        onCancel={() => {
+          refocusWithdraw.current = true;
+          setConfirming(false);
+        }}
+      >
+        Your place will be released to other attendees.
+      </ConfirmDialog>
     </section>
   );
 }

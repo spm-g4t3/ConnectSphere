@@ -25,8 +25,8 @@
 // it yet.)
 //
 // SCRUM-334 added the event's coordinator and assignment history, and the
-// assigned coordinator's Reassign action, which opens ReassignEventPanel as a
-// panel in place of this one.
+// Reassign action (the Lead's since SCRUM-444), which opens ReassignEventPanel
+// as a panel in place of this one.
 //
 // SCRUM-129 (SCRUM-19) replaced the dead decision section. The assigned
 // coordinator now starts the review of a submitted request, then approves,
@@ -219,7 +219,7 @@ export default function CoordinatorRequestDetail({
   const equipmentSectionRef = useRef(null);
 
   // SCRUM-334. reassigning swaps this panel for ReassignEventPanel.
-  // handedOverTo is who the event went to, if this coordinator handed it over
+  // handedOverTo is who the event went to, if the Lead handed it over
   // while the panel was open: the `request` prop is the row the parent loaded
   // and may not be replaced (see handleReassigned). historyVersion is the
   // AssignmentHistory key, bumped to make it read the history again.
@@ -256,36 +256,25 @@ export default function CoordinatorRequestDetail({
 
   const assignedCoordinatorId = handedOverTo?.id ?? request.assignedCoordinatorId;
 
-  // Reassign shows only to the event's assigned coordinator. This mirrors the
-  // server's AC6 check in reassign_event_request (018) and is a convenience,
-  // not the gate: it saves everyone else from a button that can only be
-  // refused. The server checks again, under a lock, and if the row this panel
-  // holds is stale, ReassignEventPanel turns the 403 into a message.
   const isAssignedCoordinator = Boolean(user?.id) && assignedCoordinatorId === user.id;
-  // SCRUM-486 (SCRUM-521), AC6: the Event Coordinator Lead may hand over any
-  // event, as 052's reassign_event_request allows, so the button shows for
-  // the holder or a Lead. Only while someone holds it: a request with no
-  // coordinator is assigned from the Lead's queue, not handed over (052
-  // refuses that, AC5-05). The Lead is never isAssignedCoordinator (only
-  // event_coordinator can be assigned), so every other action on this screen
-  // stays the holder's.
-  //
-  // SCRUM-370: and never on a cancelled event, which nobody can hand over
-  // (052's status list leaves cancelled out). Both conditions kept from the
-  // merge of dev, neither dropped.
+  // SCRUM-444 AC3 reverses SCRUM-486 AC6: only the Lead hands over (055, behind
+  // leadOnly). A convenience, not the gate. Only while someone holds it (a
+  // request with no coordinator is assigned, not handed over), and never on a
+  // cancelled event (SCRUM-370). The Lead is never isAssignedCoordinator, so
+  // every other action on this screen stays the holder's.
   const isLead = normaliseRole(user?.role) === "EVENT_COORDINATOR_LEAD";
   const canConfirm = normaliseRole(user?.role) === "EVENT_COORDINATOR"
     && isAssignedCoordinator && current.status === "safety_approved";
   const canReassign = assignedCoordinatorId != null
     && current.status !== "cancelled"
-    && (isAssignedCoordinator || isLead);
+    && isLead;
   // SCRUM-384 AC1: the holder, on a Confirmed event whose end has passed. A convenience;
   // complete_event_request (034) checks the caller, the status and the end time under the lock.
   const isCoordinatorRole = normaliseRole(user?.role) === "EVENT_COORDINATOR";
   const canComplete = isCoordinatorRole && canMarkCompleted(current, { isAssignedCoordinator });
   const awaitingEnd = isCoordinatorRole && isAssignedCoordinator
     && current.status === "confirmed" && !eventHasEnded(current.proposedEnd);
-  // SCRUM-384 AC2: closing notes are for coordinators (and the Lead); never an Organiser.
+  // SCRUM-384 AC2, SCRUM-444 AC5: only the holder writes closing notes (on completion, 034); the holder and the Lead read them; never an Organiser.
   const closingNotes = (isCoordinatorRole || isLead) && current.status === "completed"
     ? closingNotesOf(current)
     : null;
@@ -795,9 +784,6 @@ export default function CoordinatorRequestDetail({
         {handedOverTo && (
           <p className="coordinator-reassign__notice" role="status">
             Handed over to {handedOverTo.fullName ?? "the coordinator you chose"}.
-            {/* Said to the coordinator who handed it over. A Lead never could
-                change it, and can hand it over again (SCRUM-521). */}
-            {isLead ? "" : " You can still view this event, but not change it."}
           </p>
         )}
 

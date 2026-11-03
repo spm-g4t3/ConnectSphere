@@ -1231,10 +1231,10 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
     });
 
     it('SCRUM486_AC5_a_handover_with_no_note_stores_null', async () => {
-      // AC5-04.
+      // AC5-04. By the Lead: since SCRUM-444 (055) the holder may not hand over.
       const id = await request(STATUS.SUBMITTED);
 
-      await reassign(id, otherCoordinator, coordinator);
+      await reassign(id, otherCoordinator, lead);
 
       expect((await assignmentHistory(id))[0].handover_note).toBeNull();
     });
@@ -1262,20 +1262,19 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
     });
   });
 
-  describe('SCRUM-486 AC6: the holder and the Lead both reassign', () => {
-    it('SCRUM486_AC6_the_holder_reassigns_as_scrum327_allowed', async () => {
-      // AC6-01. SCRUM-327 AC6 stands: unchanged by the widening.
+  describe('SCRUM-486 AC6: the Lead reassigns (the holder no longer may, SCRUM-444)', () => {
+    it('SCRUM444_AC3_the_holder_cannot_reassign', async () => {
+      // Was SCRUM486_AC6_the_holder_reassigns_as_scrum327_allowed. SCRUM-444 AC3
+      // (Week 9 Q&A, sheet G3-5, row 18): only the Lead hands an event over, so 055 refuses the holder.
       const id = await request(STATUS.UNDER_REVIEW);
+      const before = await row(id);
 
-      await reassign(id, otherCoordinator, coordinator, 'On leave from Monday');
+      const err = await refusal(reassign(id, otherCoordinator, coordinator, 'On leave from Monday'));
 
-      expect((await row(id)).assigned_coordinator_id).toBe(otherCoordinator);
-      expect((await assignmentHistory(id))[0]).toMatchObject({
-        previous_coordinator_id: coordinator,
-        new_coordinator_id: otherCoordinator,
-        assigned_by: coordinator,
-        handover_note: 'On leave from Monday',
-      });
+      expect(err?.code).toBe('42501');
+      expect(err.message).toContain('only the Event Coordinator Lead can hand over event request');
+      expect(await row(id)).toEqual(before);
+      expect(await assignmentHistory(id)).toHaveLength(0);
     });
 
     it('SCRUM486_AC6_a_lead_who_does_not_hold_the_event_reassigns_it', async () => {
@@ -1395,8 +1394,8 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
   describe('SCRUM-486 AC9: the history names who made each assignment', () => {
     it('SCRUM486_AC9_reads_correctly_across_a_submission_an_assignment_and_two_reassignments', async () => {
       // AC9-01 and AC9-02. Submission writes no row; the Lead's first
-      // assignment names the Lead; the holder's handover names the holder; the
-      // Lead's names the Lead. No row has a null assigned_by, so none would
+      // assignment and both handovers name the Lead (since SCRUM-444, 055, the
+      // holder may not hand over). No row has a null assigned_by, so none would
       // read "automatically on submission", which listAssignmentHistory derives
       // from a null (SCRUM-327's rows keep theirs).
       const id = await request();
@@ -1405,7 +1404,7 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
 
       await assign(id, coordinator, lead, 'Yours');
       await pause();
-      await reassign(id, otherCoordinator, coordinator, 'Handing over');
+      await reassign(id, otherCoordinator, lead, 'Handing over');
       await pause();
       await reassign(id, coordinator, lead);
 
@@ -1416,7 +1415,7 @@ describe('SCRUM-325: the status lifecycle in Postgres', () => {
       )).rows;
       expect(history).toEqual([
         { previous_coordinator_id: null, new_coordinator_id: coordinator, assigned_by: lead, handover_note: 'Yours' },
-        { previous_coordinator_id: coordinator, new_coordinator_id: otherCoordinator, assigned_by: coordinator, handover_note: 'Handing over' },
+        { previous_coordinator_id: coordinator, new_coordinator_id: otherCoordinator, assigned_by: lead, handover_note: 'Handing over' },
         { previous_coordinator_id: otherCoordinator, new_coordinator_id: coordinator, assigned_by: lead, handover_note: null },
       ]);
     });

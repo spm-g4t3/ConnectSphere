@@ -57,8 +57,15 @@ const stateRow = (overrides = {}) => ({
   },
 });
 
-/** A client whose rpc answers by function name. */
-function fakeClient({ rpc = {}, type = { id: TYPE_ID, retired_at: null }, event = { id: EVENT_ID } } = {}) {
+/**
+ * A client whose rpc answers by function name. The event is the signed-in
+ * coordinator's: since SCRUM-444 the read answers only its holder and the Lead.
+ */
+function fakeClient({
+  rpc = {},
+  type = { id: TYPE_ID, retired_at: null },
+  event = { id: EVENT_ID, status: 'approved', assigned_coordinator_id: COORDINATOR_ID },
+} = {}) {
   return rpcByNameClient({
     rpc,
     fallback: () => ok({ request: null }),

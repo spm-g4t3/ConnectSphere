@@ -198,7 +198,8 @@ describe("SCRUM487_AC2 the coordinators table", () => {
 
     renderOverview();
 
-    expect(screen.getByText("Loading coordinators...")).toBeInTheDocument();
+    // The events list loads under its own heading, so look under this one.
+    expect(screen.getByRole("heading", { name: "Coordinators" }).nextElementSibling).toHaveTextContent(/^Loading\.\.\.$/);
   });
 
   it("SCRUM487_AC2_a_failed_overview_is_said_and_the_events_still_load", async () => {

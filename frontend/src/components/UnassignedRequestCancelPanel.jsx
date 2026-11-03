@@ -6,10 +6,12 @@
 // has no attendees to tell. The server's cancel_event_request (013) decides
 // whether the Lead may cancel it, under the row lock.
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cancelEventRequest, getEventCancellationImpact } from "../services/eventRequestService";
 import { statusMessageOf } from "../services/apiErrors";
 import { CancellationImpact } from "./EventCancellationPanel";
+import Button from "./ui/Button";
+import ErrorNotice from "./ui/ErrorNotice";
 
 // Keyed by status for both calls, never by the server's text. 403 and 409 are
 // the two ways the race with an assignment, or another Lead, is lost (AC5).
@@ -24,10 +26,11 @@ const DEFAULT_ERROR = "The request could not be cancelled. No changes have been 
 /**
  * @param {object} props
  * @param {object} props.request       the queue row
- * @param {Function} props.onCancel    back to the queue, nothing done
  * @param {Function} props.onCancelled called with the cancelled request
+ *
+ * No way back of its own: UnassignedQueue draws one back link for both panels.
  */
-export default function UnassignedRequestCancelPanel({ request, onCancel, onCancelled }) {
+export default function UnassignedRequestCancelPanel({ request, onCancelled }) {
   const [reason, setReason] = useState("");
   const [initiator, setInitiator] = useState("");
   const [impact, setImpact] = useState(null);
@@ -35,6 +38,12 @@ export default function UnassignedRequestCancelPanel({ request, onCancel, onCanc
   const [loadingImpact, setLoadingImpact] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState(null);
+  const headingRef = useRef(null);
+
+  // The button that opened this panel has gone, so focus starts on its title.
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, []);
 
   // A preview is of the inputs it was asked with, so a change discards it.
   function invalidatePreview(update) {
@@ -77,10 +86,7 @@ export default function UnassignedRequestCancelPanel({ request, onCancel, onCanc
 
   return (
     <div className="assign-coordinator unassigned-cancel">
-      <button className="unassigned-queue__back" type="button" onClick={onCancel}>
-        &larr; Back to the unassigned queue
-      </button>
-      <h2>Cancel {request.eventName}</h2>
+      <h2 ref={headingRef} tabIndex={-1}>Cancel {request.eventName}</h2>
       <p>
         This request has no coordinator yet. The Organiser will be told it was
         cancelled, with your reason. Cancelling is final.
@@ -122,9 +128,9 @@ export default function UnassignedRequestCancelPanel({ request, onCancel, onCanc
           </label>
         </fieldset>
         <div className="assign-coordinator__actions">
-          <button type="submit" disabled={loadingImpact || cancelling}>
+          <Button type="submit" disabled={loadingImpact || cancelling}>
             {loadingImpact ? "Loading impact..." : impact ? "Refresh impact preview" : "Preview cancellation"}
-          </button>
+          </Button>
         </div>
       </form>
 
@@ -142,22 +148,18 @@ export default function UnassignedRequestCancelPanel({ request, onCancel, onCanc
               />
               I have reviewed the impact and confirm cancelling this request.
             </label>
-            <button
-              type="button"
-              className="unassigned-queue__cancel"
+            <Button
+              variant="danger"
               onClick={handleCancel}
               disabled={!confirmed || cancelling || loadingImpact}
             >
               {cancelling ? "Cancelling..." : "Cancel request"}
-            </button>
+            </Button>
           </div>
         </>
       )}
-      {error && (
-        <p className="unassigned-queue__error" role="alert">
-          {error}
-        </p>
-      )}
+      {/* Form errors have no Try again: previewing or cancelling again is the retry. */}
+      {error && <ErrorNotice message={error} />}
     </div>
   );
 }

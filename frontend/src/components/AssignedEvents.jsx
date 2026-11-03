@@ -14,7 +14,7 @@
 // (below).
 //
 // Built the way UnassignedQueue is: a <section> that takes its card styling
-// and badge colours from the wrapper App.jsx mounts it in, a status-keyed
+// from the wrapper App.jsx mounts it in, a status-keyed
 // error table, and loading, error and empty states said in words. The rows
 // borrow My events' row classes, so the two lists of events look alike
 // without a stylesheet of their own. No refetch on focus: the Lead leaves this
@@ -36,8 +36,9 @@
 //
 // Each of the three reads has its own loading, failure and empty state, so
 // one failing never takes the others down. Only the list's failure is an
-// alert: the list is what the page is for, and SCRUM-486's tests find its
-// failure as the page's one alert.
+// alert (ErrorNotice): the list is what the page is for, and SCRUM-486's tests
+// find its failure as the page's one alert. The other two say theirs politely,
+// each with its own Try again.
 //
 // The words for each status, in the table's headings and the status filter,
 // come from the overview response's statuses: { status, label, finished },
@@ -49,17 +50,21 @@
 // table written here, a second copy of the vocabulary eventRequestStatus.js
 // owns.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import UnassignedCount from "./UnassignedCount";
 import CoordinatorWorkloadTable from "./CoordinatorWorkloadTable";
 import AssignedEventsFilters from "./AssignedEventsFilters";
 import { listAssignedEventsForLead, listCoordinatorOverview } from "../services/eventRequestService";
-import { formatTimestamp } from "../services/displayFormat";
-import {
-  readStatusDisplay,
-  statusClassName,
-} from "../services/eventRequestStatusDisplay";
+import { canRetryRead } from "../services/apiErrors";
+import { formatDateTime } from "../services/displayFormat";
+import { readStatusDisplay, statusTone } from "../services/eventRequestStatusDisplay";
+import Button from "./ui/Button";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import LoadingText from "./ui/LoadingText";
+import StatusBadge from "./ui/StatusBadge";
+import useFocusAfterRetry from "./useFocusAfterRetry";
 
 // 403 has its own words, as in UnassignedQueue: it means the account is not a
 // Lead, an administration problem, not a breakage.
@@ -69,7 +74,7 @@ import {
 const LIST_ERROR_MESSAGES = {
   400: "Those filters could not be applied.",
   403: "Only the Event Coordinator Lead can see the assigned events.",
-  500: "The assigned events could not be loaded. Please try again.",
+  500: "The assigned events could not be loaded.",
 };
 
 const NO_FILTERS = Object.freeze({ coordinatorId: "", status: "", includeFinished: false });
@@ -77,31 +82,47 @@ const NO_FILTERS = Object.freeze({ coordinatorId: "", status: "", includeFinishe
 export default function AssignedEvents() {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState(null); // { message, retryable }
   const [filters, setFilters] = useState(NO_FILTERS);
+  // Bumped by Try again, so the list effect reads the same filters again.
+  const [listAttempt, setListAttempt] = useState(0);
 
   // The overview: { statuses, coordinators }, read once for the table and
   // the filters.
   const [statuses, setStatuses] = useState([]);
   const [coordinators, setCoordinators] = useState([]);
   const [overviewLoading, setOverviewLoading] = useState(true);
-  const [overviewFailed, setOverviewFailed] = useState(false);
+  const [overviewError, setOverviewError] = useState(null); // { retryable }
+
+  // State is set only in the callbacks, so the first read sets none before it answers.
+  const loadOverview = useCallback(
+    () =>
+      listCoordinatorOverview()
+        .then((overview) => {
+          setStatuses(overview.statuses);
+          setCoordinators(overview.coordinators);
+        })
+        .catch((err) => setOverviewError({ retryable: canRetryRead(err) }))
+        .finally(() => setOverviewLoading(false)),
+    [],
+  );
 
   useEffect(() => {
-    async function load() {
-      try {
-        const overview = await listCoordinatorOverview();
-        setStatuses(overview.statuses);
-        setCoordinators(overview.coordinators);
-      } catch {
-        setOverviewFailed(true);
-      } finally {
-        setOverviewLoading(false);
-      }
-    }
+    loadOverview();
+  }, [loadOverview]);
 
-    load();
-  }, []);
+  // Loading starts true, so only a retry needs to raise it.
+  function reloadOverview() {
+    setOverviewLoading(true);
+    setOverviewError(null);
+    return loadOverview();
+  }
+  // Each Try again goes away as its read starts, so focus moves to the heading
+  // of its section instead of falling to the page body.
+  const { headingRef: coordinatorsHeadingRef, retry: retryOverview } = useFocusAfterRetry(reloadOverview);
+  const { headingRef: eventsHeadingRef, retry: retryList } = useFocusAfterRetry(
+    useCallback(() => setListAttempt((attempt) => attempt + 1), []),
+  );
 
   // Read again on every change of filters. A change made while a read is in
   // flight starts another, and the two can answer in either order, so each
@@ -122,10 +143,10 @@ export default function AssignedEvents() {
       } catch (err) {
         if (ignore) return;
         setEvents([]);
-        setError(
-          LIST_ERROR_MESSAGES[err.response?.status] ||
-            "The assigned events could not be loaded. Please try again.",
-        );
+        setError({
+          message: LIST_ERROR_MESSAGES[err.response?.status] || "The assigned events could not be loaded.",
+          retryable: canRetryRead(err),
+        });
       } finally {
         if (!ignore) setLoading(false);
       }
@@ -135,15 +156,22 @@ export default function AssignedEvents() {
     return () => {
       ignore = true;
     };
-  }, [filters]);
+  }, [filters, listAttempt]);
 
   // The table counts active events only, so its columns are the active statuses.
   const activeStatuses = statuses.filter((entry) => !entry.finished);
   const filtered = filters.coordinatorId !== "" || filters.status !== "" || filters.includeFinished;
 
+  // The button goes as the list reloads, so focus moves to the list's heading
+  // instead of falling to the page body.
+  function clearFilters() {
+    eventsHeadingRef.current?.focus();
+    setFilters(NO_FILTERS);
+  }
+
   return (
     <section className="assigned-events">
-      <h2>Assigned events</h2>
+      <h1>Assigned events</h1>
       <p>Every coordinator&apos;s events and workload.</p>
 
       {/* SCRUM-487 AC4 (SCRUM-543): the requests nobody holds yet, counted,
@@ -152,16 +180,17 @@ export default function AssignedEvents() {
       <UnassignedCount />
 
       {/* SCRUM-487 AC2 (SCRUM-544). */}
-      <h3>Coordinators</h3>
+      <h2 ref={coordinatorsHeadingRef} tabIndex={-1}>Coordinators</h2>
       <CoordinatorWorkloadTable
         coordinators={coordinators}
         statuses={activeStatuses}
         loading={overviewLoading}
-        failed={overviewFailed}
+        failed={overviewError !== null}
+        onRetry={overviewError?.retryable ? retryOverview : undefined}
       />
 
       {/* SCRUM-487 AC3 (SCRUM-544). */}
-      <h3>Events</h3>
+      <h2 ref={eventsHeadingRef} tabIndex={-1}>Events</h2>
       <AssignedEventsFilters
         coordinators={coordinators}
         statuses={statuses}
@@ -169,13 +198,38 @@ export default function AssignedEvents() {
         onChange={setFilters}
       />
 
-      {loading && <p>Loading...</p>}
-      {error && <p role="alert">{error}</p>}
+      {loading && <LoadingText />}
+      {error && (
+        <ErrorNotice
+          message={error.message}
+          onRetry={error.retryable ? retryList : undefined}
+        />
+      )}
       {/* Nothing held is said, never left as an empty card that could be
           mistaken for a failed load. With filters set, the words say the
           filters found nothing, not that nobody holds anything. */}
       {!loading && !error && events.length === 0 && (
-        <p>{filtered ? "No events match these filters." : "No coordinator is holding an active event."}</p>
+        filtered ? (
+          <EmptyState
+            message="No events match these filters."
+            nextStep="Change or clear the filters to see more."
+            action={
+              <Button variant="secondary" onClick={clearFilters}>
+                Clear filters
+              </Button>
+            }
+          />
+        ) : (
+          <EmptyState
+            message="No coordinator is holding an active event."
+            nextStep="Assign a request from the unassigned queue."
+            action={
+              <Link className="ui-button ui-button--primary" to="/unassigned-queue">
+                Open the unassigned queue
+              </Link>
+            }
+          />
+        )
       )}
 
       {/* Earliest event first, as the server orders it; not re-sorted. */}
@@ -189,12 +243,10 @@ export default function AssignedEvents() {
               <div className="my-assigned-events__summary">
                 <span className="my-assigned-events__title">
                   <strong>{event.eventName}</strong>
-                  <span className={`status-badge ${statusClassName(display.group)}`}>
-                    {display.label}
-                  </span>
+                  <StatusBadge tone={statusTone(display.group)}>{display.label}</StatusBadge>
                 </span>
                 <span className="my-assigned-events__meta">
-                  <span>{formatTimestamp(event.proposedStart, "Date not set")}</span>
+                  <span>{formatDateTime(event.proposedStart, "Date not set")}</span>
                   <span>Organiser: {event.organiserName ?? "No name on record"}</span>
                   <span>Coordinator: {event.assignedCoordinatorName ?? "No name on record"}</span>
                 </span>

@@ -277,8 +277,11 @@ describe('SCRUM-402: the organiser submits with nothing returned', () => {
 
 
 describe('SCRUM-402: the coordinator reads the change requests', () => {
+  // SCRUM-444: the event is read first, so the route can refuse a non-holder.
+  const held = ok(eventRow({ assigned_coordinator_id: COORDINATOR_ID }));
+
   it('SCRUM402_AC1_oldest_first_with_each_rows_group_and_current_value_in_one_query', async () => {
-    const client = createEventRequestClient([ok([
+    const client = createEventRequestClient([held, ok([
       changeRow({ event_requests: { purpose: 'Industry networking', venue_requirements: 'A large hall' } }),
       changeRow({ id: OTHER_ID, change_field: 'venue', requested_change: 'A tiered hall',
         event_requests: { purpose: 'Industry networking', venue_requirements: 'A large hall' } }),
@@ -295,23 +298,24 @@ describe('SCRUM-402: the coordinator reads the change requests', () => {
       ['other', 'c0000000-0000-4000-8000-000000000003', null],
     ]);
     expect(res.body.map((r) => r.organiserNote)).toEqual([null, null, null]);
-    expect(client.calls).toHaveLength(1);
-    expect(client.calls[0]).toMatchObject({
+    expect(client.calls).toHaveLength(2);
+    expect(client.calls[0]).toMatchObject({ table: 'event_requests', filters: [['id', REQUEST_ID]] });
+    expect(client.calls[1]).toMatchObject({
       table: 'event_change_requests',
       filters: [['event_request_id', REQUEST_ID]],
       order: [['created_at', { ascending: true }], ['change_field', { ascending: true }]],
     });
-    expect(client.calls[0].select).toContain('event_requests ( event_name, description, purpose, proposed_start');
+    expect(client.calls[1].select).toContain('event_requests ( event_name, description, purpose, proposed_start');
   });
 
   it('SCRUM402_AC1_a_failed_read_is_a_500_not_an_empty_list', async () => {
-    const client = createEventRequestClient([dbError('XX000', 'boom')]);
+    const client = createEventRequestClient([held, dbError('XX000', 'boom')]);
 
     expect((await request(app(client)).get(`/api/event-requests/${REQUEST_ID}/change-requests/review`)).status).toBe(500);
   });
 
   it('SCRUM402_AC1_the_coordinators_list_carries_the_organisers_note', async () => {
-    const client = createEventRequestClient([ok([changeRow({ organiser_note: 'Our sponsor asked', event_requests: { purpose: 'Industry networking' } })])]);
+    const client = createEventRequestClient([held, ok([changeRow({ organiser_note: 'Our sponsor asked', event_requests: { purpose: 'Industry networking' } })])]);
 
     const res = await request(app(client)).get(`/api/event-requests/${REQUEST_ID}/change-requests/review`);
 

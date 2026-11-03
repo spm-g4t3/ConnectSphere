@@ -532,8 +532,9 @@ describe('SCRUM-486 AC2-06: the shared review queue lists only requests someone 
     unassignedRow({ id: 'draft-stale-coordinator', status: STATUS.DRAFT, assigned_coordinator_id: COORDINATOR_A }),
   ];
 
+  // Read as COORDINATOR_A, who holds every held row: since SCRUM-444 the queue is the caller's.
   it('SCRUM486_AC2_the_review_queue_leaves_out_a_submitted_request_nobody_holds', async () => {
-    const queue = await listEventRequestsForReview({ client: createTableFakeClient(TABLE) });
+    const queue = await listEventRequestsForReview(COORDINATOR_A, { client: createTableFakeClient(TABLE) });
 
     expect(queue.map((request) => request.id)).not.toContain('unassigned-submitted');
     for (const request of queue) expect(request.assignedCoordinatorId).not.toBeNull();
@@ -542,7 +543,7 @@ describe('SCRUM-486 AC2-06: the shared review queue lists only requests someone 
   it('SCRUM486_AC2_the_review_queue_still_lists_a_held_request_in_every_status_it_listed_before', async () => {
     // Submitted, under review, pending clarification: COORDINATOR_QUEUE_STATUSES,
     // unchanged. Approved and draft stay out, as they always did.
-    const queue = await listEventRequestsForReview({ client: createTableFakeClient(TABLE) });
+    const queue = await listEventRequestsForReview(COORDINATOR_A, { client: createTableFakeClient(TABLE) });
 
     expect(queue.map((request) => request.id).sort()).toEqual(
       ['held-pending-clarification', 'held-submitted', 'held-under-review'],
@@ -570,7 +571,7 @@ describe('SCRUM-486 AC2-06: the shared review queue lists only requests someone 
     // the three review statuses, so a draft is out of both, whatever its
     // coordinator column says. Run against the same table as above, through
     // the real queries.
-    const shared = await listEventRequestsForReview({ client: createTableFakeClient(TABLE) });
+    const shared = await listEventRequestsForReview(COORDINATOR_A, { client: createTableFakeClient(TABLE) });
     const client = createTableFakeClient(TABLE);
     const leads = await listUnassignedEventRequests({
       client: {
@@ -656,8 +657,13 @@ describe("SCRUM-486 AC6: the Lead reads an event's clarification history", () =>
     ]);
   });
 
-  it('SCRUM486_AC6_a_coordinator_still_reads_it', async () => {
-    await expect(read('event_coordinator')).resolves.toHaveLength(1);
+  it('SCRUM444_AC1_a_coordinator_who_does_not_hold_it_gets_not_found', async () => {
+    // Was SCRUM486_AC6_a_coordinator_still_reads_it: the caller is not
+    // COORDINATOR_A, and since SCRUM-444 AC1 only the holder and the Lead read it.
+    const err = await errorFrom(read('event_coordinator'));
+
+    expect(err).toBeInstanceOf(NotFoundError);
+    expect(err.message).toBe(`Event request ${REQUEST_ID} not found`);
   });
 
   it.each([
