@@ -192,6 +192,19 @@ describe("SCRUM585 AC4 the Organiser's dashboard", () => {
     expect(screen.getAllByText("15 Jan 2026, 9:00 am").length).toBeGreaterThan(0);
     expect(screen.getByText("15 Jan 2026, 11:00 am")).toBeInTheDocument();
   });
+
+  it("SCRUM585_AC4_dashboard_reply_by_day_still_ahead_says_Reply_by_with_the_default_note", async () => {
+    vi.mocked(getMyEventRequests).mockResolvedValue([
+      { ...clarification, clarificationNote: null, clarificationReplyByDate: "2099-12-31" },
+    ]);
+    renderDashboard();
+
+    const deadline = (await screen.findByRole("link", { name: "Respond in My Events" })).closest("li");
+    expect(within(deadline).getByText("Reply by")).toBeInTheDocument();
+    expect(within(deadline).queryByText("Overdue since")).toBeNull();
+    expect(within(deadline).getByText("31 Dec 2099")).toBeInTheDocument();
+    expect(within(deadline).getByText("The Event Coordinator requested an amendment.")).toBeInTheDocument();
+  });
 });
 
 describe("SCRUM585 AC4 My Events", () => {
@@ -359,6 +372,16 @@ describe("SCRUM585 AC4 the clarification reply", () => {
 
     expect(await screen.findByText("1 field editable")).toBeInTheDocument();
   });
+
+  it("SCRUM585_AC4_clarification_reply_refused_options_read_has_no_try_again", async () => {
+    vi.mocked(getEventClarificationHistory).mockRejectedValue(httpError(403));
+    render(<ClarificationReplyForm request={clarification} />);
+
+    const amendments = screen.getByRole("region", { name: "Event amendments" });
+    expect(await within(amendments).findByRole("alert"))
+      .toHaveTextContent("Could not load the clarification details.");
+    expect(within(amendments).queryByRole("button", { name: "Try again" })).toBeNull();
+  });
 });
 
 describe("SCRUM585 AC4 the change request history", () => {
@@ -388,6 +411,13 @@ describe("SCRUM585 AC4 the change request history", () => {
     expect(await screen.findByText(/^Requested 15 Jan 2026, 9:00 am; processed 15 Jan 2026, 11:00 am$/))
       .toBeInTheDocument();
   });
+
+  it("SCRUM585_AC4_change_requests_refused_read_has_no_try_again", async () => {
+    vi.mocked(getChangeRequests).mockRejectedValue(httpError(403));
+    render(<ChangeRequestStatusList eventRequestId="e1" />);
+
+    await expectErrorNotice("Could not load your change requests.", { tryAgain: false });
+  });
 });
 
 describe("SCRUM585 AC4 the clarification history", () => {
@@ -412,6 +442,13 @@ describe("SCRUM585 AC4 the clarification history", () => {
 
     expect(await screen.findByText("15 Jan 2026, 9:00 am")).toBeInTheDocument();
     expect(screen.getByText("20 Jan 2026")).toBeInTheDocument();
+  });
+
+  it("SCRUM585_AC4_clarification_history_missing_event_has_no_try_again", async () => {
+    vi.mocked(getEventClarificationHistory).mockRejectedValue(httpError(404));
+    render(<ClarificationHistory eventRequestId="e1" />);
+
+    await expectErrorNotice("Clarification history could not be loaded.", { tryAgain: false });
   });
 });
 
@@ -460,6 +497,14 @@ describe("SCRUM585 AC4 the panels inside a My Events row", () => {
     expect(await screen.findByText("Priya Nair")).toBeInTheDocument();
   });
 
+  it("SCRUM585_AC4_decision_outcome_missing_name_record_has_no_try_again", async () => {
+    vi.mocked(getAssignmentHistory).mockRejectedValue(httpError(404));
+    render(<DecisionOutcome request={{ ...rejected, decision: "rejected", decidedBy: "c1", decidedAt: NINE_AM }} view="organiser" />);
+
+    await expectErrorNotice("The decider's name could not be loaded.", { tryAgain: false });
+    expect(screen.getByText("Rejected")).toBeInTheDocument();
+  });
+
   it("SCRUM585_AC4_change_history_empty_and_failed_read_follow_the_standard", async () => {
     vi.mocked(getEventChangeHistory).mockRejectedValueOnce(httpError(500)).mockResolvedValue([]);
     render(<EventChangeHistory eventRequestId="e1" />);
@@ -494,6 +539,21 @@ describe("SCRUM585 AC4 the registration screens", () => {
     inRouter(<EventRegistrationSettings eventId="e1" />);
 
     await expectErrorNotice("Session expired.", { tryAgain: false });
+  });
+
+  // The read behind Try again: a server fault can be tried again, a refusal cannot.
+  it("SCRUM585_AC4_registration_settings_try_again_failing_again_keeps_or_drops_try_again_by_cause", async () => {
+    vi.mocked(getRegistrationSettings)
+      .mockRejectedValueOnce(httpError(503))
+      .mockRejectedValueOnce(httpError(500))
+      .mockRejectedValueOnce(httpError(403, { error: "Not your event." }));
+    inRouter(<EventRegistrationSettings eventId="e1" />);
+
+    await userEvent.click(await expectErrorNotice("Could not load registration settings.", { tryAgain: true }));
+    await userEvent.click(await expectErrorNotice("Could not load registration settings.", { tryAgain: true }));
+
+    await expectErrorNotice("Not your event.", { tryAgain: false });
+    expect(getRegistrationSettings).toHaveBeenCalledTimes(3);
   });
 
   it("SCRUM585_AC4_registration_settings_save_error_has_no_try_again", async () => {
@@ -537,6 +597,13 @@ describe("SCRUM585 AC4 the registration screens", () => {
     await userEvent.click(await expectErrorNotice("Could not load your events.", { tryAgain: true }));
 
     expect(await screen.findByText(/15 Jan 2026, 9:00 am/)).toBeInTheDocument();
+  });
+
+  it("SCRUM585_AC4_registration_events_refused_read_has_no_try_again", async () => {
+    vi.mocked(getMyEventRequests).mockRejectedValue(httpError(403));
+    inRouter(<RegistrationEventsList />);
+
+    await expectErrorNotice("Could not load your events.", { tryAgain: false });
   });
 
   it("SCRUM585_AC4_registrations_list_loading_and_empty_follow_the_standard", async () => {
