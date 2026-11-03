@@ -20,25 +20,35 @@
 // coordinator overview. SCRUM-487 extended it (the counts, the filters,
 // finished events), and its rows still link here.
 //
-// Open to coordinators too: it is the same read they already have, and gives
-// an event a link of its own. The server decides what either may do on it.
+// Open to coordinators too, for the events they hold (SCRUM-444): it is the
+// same read they already have, and gives an event a link of its own. The
+// server decides what either may do on it.
 
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
+import { useAuth } from "../auth/AuthContext";
+import { normaliseRole } from "../auth/normaliseRole";
 import { getEventRequestForReview } from "../services/eventRequestService";
 import CoordinatorRequestDetail from "./CoordinatorRequestDetail";
 
-// Keyed by status, as every load in this frontend is. 404 covers a draft as
-// well as a missing id: GET /:id/review answers both the same, so a draft is
-// not revealed to exist.
+// Keyed by status, as every load in this frontend is, never on the server's
+// text. 404 covers a draft, a missing id and, since SCRUM-444, an event the
+// caller does not hold: GET /:id/review answers all three the same. It is the
+// page a previous holder lands on from an old link or a notice (AC4).
 const LOAD_ERROR_MESSAGES = {
   403: "Only Event Coordinators and the Event Coordinator Lead can open an event here.",
-  404: "There is no submitted event request at this address.",
+  404: "This event isn't available to you. It may have been handed over to another coordinator, or it may no longer exist.",
   500: "This event request could not be loaded. Please try again.",
 };
 
+// The Lead reads every event, so their 404 is only ever a draft or a missing id:
+// no handover to mention. Keyed on the role from the auth context, not the text.
+const LEAD_NOT_FOUND = "This event request doesn't exist or hasn't been submitted yet.";
+
 export default function EventRequestReviewPage() {
   const { eventRequestId } = useParams();
+  const { user } = useAuth();
+  const isLead = normaliseRole(user?.role) === "EVENT_COORDINATOR_LEAD";
   const [request, setRequest] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -48,14 +58,15 @@ export default function EventRequestReviewPage() {
       setRequest(await getEventRequestForReview(eventRequestId));
       setError(null);
     } catch (err) {
+      const status = err.response?.status;
       setError(
-        LOAD_ERROR_MESSAGES[err.response?.status] ||
+        (isLead && status === 404 ? LEAD_NOT_FOUND : LOAD_ERROR_MESSAGES[status]) ||
           "This event request could not be loaded. Please try again.",
       );
     } finally {
       setLoading(false);
     }
-  }, [eventRequestId]);
+  }, [eventRequestId, isLead]);
 
   useEffect(() => {
     load();

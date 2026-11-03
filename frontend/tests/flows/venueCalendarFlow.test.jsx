@@ -26,7 +26,7 @@
 // coordinator reaches a retired venue's past bookings from search.
 //
 // SCRUM-484 (AC7): a booking at a venue with setup and turnaround shows the
-// three parts in every view. Its expected text is built with formatRange from
+// three parts in every view. Its expected text is built with formatDateTimeRange from
 // the same instants, so it holds in all three zones above.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -36,7 +36,7 @@ import userEvent from "@testing-library/user-event";
 import App from "../../src/App.jsx";
 import { useAuth } from "../../src/auth/AuthContext";
 import * as venueService from "../../src/services/venueService";
-import { formatRange } from "../../src/services/displayFormat";
+import { formatDateTimeRange, formatLongDay, formatMonthYear, formatShortDay } from "../../src/services/displayFormat";
 import { mockAuthUser } from "../helpers/renderApp.js";
 
 vi.mock("../../src/auth/AuthContext", async () => (await import("../helpers/authMock.js")).authContextMock());
@@ -92,21 +92,11 @@ function at(day, hour) {
 }
 
 function dayButtonName(date) {
-  return `Show ${date.toLocaleDateString("en-GB", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  })}`;
+  return `Show ${formatLongDay(date)}`;
 }
 
 function dayTitle(date) {
-  return date.toLocaleDateString("en-GB", {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
+  return formatShortDay(date);
 }
 
 /**
@@ -184,7 +174,7 @@ function windowOf(start, end) {
 
 /** Wait until the answer for the window on screen has landed. */
 async function settled() {
-  await waitFor(() => expect(screen.queryByText("Loading calendar...")).not.toBeInTheDocument());
+  await waitFor(() => expect(screen.queryByText("Loading...")).not.toBeInTheDocument());
 }
 
 function labelOf(item) {
@@ -329,7 +319,7 @@ describe("SCRUM178_AC1_AC2_AC4 venue calendar flow (SCRUM-184)", () => {
     await user.click(screen.getByRole("button", { name: "Month" }));
     await settled();
     expect(lastWindow()).toEqual(windowOf(monthStart, monthEnd));
-    const monthName = dayAfter(monthStart, 7).toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+    const monthName = formatMonthYear(dayAfter(monthStart, 7));
     expect(screen.getByRole("table", { name: monthName })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Next month" })).toBeInTheDocument();
 
@@ -344,7 +334,7 @@ describe("SCRUM178_AC1_AC2_AC4 venue calendar flow (SCRUM-184)", () => {
     await settled();
     expect(lastWindow()).toEqual(windowOf(tuesday, dayAfter(tuesday, 1)));
 
-    const dayItems = within(document.querySelector(".venue-calendar")).getAllByRole("listitem");
+    const dayItems = within(document.querySelector(".venue-calendar__entries")).getAllByRole("listitem");
     expect(dayItems).toHaveLength(1);
     expect(labelOf(dayItems[0])).toBe("Booked");
     expect(dayItems[0]).toHaveTextContent("Gala Dinner");
@@ -365,7 +355,7 @@ describe("SCRUM178_AC1_AC2_AC4 venue calendar flow (SCRUM-184)", () => {
 
     expect(window.location.pathname).toBe(`/venues/${RETIRED.id}/calendar`);
     expect(await screen.findByRole("heading", { level: 1, name: "Old Annex" })).toBeInTheDocument();
-    expect(screen.getByText("Retired")).toHaveClass("venue-calendar__badge");
+    expect(screen.getByText("Retired")).toHaveClass("ui-status-badge", "ui-status-badge--neutral");
     await settled();
 
     expect(lastWindow()).toEqual({ ...windowOf(monday, dayAfter(monday, 7)), venueId: RETIRED.id });
@@ -401,7 +391,7 @@ describe("SCRUM178_AC1 retired venue calendar from search (SCRUM-185)", () => {
 
     expect(window.location.pathname).toBe(`/venues/${RETIRED.id}/calendar`);
     expect(await screen.findByRole("heading", { level: 1, name: "Old Annex" })).toBeInTheDocument();
-    expect(screen.getByText("Retired")).toHaveClass("venue-calendar__badge");
+    expect(screen.getByText("Retired")).toHaveClass("ui-status-badge", "ui-status-badge--neutral");
     await settled();
 
     expect(calendarWindows()).toEqual([
@@ -467,9 +457,9 @@ describe("SCRUM484_AC7 venue calendar flow shows setup and turnaround", () => {
       entriesByVenue: { [VENUE.id]: [padded] },
     });
     const expected =
-      `Setup ${formatRange(padded.occupiedStartsAt, padded.startsAt)} · ` +
-      `Event ${formatRange(padded.startsAt, padded.endsAt)} · ` +
-      `Turnaround ${formatRange(padded.endsAt, padded.occupiedEndsAt)}`;
+      `Setup ${formatDateTimeRange(padded.occupiedStartsAt, padded.startsAt)} · ` +
+      `Event ${formatDateTimeRange(padded.startsAt, padded.endsAt)} · ` +
+      `Turnaround ${formatDateTimeRange(padded.endsAt, padded.occupiedEndsAt)}`;
 
     const user = userEvent.setup();
     signIn("event_coordinator");
@@ -496,7 +486,7 @@ describe("SCRUM484_AC7 venue calendar flow shows setup and turnaround", () => {
     // Day: the same text again.
     await user.click(screen.getByRole("button", { name: dayButtonName(wednesday) }));
     await settled();
-    const dayItem = within(document.querySelector(".venue-calendar")).getByRole("listitem");
+    const dayItem = within(document.querySelector(".venue-calendar__entries")).getByRole("listitem");
     expect(dayItem.querySelector(".venue-calendar__entry-time").textContent).toBe(expected);
   });
 });

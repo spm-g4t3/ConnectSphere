@@ -139,7 +139,9 @@ describe("SCRUM-402 the list", () => {
     expect(await screen.findByText("A photographer, please")).toBeInTheDocument();
   });
 
-  it("SCRUM402_AC2_the_lead_and_other_coordinators_read_it_with_no_buttons", async () => {
+  it("SCRUM444_AC2_the_lead_reads_it_with_no_buttons", async () => {
+    // Was SCRUM402_AC2_the_lead_and_other_coordinators_read_it_with_no_buttons:
+    // since SCRUM-444 other coordinators never get the event, the Lead does.
     renderPanel({ canProcess: false });
 
     await screen.findByText("Our sponsor asked", { exact: false });

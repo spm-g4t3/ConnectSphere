@@ -113,9 +113,9 @@ describe('SCRUM-384: GET /mine returns the closing notes to the assigned coordin
 describe('SCRUM-384: GET /:id/review returns the closing notes to a coordinator', () => {
   const review = (client, requireAuth) => request(appWith(client, requireAuth)).get(`/api/event-requests/${EVENT_ID}/review`);
 
+  // SCRUM-444 AC1: "another event coordinator" left this table; it is refused below.
   it.each([
     ['an event coordinator', ROLE.EVENT_COORDINATOR, COORDINATOR_ID],
-    ['another event coordinator', ROLE.EVENT_COORDINATOR, OTHER_COORDINATOR_ID],
     ['the event coordinator lead', ROLE.EVENT_COORDINATOR_LEAD, LEAD_ID],
   ])('SCRUM379_AC2_%s_gets_closingNotes', async (_label, role, id) => {
     const client = createEventRequestClient([ok(row())]);
@@ -125,6 +125,17 @@ describe('SCRUM-384: GET /:id/review returns the closing notes to a coordinator'
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ id: EVENT_ID, status: STATUS.COMPLETED, closingNotes: SECRET });
     expect(selectedColumns(client)).toContain('closing_notes');
+  });
+
+  it('SCRUM444_AC5_another_event_coordinator_is_refused_the_closing_notes', async () => {
+    // Was the "another event coordinator" row of SCRUM379_AC2_%s_gets_closingNotes.
+    const client = createEventRequestClient([ok(row())]);
+
+    const res = await review(client, as(ROLE.EVENT_COORDINATOR, OTHER_COORDINATOR_ID));
+
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ error: `Event request ${EVENT_ID} not found` });
+    expect(JSON.stringify(res.body)).not.toContain(SECRET);
   });
 
   it('SCRUM379_AC2_an_event_without_notes_has_closingNotes_null', async () => {

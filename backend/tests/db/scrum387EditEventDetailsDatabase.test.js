@@ -193,9 +193,10 @@ describe('SCRUM-387: edit_event_request_details (022)', () => {
     });
 
     it('SCRUM387_AC1_a_coordinator_reassigned_away_is_refused_with_42501', async () => {
-      // AC1-05: the event was handed to another coordinator after review began.
+      // AC1-05: the event was handed to another coordinator after review began,
+      // by the Lead: since SCRUM-444 (055) the holder may not hand over.
       const id = await underReview();
-      await db.query("select reassign_event_request($1, $2, $3, 'Over to you')", [id, otherCoordinator, coordinator]);
+      await db.query("select reassign_event_request($1, $2, $3, 'Over to you')", [id, otherCoordinator, lead]);
 
       await expectRefused(id, () => edit(id, coordinator, { eventName: NEW.eventName }), '42501');
       expect((await editResult(id, otherCoordinator, { eventName: NEW.eventName })).changedFields).toEqual(['eventName']);

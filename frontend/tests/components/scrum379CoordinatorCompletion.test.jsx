@@ -48,7 +48,6 @@ vi.mock("../../src/services/eventRequestService", () => ({
   getEventClarificationHistory: vi.fn(),
   getEventReadiness: vi.fn(),
   getMyEventRequests: vi.fn(),
-  listCoordinators: vi.fn(),
   listCoordinatorWorkload: vi.fn(),
   processCoordinatorChangeRequest: vi.fn(),
   previewSignificantEventChange: vi.fn(),
@@ -88,7 +87,6 @@ const ORGANISER = "11111111-1111-4111-8111-111111111111";
 const REQUEST_ID = "22222222-2222-4222-8222-222222222222";
 
 const COORDINATOR_USER = { id: ASSIGNED, role: "event_coordinator" };
-const OTHER_COORDINATOR_USER = { id: OTHER, role: "event_coordinator" };
 const LEAD_USER = { id: OTHER, role: "event_coordinator_lead" };
 
 const DISPLAY = {
@@ -213,13 +211,9 @@ describe("SCRUM379 when Mark as completed is offered", () => {
     expect(screen.getByText("You can mark this event as completed once it has ended.")).toBeInTheDocument();
   });
 
-  it("SCRUM379_AC1_another_coordinator_is_not_offered_it_and_gets_no_hint", () => {
-    renderDetail(OTHER_COORDINATOR_USER);
-
-    expect(markButton()).not.toBeInTheDocument();
-    expect(screen.queryByText(/once it has ended/)).not.toBeInTheDocument();
-  });
-
+  // SCRUM379_AC1_another_coordinator_is_not_offered_it_and_gets_no_hint went in
+  // SCRUM-444: that coordinator gets the 404 page (SCRUM444_AC4_a_404_says_the_event_isnt_available_to_you),
+  // and the non-holder who opens this screen, the Lead, is the next test.
   it("SCRUM379_AC1_the_lead_is_not_offered_it", () => {
     renderDetail(LEAD_USER);
 
@@ -367,12 +361,8 @@ describe("SCRUM379 closing notes on a completed event", () => {
     expect(within(section).getByText("Only coordinators can see these notes. The organiser cannot.")).toBeInTheDocument();
   });
 
-  it("SCRUM379_AC2_another_coordinator_sees_the_notes", () => {
-    renderDetail(OTHER_COORDINATOR_USER, completed());
-
-    expect(screen.getByText(SECRET)).toBeInTheDocument();
-  });
-
+  // SCRUM379_AC2_another_coordinator_sees_the_notes went in SCRUM-444: that
+  // coordinator gets the 404 page, and the Lead's case is the next test.
   it("SCRUM379_AC2_the_lead_sees_the_notes", () => {
     renderDetail(LEAD_USER, completed());
 

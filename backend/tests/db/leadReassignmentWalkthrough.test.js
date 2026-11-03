@@ -86,8 +86,9 @@ describe('SCRUM-486 AC6, AC7: a Lead hands A\'s event to B, over HTTP, on a real
     await db?.close();
   });
 
-  it('SCRUM486_AC7_after_a_lead_hands_a_to_b_a_is_refused_and_b_reviews_and_decides', async () => {
-    // AC6-02, then AC7-01 to AC7-03, in the order a person would do them.
+  it('SCRUM444_AC4_after_a_lead_hands_a_to_b_a_is_refused_and_b_reviews_and_decides', async () => {
+    // Was SCRUM486_AC7_…: SCRUM-444 AC4 reverses AC7-03, so A no longer reads it.
+    // AC6-02, then AC7-01 and AC7-02, in the order a person would do them.
 
     // The Lead, who does not hold the event, opens it and hands it to B.
     const opened = await request(asLead()).get(`/api/event-requests/${eventId}/review`);
@@ -113,8 +114,10 @@ describe('SCRUM-486 AC6, AC7: a Lead hands A\'s event to B, over HTTP, on a real
       handover_note: 'Priya is on leave.',
     });
 
-    // A can still read it (AC7-03), and can no longer act on it (AC7-02).
-    expect((await request(asA()).get(`/api/event-requests/${eventId}/review`)).status).toBe(200);
+    // A can no longer read it, a missing id's 404 (SCRUM-444 AC4), nor act on it (AC7-02).
+    const aReads = await request(asA()).get(`/api/event-requests/${eventId}/review`);
+    expect(aReads.status).toBe(404);
+    expect(aReads.body).toEqual({ error: `Event request ${eventId} not found` });
     const aStarts = await request(asA()).post(`/api/event-requests/${eventId}/start-review`).send({});
     expect(aStarts.status).toBe(403);
     const aHandsOver = await request(asA())

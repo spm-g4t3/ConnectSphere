@@ -3,7 +3,7 @@
 // SCRUM-125 regression. shortId and formatTimestamp moved from VenueDetail.jsx
 // into services/displayFormat.js; a booking row must render exactly as it did
 // before. The venue service is mocked, so nothing touches the network.
-// Timezone-safe: the expected range is computed as Singapore time (sgTime) from
+// Timezone-safe: the expected range is computed with the display format from
 // fixtures that carry offsets.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -16,7 +16,7 @@ import {
   getVenueDetails,
   getVenueHistory,
 } from "../../src/services/venueService";
-import { sgTime } from "../helpers/singaporeTime.js";
+import { formatDateTime, formatDateTimeRange } from "../../src/services/displayFormat";
 
 // SCRUM-493: VenueDetail also fetches getVenueDetails for its safety section.
 // The default (set in beforeEach) is a venue with neither fact recorded, so
@@ -59,9 +59,7 @@ describe("SCRUM17 VenueDetail after the display helpers moved", () => {
     expect(code).toHaveAttribute("title", BOOKING.eventRequestId);
 
     const row = code.closest("li");
-    const expectedRange =
-      `${sgTime(BOOKING.startsAt)} – ` +
-      `${sgTime(BOOKING.endsAt)}`;
+    const expectedRange = formatDateTimeRange(BOOKING.startsAt, BOOKING.endsAt);
     expect(within(row).getByText(expectedRange).tagName).toBe("SPAN");
 
     expect(getVenueBookings).toHaveBeenCalledWith(VENUE.id);
@@ -104,7 +102,7 @@ describe("SCRUM17 VenueDetail after the display helpers moved", () => {
 
     const code = await screen.findByText("9b1deb4d");
     expect(code).toHaveAttribute("title", editor);
-    expect(screen.getByText(sgTime(changedAt))).toBeInTheDocument();
+    expect(screen.getByText(formatDateTime(changedAt))).toBeInTheDocument();
   });
 });
 
@@ -185,8 +183,7 @@ describe("SCRUM182 the bookings panel names the role gate", () => {
     const message = await screen.findByText(
       "Only Venue Staff and Event Coordinators can see a venue's bookings.",
     );
-    expect(message).toHaveAttribute("role", "alert");
-    expect(message).toHaveClass("venue-detail__error");
+    expect(message.closest('[role="alert"]')).toHaveClass("ui-error-notice");
     expect(
       screen.queryByText("Could not load this venue's bookings. Please try again."),
     ).not.toBeInTheDocument();
@@ -393,8 +390,7 @@ describe("SCRUM493 the Safety information section", () => {
     const message = await screen.findByText(
       "That venue no longer exists. Go back and refresh the catalogue.",
     );
-    expect(message).toHaveAttribute("role", "alert");
-    expect(message).toHaveClass("venue-detail__error");
+    expect(message.closest('[role="alert"]')).toHaveClass("ui-error-notice");
 
     await user.click(screen.getByRole("button", { name: "Try again" }));
 

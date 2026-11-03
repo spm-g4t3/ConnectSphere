@@ -92,7 +92,8 @@ describe('SCRUM-379 AC5, AC6: a Completed event stays readable, on the real sche
       statusHistoryOrganiser: await getEventRequestStatusHistory(eventId, organiser, { client }),
       statusHistoryCoordinator: await getEventRequestStatusHistory(eventId, coordinator, { client }),
       clarificationOrganiser: await asOrganiser((id, who) => getEventClarificationHistory(id, who, ROLE.EVENT_ORGANISER, { client })),
-      clarificationCoordinator: await getEventClarificationHistory(eventId, otherCoordinator, ROLE.EVENT_COORDINATOR, { client }),
+      // The holder: since SCRUM-444 a coordinator not assigned is refused (below).
+      clarificationCoordinator: await getEventClarificationHistory(eventId, coordinator, ROLE.EVENT_COORDINATOR, { client }),
       decisionsOrganiser: await asOrganiser((id, who) => getEventDecisionHistory(id, who, ROLE.EVENT_ORGANISER, { client })),
       decisionsCoordinator: await getEventDecisionHistory(eventId, coordinator, ROLE.EVENT_COORDINATOR, { client }),
       decisionsLead: await getEventDecisionHistory(eventId, lead, ROLE.EVENT_COORDINATOR_LEAD, { client }),
@@ -202,7 +203,8 @@ describe('SCRUM-379 AC5, AC6: a Completed event stays readable, on the real sche
       expect(after.arrangements.startsAt).not.toBeNull();
     });
 
-    it('SCRUM379_AC5_the_clarification_history_is_unchanged_for_the_organiser_and_for_any_coordinator', () => {
+    it('SCRUM444_AC1_the_clarification_history_is_unchanged_for_the_organiser_and_the_assigned_coordinator', () => {
+      // Was SCRUM379_AC5_…_and_for_any_coordinator: SCRUM-444 AC1 narrows it to the holder.
       expect(after.clarificationOrganiser).toEqual(before.clarificationOrganiser);
       expect(after.clarificationCoordinator).toEqual(before.clarificationCoordinator);
       expect(after.clarificationOrganiser[0]).toMatchObject({ type: 'question', message: 'Please confirm the expected turnout', authorName: 'Priya Nair' });
@@ -251,6 +253,11 @@ describe('SCRUM-379 AC5, AC6: a Completed event stays readable, on the real sche
     it('SCRUM379_AC5_a_coordinator_who_is_not_assigned_cannot_read_the_status_or_decision_history', async () => {
       await expect(getEventRequestStatusHistory(eventId, otherCoordinator, { client })).rejects.toMatchObject({ status: 404 });
       await expect(getEventDecisionHistory(eventId, otherCoordinator, ROLE.EVENT_COORDINATOR, { client })).rejects.toMatchObject({ status: 404 });
+    });
+
+    it('SCRUM444_AC1_a_coordinator_who_is_not_assigned_cannot_read_the_clarification_history', async () => {
+      await expect(getEventClarificationHistory(eventId, otherCoordinator, ROLE.EVENT_COORDINATOR, { client }))
+        .rejects.toMatchObject({ status: 404, message: `Event request ${eventId} not found` });
     });
   });
 

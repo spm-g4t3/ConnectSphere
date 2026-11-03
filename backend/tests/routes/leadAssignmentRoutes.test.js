@@ -357,7 +357,7 @@ describe('SCRUM-486 AC3, AC4: POST /:id/assign', () => {
 });
 
 
-describe('SCRUM-486 AC6: POST /:id/reassign admits the Lead as well as a coordinator', () => {
+describe('SCRUM-486 AC6: POST /:id/reassign admits the Lead (since SCRUM-444, only the Lead)', () => {
   const handOver = (client, requireAuth) =>
     request(appWith({ client, requireAuth }))
       .post(`/api/event-requests/${REQUEST_ID}/reassign`)
@@ -381,28 +381,30 @@ describe('SCRUM-486 AC6: POST /:id/reassign admits the Lead as well as a coordin
     expect(client.calls[0].args.p_assigned_by).toBe(LEAD_ID);
   });
 
-  it('SCRUM486_AC6_a_coordinator_still_reaches_it', async () => {
-    // SCRUM-327 AC6, unchanged: the holder hands over. Whether this
-    // coordinator holds the event is still the function's question.
+  it('SCRUM444_AC3_the_holder_is_refused_the_handover_with_403_and_queries_nothing', async () => {
+    // Was SCRUM486_AC6_a_coordinator_still_reaches_it. SCRUM-444 AC3 (Week 9
+    // Q&A, sheet G3-5, row 18): the holder may no longer hand over, so leadOnly
+    // refuses them first.
     const client = createFakeClient([handedOver()]);
 
     const res = await handOver(client, signedInWithRole(ROLE.EVENT_COORDINATOR, COORDINATOR_A));
 
-    expect(res.status).toBe(200);
-    expect(client.calls[0].args.p_assigned_by).toBe(COORDINATOR_A);
+    expect(res.status).toBe(403);
+    expect(res.body).toEqual({ error: 'This action is restricted to Event Coordinator Leads' });
+    expect(client.calls).toHaveLength(0);
   });
 
   it.each(
     [ROLE.EVENT_ORGANISER, ROLE.VENUE_STAFF, ROLE.TECHNICAL_SUPPORT_STAFF, ROLE.ATTENDEE, ROLE.SAFETY_OFFICER, null]
       .map((role) => [String(role), role]),
   )('SCRUM486_AC6_%s_is_refused_the_handover_with_403_and_queries_nothing', async (_label, role) => {
-    // Widened by exactly one role. The refusal now names both who may.
+    // Since SCRUM-444 the gate is leadOnly, so the refusal names the Lead alone.
     const client = createFakeClient([]);
 
     const res = await handOver(client, signedInWithRole(role, ORGANISER_ID));
 
     expect(res.status).toBe(403);
-    expect(res.body).toEqual({ error: 'This action is restricted to Event Coordinators or Event Coordinator Leads' });
+    expect(res.body).toEqual({ error: 'This action is restricted to Event Coordinator Leads' });
     expect(client.calls).toHaveLength(0);
   });
 });
@@ -434,7 +436,8 @@ describe('SCRUM-486 AC6: the event screen\'s reads admit the Lead, so the hand-o
       `/api/event-requests/${REQUEST_ID}/assignments/review`,
       () => [ok(held()), ok([historyRow]), ok([{ id: COORDINATOR_A, full_name: 'Priya Nair' }, { id: LEAD_ID, full_name: 'Lena Lead' }])],
     ],
-    ['GET /:id/change-requests/review', `/api/event-requests/${REQUEST_ID}/change-requests/review`, () => [ok([])]],
+    // SCRUM-444: the event is read first, so the route can refuse a non-holder.
+    ['GET /:id/change-requests/review', `/api/event-requests/${REQUEST_ID}/change-requests/review`, () => [ok(held()), ok([])]],
   ];
 
   it.each(READS)('SCRUM486_AC6_a_lead_who_holds_nothing_reads_%s', async (_route, path, results) => {

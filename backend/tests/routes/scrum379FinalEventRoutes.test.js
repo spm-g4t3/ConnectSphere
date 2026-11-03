@@ -150,7 +150,8 @@ const ROUTES = [
   ['eventRequests', 'post', '/:id/confirm', C, true, 'event'],
   ['eventRequests', 'post', '/:id/clarification', C, true, 'event'],
   ['eventRequests', 'post', '/:id/clarification/close', C, true, 'event'],
-  ['eventRequests', 'post', '/:id/reassign', C, true, 'event'],
+  // SCRUM-444 (D4): the Lead's route now, behind leadOnly.
+  ['eventRequests', 'post', '/:id/reassign', L, true, 'event'],
   ['eventRequests', 'post', '/:id/assign', L, true, 'event'],
   ['eventRequests', 'post', '/:id/start-review', C, true, 'event'],
   ['eventRequests', 'post', '/:id/decision', C, true, 'event'],

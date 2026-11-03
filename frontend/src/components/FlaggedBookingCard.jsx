@@ -10,7 +10,8 @@
 
 import FlaggedBookingFlagDetail from "./FlaggedBookingFlagDetail";
 import FlaggedBookingReasonForm from "./FlaggedBookingReasonForm";
-import { formatTimestamp } from "../services/displayFormat";
+import ErrorNotice from "./ui/ErrorNotice";
+import { formatDateTime } from "../services/displayFormat";
 import { formatVenuePeriod } from "../services/datetimeFormat";
 import { conflictText } from "../services/flaggedBookingErrors";
 import {
@@ -25,6 +26,7 @@ export default function FlaggedBookingCard({
   item,
   expanded,
   onToggle,
+  toggleRef,
   busy,
   resolving,
   error,
@@ -42,9 +44,11 @@ export default function FlaggedBookingCard({
   return (
     <li className="pending-bookings__card">
       {/* Locked while any resolution is in flight, so the resolving card stays
-          open and a refusal shown inside it is not lost to another card. */}
+          open and a refusal shown inside it is not lost to another card.
+          A native button: it is a disclosure row, not an action, so Button would restyle it. */}
       <button
         type="button"
+        ref={toggleRef}
         className="pending-bookings__toggle"
         aria-expanded={expanded}
         aria-controls={regionId}
@@ -69,16 +73,13 @@ export default function FlaggedBookingCard({
             <dt>Event&apos;s current period</dt>
             <dd>{formatVenuePeriod(item.eventStartsAt, item.eventEndsAt)}</dd>
             <dt>Flagged</dt>
-            <dd>{formatTimestamp(item.flaggedAt, "at an unknown time")}</dd>
+            <dd>{formatDateTime(item.flaggedAt, "at an unknown time")}</dd>
           </dl>
 
           <FlaggedBookingFlagDetail item={item} headingLevel={3} />
 
-          {error && (
-            <p className="pending-bookings__error" role="alert">
-              {error}
-            </p>
-          )}
+          {/* Both resolutions are reason forms, so submitting again is the retry. */}
+          {error && <ErrorNotice message={error} />}
           {clashes.length > 0 && (
             <>
               <h3>What is in the way</h3>
@@ -121,6 +122,7 @@ export default function FlaggedBookingCard({
             verb="cancelling"
             busy={busy}
             buttonLabel="Cancel booking"
+            buttonVariant="danger"
             sendingLabel={resolving === "cancel" ? "Cancelling..." : null}
             onSubmit={(reason) => onCancel(item, reason)}
           />

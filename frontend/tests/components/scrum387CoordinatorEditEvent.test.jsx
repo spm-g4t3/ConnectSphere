@@ -49,7 +49,6 @@ vi.mock("../../src/services/eventRequestService", () => ({
   getEventCancellationImpact: vi.fn(),
   getEventClarificationHistory: vi.fn(),
   getMyEventRequests: vi.fn(),
-  listCoordinators: vi.fn(),
   listCoordinatorWorkload: vi.fn(),
   processCoordinatorChangeRequest: vi.fn(),
   previewSignificantEventChange: vi.fn(),

@@ -34,7 +34,6 @@ vi.mock("../../src/services/eventRequestService", () => ({
   requestEventClarification: vi.fn(),
   getAssignmentHistory: vi.fn(),
   getAssignmentHistoryForReview: vi.fn(),
-  listCoordinators: vi.fn(),
   reassignEventRequest: vi.fn(),
 }));
 
@@ -125,7 +124,7 @@ describe("SCRUM17_AC3 EventCoordinatorDashboard", () => {
     await screen.findByText("You have no notifications.");
 
     expect(getPendingBookingRequests).not.toHaveBeenCalled();
-    expect(screen.queryByRole("heading", { name: "Pending booking requests" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /^Pending booking requests/ })).not.toBeInTheDocument();
   });
 
   it("both sections are direct children of the dashboard wrapper, for the card styling", async () => {

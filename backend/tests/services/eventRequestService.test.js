@@ -36,9 +36,9 @@
  *   AC11 -- each coordinator has a list of the events assigned to them,
  *           grouped by status, earliest event first
  *
- * SCRUM-334 (a subtask of SCRUM-327) adds listCoordinators, for the reassign
- * picker, and listAssignmentHistory, an event's history of coordinators. Their
- * SCRUM334_* tests follow SCRUM-333's:
+ * SCRUM-334 (a subtask of SCRUM-327) adds listAssignmentHistory, an event's
+ * history of coordinators (its listCoordinators, the holder's reassign picker,
+ * went in SCRUM-444). Its SCRUM334_* tests follow SCRUM-333's:
  *   AC9  -- every handover records who made it, and the note
  *   AC10 -- the Organiser's screen shows the event's assignment history
  *
@@ -1734,7 +1734,8 @@ describe('SCRUM-162: assigned Coordinator requests clarification', () => {
     expect(client.calls).toHaveLength(0);
   });
 
-  it('returns clarification entries oldest first with the author name for any Coordinator', async () => {
+  it('SCRUM444_AC1_returns_clarification_entries_oldest_first_with_the_author_name_for_the_assigned_coordinator', async () => {
+    // Was "… for any Coordinator": since SCRUM-444 AC1, the holder and the Lead.
     const firstEntry = {
       id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       entry_type: 'question',
@@ -1763,10 +1764,17 @@ describe('SCRUM-162: assigned Coordinator requests clarification', () => {
 
     const history = await getEventClarificationHistory(
       REQUEST_ID,
-      NEW_COORDINATOR_ID,
+      COORDINATOR_ID,
       ROLE.EVENT_COORDINATOR,
       { client },
     );
+    const refused = await errorFrom(getEventClarificationHistory(
+      REQUEST_ID,
+      NEW_COORDINATOR_ID,
+      ROLE.EVENT_COORDINATOR,
+      { client: createEventRequestClient([ok(assignedRow())]) },
+    ));
+    expect(refused).toBeInstanceOf(NotFoundError);
 
     expect(history).toEqual([
       {
@@ -1959,18 +1967,14 @@ function createQueueFakeClient(results = []) {
 const heldRow = (overrides = {}) => storedRow({ assigned_coordinator_id: COORDINATOR_ID, ...overrides });
 
 describe('SCRUM-45 AC1: every request awaiting a decision, across all Organisers', () => {
-  it('SCRUM45_AC1_filters_on_the_three_review_statuses_and_on_a_coordinator_holding_the_request', async () => {
-    // Was SCRUM45_AC1_filters_on_the_three_review_statuses_and_nothing_else.
-    // Right when written: from SCRUM-330 until SCRUM-486 every submitted
-    // request was given a coordinator in the same transaction, so a status
-    // filter alone already meant "held by someone". Migration 052 removed
-    // that: a submitted request now waits with no coordinator until the Lead
-    // assigns one, and it is the Lead's alone (AC2-06). So the read gained one
-    // filter, and "nothing else" is no longer true. Renamed for that; the
-    // two halves below are unchanged and still asserted in full.
+  it('SCRUM444_AC1_the_queue_is_filtered_to_the_caller_with_the_same_statuses_and_order', async () => {
+    // Was SCRUM45_AC1_filters_on_the_three_review_statuses_and_on_a_coordinator_holding_the_request
+    // (and before that …_and_nothing_else). SCRUM-444 (D3): the caller's own
+    // events, which also keeps out a request nobody holds (SCRUM-486 AC2-06),
+    // so the not-null filter became the caller's id. The statuses are unchanged.
     const client = createQueueFakeClient([ok([heldRow({ status: STATUS.SUBMITTED })])]);
 
-    await listEventRequestsForReview({ client });
+    await listEventRequestsForReview(COORDINATOR_ID, { client });
 
     const [call] = client.calls;
     expect(call.table).toBe('event_requests');
@@ -1980,17 +1984,15 @@ describe('SCRUM-45 AC1: every request awaiting a decision, across all Organisers
     // rather than three literals copied into the service.
     expect(call.inFilters).toEqual([['status', COORDINATOR_QUEUE_STATUSES]]);
 
-    // SCRUM-486 AC2-06: and the request has a coordinator. Exactly this one
-    // negative filter, so an unassigned request cannot reach the shared queue.
-    expect(call.notFilters).toEqual([['assigned_coordinator_id', 'is', null]]);
-
-    // Half two, and the more important half: there is no organiser filter at
-    // all. Every other read in this module narrows to one organiser_id, and
-    // that is precisely the reported bug -- a submitted request never reached
-    // the Coordinator side because no read existed that was not owner-scoped.
-    // An empty `filters` is what "this query crosses every Organiser" looks
-    // like at the seam.
-    expect(call.filters).toEqual([]);
+    // Half two: the caller's id is the only equality filter. Still no
+    // organiser filter: the queue crosses every Organiser, which is the
+    // reported bug's fix (no read existed that was not owner-scoped).
+    expect(call.filters).toEqual([['assigned_coordinator_id', COORDINATOR_ID]]);
+    expect(call.notFilters).toEqual([]);
+    expect(call.order).toEqual([
+      ['submitted_at', { ascending: true, nullsFirst: false }],
+      ['id', { ascending: true }],
+    ]);
   });
 
   it('SCRUM45_AC1_selects_the_same_columns_as_the_organisers_own_list', async () => {
@@ -1999,7 +2001,7 @@ describe('SCRUM-45 AC1: every request awaiting a decision, across all Organisers
       ok([storedRow()]),
     ]);
 
-    await listEventRequestsForReview({ client });
+    await listEventRequestsForReview(COORDINATOR_ID, { client });
     await listEventRequestsForOrganiser(ORGANISER_ID, { client });
 
     const [queueCall, organiserCall] = client.calls;
@@ -2023,7 +2025,7 @@ describe('SCRUM-45 AC1: every request awaiting a decision, across all Organisers
       ]),
     ]);
 
-    const requests = await listEventRequestsForReview({ client });
+    const requests = await listEventRequestsForReview(COORDINATOR_ID, { client });
 
     // The whole point of the queue, and the inverse of the assertion
     // SCRUM14_AC1_filters_the_query_on_the_organiser makes about the list
@@ -2040,7 +2042,7 @@ describe('SCRUM-45 AC1: every request awaiting a decision, across all Organisers
       ]),
     ]);
 
-    const requests = await listEventRequestsForReview({ client });
+    const requests = await listEventRequestsForReview(COORDINATOR_ID, { client });
 
     expect(requests).toHaveLength(2);
     expect(requests[0]).toMatchObject({
@@ -2060,7 +2062,7 @@ describe('SCRUM-45 AC1: every request awaiting a decision, across all Organisers
   it('SCRUM45_AC1_orders_by_oldest_waiting_first_with_nulls_last', async () => {
     const client = createQueueFakeClient([ok([heldRow({ status: STATUS.SUBMITTED })])]);
 
-    await listEventRequestsForReview({ client });
+    await listEventRequestsForReview(COORDINATOR_ID, { client });
 
     // submitted_at ASC, not updated_at DESC. updated_at is maintained by the
     // event_requests_set_updated_at trigger, so on this screen it would be
@@ -2082,13 +2084,16 @@ describe('SCRUM-45 AC1: every request awaiting a decision, across all Organisers
     // Nothing waiting is the good state of this screen, not a missing
     // resource, so it is [] and never a NotFoundError. The null case is the
     // shape PostgREST can return for an empty result set.
-    await expect(listEventRequestsForReview({ client: createQueueFakeClient([ok([])]) }))
+    await expect(listEventRequestsForReview(COORDINATOR_ID, { client: createQueueFakeClient([ok([])]) }))
       .resolves.toEqual([]);
-    await expect(listEventRequestsForReview({ client: createQueueFakeClient([ok(null)]) }))
+    await expect(listEventRequestsForReview(COORDINATOR_ID, { client: createQueueFakeClient([ok(null)]) }))
       .resolves.toEqual([]);
   });
 
-  it('SCRUM45_AC1_takes_no_organiser_and_asserts_none', async () => {
+  it('SCRUM444_AC1_the_queue_takes_the_caller_and_no_organiser', async () => {
+    // Was SCRUM45_AC1_takes_no_organiser_and_asserts_none. Still no organiser;
+    // since SCRUM-444 it takes the coordinator, from the token, as its one
+    // required parameter.
     const client = createQueueFakeClient([ok([heldRow({ status: STATUS.SUBMITTED })])]);
 
     // Called with no organiser at all, and both the call and the signature
@@ -2100,18 +2105,17 @@ describe('SCRUM-45 AC1: every request awaiting a decision, across all Organisers
     // assertOrganiser were ever added here the queue would throw a
     // ValidationError on every call and the Coordinator's screen would show
     // a 400 for a request that named nothing wrong.
-    await expect(listEventRequestsForReview({ client })).resolves.toHaveLength(1);
+    await expect(listEventRequestsForReview(COORDINATOR_ID, { client })).resolves.toHaveLength(1);
     expect(client.calls).toHaveLength(1);
 
-    // No required positional parameter: the single argument is a destructured
-    // options object with a default, so .length is 0.
-    expect(listEventRequestsForReview.length).toBe(0);
+    // The coordinator, then the options object, whose default keeps it out of .length.
+    expect(listEventRequestsForReview.length).toBe(1);
   });
 
   it('SCRUM45_AC1_leaves_an_unrecognised_database_failure_untyped', async () => {
     const client = createQueueFakeClient([dbError('42P01', 'relation does not exist')]);
 
-    const err = await errorFrom(listEventRequestsForReview({ client }));
+    const err = await errorFrom(listEventRequestsForReview(COORDINATOR_ID, { client }));
 
     // Untyped means the route's handleError falls through to a 500 with a
     // generic message. Anything typed here would reach a Coordinator dressed
@@ -2145,7 +2149,7 @@ describe('SCRUM-45 AC1: every request awaiting a decision, across all Organisers
  *
  * The import is appended for the reason the SCRUM-11 block gives for its own.
  */
-import { getEventRequestForCoordinator } from '../../src/services/eventRequestService.js';
+import { getEventRequestForCoordinator, assertCoordinatorMayRead } from '../../src/services/eventRequestService.js';
 
 const CHANGE_REQUEST_ID = '77777777-7777-4777-8777-777777777777';
 
@@ -2337,25 +2341,25 @@ describe('SCRUM-327 AC7: only the assigned coordinator can request clarification
  * and the queue covers only submitted, under_review and pending_clarification.
  * So once an event is approved or confirmed, no coordinator can read it, while
  * AC6 still lets its coordinator hand it over and AC7 says the previous one
- * can still view it. SCRUM-332's Done criteria say reading stays open to every
- * coordinator.
+ * can still view it. (SCRUM-444 AC1 and AC4 since narrowed reading to the
+ * holder and the Lead: see below.)
  *
  * It takes no coordinator id and no organiser id, and compares neither. That
  * follows listEventRequestsForReview: a function that takes no owner checks
- * none, and the caller proves the right to read. Here the proof is the role
- * gate on the route. Which coordinator holds the event decides who can change
- * it, never who can read it.
+ * none, and the caller proves the right to read. Since SCRUM-444 the routes do
+ * that with assertCoordinatorMayRead after this read; its other callers are
+ * writes, which their own checks refuse.
  *
  * The one thing it refuses is a draft. A draft is the Organiser's private
  * working copy, and COORDINATOR_QUEUE_STATUSES leaves it out of the queue so
  * that no coordinator learns it exists. A single read that returned drafts
  * would undo that for anyone who guessed an id.
  */
-describe('SCRUM-327 AC7: every coordinator can read an event', () => {
-  it('SCRUM332_AC7_any_coordinator_can_read_an_event', async () => {
-    // Held by a different coordinator and owned by a different Organiser, and
-    // still returned. One read, on id only: no organiser filter, no
-    // coordinator filter.
+describe('SCRUM-327 AC7: the coordinator read (since SCRUM-444, for the holder and the Lead)', () => {
+  it('SCRUM444_AC1_the_read_compares_no_coordinator_and_the_rule_refuses_a_non_holder', async () => {
+    // Was SCRUM332_AC7_any_coordinator_can_read_an_event. The read itself is
+    // unchanged, for its write callers: one read, on id only, no organiser or
+    // coordinator filter. What a non-holder now meets is assertCoordinatorMayRead.
     const client = createEventRequestClient([
       ok(assignedRow({
         organiser_id: OTHER_ORGANISER_ID,
@@ -2372,6 +2376,10 @@ describe('SCRUM-327 AC7: every coordinator can read an event', () => {
     });
     expect(client.calls).toHaveLength(1);
     expect(client.calls[0].filters).toEqual([['id', REQUEST_ID]]);
+
+    expect(() => assertCoordinatorMayRead(request, NEW_COORDINATOR_ID, ROLE.EVENT_COORDINATOR)).not.toThrow();
+    expect(() => assertCoordinatorMayRead(request, COORDINATOR_ID, ROLE.EVENT_COORDINATOR))
+      .toThrow(new NotFoundError(`Event request ${REQUEST_ID} not found`));
   });
 
   it.each([STATUS.APPROVED, STATUS.CONFIRMED])(
@@ -2892,10 +2900,9 @@ describe('SCRUM-327 AC11: a coordinator lists the events assigned to them', () =
 // SCRUM-334 -- the coordinator list, and an event's assignment history
 // ---------------------------------------------------------------------------
 /**
- * Two reads, for the reassign screen and the history view.
+ * The history view's read. (listCoordinators, the holder's reassign picker,
+ * was removed with the holder's handover in SCRUM-444.)
  *
- *   listCoordinators({ client })
- *     every Event Coordinator's id and name, for the reassign picker.
  *   listAssignmentHistory(id, { includeNotes }, { client })
  *     one event's assignment history, oldest first.
  *
@@ -2908,11 +2915,10 @@ describe('SCRUM-327 AC11: a coordinator lists the events assigned to them', () =
  * including /mine and /queue, where nothing displays it. Change requests are
  * already a separate endpoint (GET /:id/change-requests) for the same reason.
  *
- * Neither function checks who is asking, which is this module's rule: a
- * function that takes no owner checks none, and the route proves the right to
- * read. For the coordinator list that proof is the role gate. For the history
- * it is the same proof the event itself needs: ownership for an Organiser,
- * the role for a coordinator.
+ * It does not check who is asking, which is this module's rule: a function
+ * that takes no owner checks none, and the route proves the right to read: the
+ * same proof the event itself needs, ownership for an Organiser and, since
+ * SCRUM-444, the holder or the Lead for a coordinator.
  *
  * Names come from profiles in a second read, as listEventRequestsForCoordinator
  * reads them and for the same reason: nothing has a foreign key to profiles,
@@ -2920,147 +2926,11 @@ describe('SCRUM-327 AC11: a coordinator lists the events assigned to them', () =
  *
  * Imports appended, for the reason the SCRUM-11 block gives.
  */
-import { listCoordinators, listAssignmentHistory } from '../../src/services/eventRequestService.js';
+import { listAssignmentHistory } from '../../src/services/eventRequestService.js';
 
 /** The column names a select string asks for, sorted, so a test compares sets. */
 const columnsOf = (call) => call.select.split(',').map((column) => column.trim()).sort();
 
-describe('SCRUM-327 AC9: every coordinator, for the reassign picker', () => {
-  /**
-   * Why the shape is { id, fullName }: the object is the person, so its keys
-   * are that person's columns in camelCase, by the same rule toEventRequest
-   * follows. organiserName on "My events" is prefixed because it names
-   * someone else on an event's row; here nothing needs prefixing.
-   *
-   * Why ordered by name, nulls last, then id: a picker is read by a person
-   * looking for a colleague, so alphabetical is what they scan. full_name is
-   * nullable, so nameless coordinators go to the end rather than the top, and
-   * id orders those, and any two people with the same name, the same way every
-   * time. Ordering by id alone would be stable but would look random to the
-   * person using it.
-   */
-  it('SCRUM334_AC9_lists_every_event_coordinator', async () => {
-    const client = createQueueFakeClient([ok([profileRow(COORDINATOR_ID, 'Priya Nair')])]);
-
-    await listCoordinators({ client });
-
-    const [call] = client.calls;
-    expect(call.table).toBe('profiles');
-
-    // One filter, the role, and nothing narrowing it further.
-    expect(call.filters).toEqual([['role', 'event_coordinator']]);
-    expect(call.inFilters).toEqual([]);
-
-    // The id and the name, never the whole row. This is the first read in the
-    // API that lists users, so it reads only what the picker shows.
-    expect(columnsOf(call)).toEqual(['full_name', 'id']);
-  });
-
-  it('SCRUM334_AC9_returns_each_coordinator_as_an_id_and_a_name', async () => {
-    const client = createQueueFakeClient([
-      ok([profileRow(COORDINATOR_ID, 'Priya Nair'), profileRow(NEW_COORDINATOR_ID, 'Marcus Tan')]),
-    ]);
-
-    const coordinators = await listCoordinators({ client });
-
-    // toEqual, so an extra key fails: no role, no created_at.
-    expect(coordinators).toEqual([
-      { id: COORDINATOR_ID, fullName: 'Priya Nair' },
-      { id: NEW_COORDINATOR_ID, fullName: 'Marcus Tan' },
-    ]);
-  });
-
-  it('SCRUM334_AC9_keeps_a_coordinator_with_no_name', async () => {
-    // full_name is nullable (007). A coordinator with no name is still a
-    // coordinator who can take an event, so they are listed, with null, and
-    // the picker shows them some other way.
-    const client = createQueueFakeClient([ok([profileRow(NEW_COORDINATOR_ID, null)])]);
-
-    const coordinators = await listCoordinators({ client });
-
-    expect(coordinators).toEqual([{ id: NEW_COORDINATOR_ID, fullName: null }]);
-  });
-
-  it('SCRUM334_AC9_orders_coordinators_by_name_then_id', async () => {
-    const client = createQueueFakeClient([ok([])]);
-
-    await listCoordinators({ client });
-
-    expect(client.calls[0].order).toEqual([
-      ['full_name', { ascending: true, nullsFirst: false }],
-      ['id', { ascending: true }],
-    ]);
-  });
-
-  it('SCRUM334_AC9_answers_no_coordinators_with_an_empty_array', async () => {
-    // Not an error. With no coordinators nobody can be handed an event, and
-    // the picker should say so; that is the picker's message to show, not a
-    // failure of this read. null is how PostgREST can send an empty result.
-    await expect(listCoordinators({ client: createQueueFakeClient([ok([])]) })).resolves.toEqual([]);
-    await expect(listCoordinators({ client: createQueueFakeClient([ok(null)]) })).resolves.toEqual([]);
-  });
-
-  it('SCRUM334_AC9_leaves_an_unrecognised_database_failure_untyped', async () => {
-    const client = createQueueFakeClient([dbError('42P01', 'relation "profiles" does not exist')]);
-
-    const err = await errorFrom(listCoordinators({ client }));
-
-    expect(err).toBeInstanceOf(Error);
-    expect(err).not.toBeInstanceOf(ValidationError);
-    expect(err).not.toBeInstanceOf(NotFoundError);
-    expect(err.status).toBeUndefined();
-  });
-
-  it('SCRUM334_AC9_takes_no_required_parameter', () => {
-    // Nothing to scope it to: every coordinator, for any coordinator.
-    expect(listCoordinators.length).toBe(0);
-  });
-});
-
-
-/**
- * An event's assignment history.
- *
- * Shape of one entry:
- *
- *   { id,
- *     previousCoordinatorId, previousCoordinatorName,
- *     newCoordinatorId,      newCoordinatorName,
- *     assignedById,          assignedByName,
- *     automatic,
- *     createdAt,
- *     handoverNote }         <- only when includeNotes is true
- *
- * Flat, ids beside names, as organiserId sits beside organiserName on "My
- * events". createdAt keeps the column's name, as every other mapping here
- * does; 014 records that it is the moment the assignment took effect.
- *
- * Why `automatic` exists, when 014 already says a null assigned_by means the
- * system assigned the event. That convention is the database's vocabulary,
- * and every client would otherwise have to know it. It is also ambiguous once
- * names are added: assignedByName is null both for the system and for a
- * person with no full_name. So the API states the one fact the screen needs,
- * "assigned automatically" or "handed over by", as a boolean derived from
- * assigned_by alone, and assignedById stays as the source it came from.
- *
- * Why the handover note is withheld from the Organiser. AC10 says the
- * Organiser's screen shows the history, and the customer confirmed they see
- * the coordinator's name, so who and when are theirs. The note is not. It is
- * written by one coordinator for another, "I'm on leave, the shortlist is in
- * my notes", and if the Organiser could read it, coordinators would write
- * differently or stop writing it, and the handover it exists for would get
- * worse. So the coordinator's view carries it and the Organiser's does not.
- *
- * The key is absent, not null. null already means "no note was written",
- * which is true of every automatic assignment. An absent key means "not sent
- * to you". If both were null, the Organiser's screen could not tell a
- * withheld note from a missing one, and nor could a test. Without
- * includeNotes the note is not even selected, so it cannot reach a response
- * through a later mapping mistake.
- *
- * includeNotes defaults to false. A caller that forgets to say gets the
- * Organiser's view, never the other way round.
- */
 describe('SCRUM-327 AC9, AC10: an event\'s assignment history', () => {
   /** The first row for an event: submitted, assigned by the system. */
   const firstAssignment = () => ({
@@ -4682,7 +4552,7 @@ describe('SCRUM-266: event reads say whether the event needs attention', () => {
     ]);
 
     const results = [
-      await listEventRequestsForReview({ client }),
+      await listEventRequestsForReview(COORDINATOR_ID, { client }),
       await listEventRequestsForCoordinator(COORDINATOR_ID, { client }),
       await listEventRequestsForOrganiser(ORGANISER_ID, { client }),
     ];
@@ -4982,7 +4852,7 @@ describe('SCRUM-310 (SCRUM-315): a flagged equipment reservation puts a Confirme
     ]);
 
     const results = [
-      await listEventRequestsForReview({ client }),
+      await listEventRequestsForReview(COORDINATOR_ID, { client }),
       await listEventRequestsForCoordinator(COORDINATOR_ID, { client }),
       await listEventRequestsForOrganiser(ORGANISER_ID, { client }),
     ];

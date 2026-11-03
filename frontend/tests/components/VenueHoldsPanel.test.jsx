@@ -6,8 +6,8 @@
 //
 // The three hold calls in venueService are mocked, so nothing touches the
 // network. Timezone-safe: fixtures are instants relative to the real clock
-// with day-sized margins, expected strings come from formatRange /
-// formatTimestamp / formatOccupiedPeriod, sent timestamps are checked by
+// with day-sized margins, expected strings come from formatDateTimeRange /
+// formatDateTime / formatOccupiedPeriod, sent timestamps are checked by
 // offset shape and getTime(), and datetime-local inputs are set with
 // fireEvent.change. No fake timers.
 
@@ -17,7 +17,7 @@ import userEvent from "@testing-library/user-event";
 
 import VenueHoldsPanel from "../../src/components/VenueHoldsPanel.jsx";
 import { getHoldCandidates, listVenueHolds, placeVenueHold } from "../../src/services/venueService";
-import { formatRange, formatTimestamp } from "../../src/services/displayFormat";
+import { formatDateTime, formatDateTimeRange } from "../../src/services/displayFormat";
 import { formatOccupiedPeriod } from "../../src/services/occupiedPeriodDisplay";
 import { toDatetimeLocalValue } from "../../src/services/datetimeFormat";
 import { deferred } from "../helpers/async.js";
@@ -119,10 +119,10 @@ describe("SCRUM491 VenueHoldsPanel active holds", () => {
     expect(listVenueHolds).toHaveBeenCalledWith(VENUE.id);
     expect(screen.getByRole("heading", { name: "Tentative holds for Hall A — Level 2" })).toBeInTheDocument();
     const row = screen.getByText("Product Launch").closest("li");
-    expect(within(row).getByText(formatRange(h.eventStartsAt, h.eventEndsAt))).toBeInTheDocument();
+    expect(within(row).getByText(formatDateTimeRange(h.eventStartsAt, h.eventEndsAt))).toBeInTheDocument();
     expect(within(row).getByText("Tentatively held")).toBeInTheDocument();
-    expect(row).toHaveTextContent(`Expires ${formatTimestamp(h.expiresAt)}`);
-    expect(row).toHaveTextContent(`Placed ${formatTimestamp(h.placedAt)} by Sam Staff`);
+    expect(row).toHaveTextContent(`Expires ${formatDateTime(h.expiresAt)}`);
+    expect(row).toHaveTextContent(`Placed ${formatDateTime(h.placedAt)} by Sam Staff`);
   });
 
   it("SCRUM491_AC2_the_signed_in_users_own_hold_says_by_you", async () => {
@@ -141,7 +141,7 @@ describe("SCRUM491 VenueHoldsPanel active holds", () => {
 
     expect(screen.getByText(OTHER_STAFF_ID.slice(0, 8))).toBeInTheDocument();
     expect(screen.getByText("Unnamed event")).toBeInTheDocument();
-    expect(screen.getByText("no date – no date")).toBeInTheDocument();
+    expect(screen.getByText("no date")).toBeInTheDocument();
   });
 
   it("SCRUM491_AC7_a_hold_past_its_expiry_is_not_shown_as_held", async () => {
@@ -217,7 +217,7 @@ describe("SCRUM491_AC2 VenueHoldsPanel placing a hold", () => {
     expect(new Date(payload.expiresAt).getTime()).toBe(new Date(expiresAt).getTime());
 
     expect(await screen.findByRole("status")).toHaveTextContent(
-      `Hold placed. Hall A is tentatively held for Product Launch until ${formatTimestamp(expiresAt)}.`,
+      `Hold placed. Hall A is tentatively held for Product Launch until ${formatDateTime(expiresAt)}.`,
     );
     expect(screen.queryByLabelText("Approved event")).not.toBeInTheDocument();
     await waitFor(() => expect(listVenueHolds).toHaveBeenCalledTimes(2));
@@ -425,15 +425,15 @@ describe("SCRUM491_AC4 VenueHoldsPanel what is in the way", () => {
 
     expect(within(rows[0]).getByText("Booked")).toBeInTheDocument();
     expect(within(rows[0]).getByText("Orientation")).toBeInTheDocument();
-    expect(within(rows[0]).getByText(formatOccupiedPeriod(BOOKING))).toBeInTheDocument();
+    expect(within(rows[0]).getByText(formatOccupiedPeriod(BOOKING, formatDateTimeRange))).toBeInTheDocument();
 
     expect(within(rows[1]).getByText("Blocked")).toBeInTheDocument();
     expect(within(rows[1]).getByText("Maintenance")).toBeInTheDocument();
-    expect(within(rows[1]).getByText(formatRange(BLOCK.startsAt, BLOCK.endsAt))).toBeInTheDocument();
+    expect(within(rows[1]).getByText(formatDateTimeRange(BLOCK.startsAt, BLOCK.endsAt))).toBeInTheDocument();
 
     expect(within(rows[2]).getByText("Tentatively held")).toBeInTheDocument();
     expect(within(rows[2]).getByText("Career Fair")).toBeInTheDocument();
-    expect(within(rows[2]).getByText(formatOccupiedPeriod(OTHER_HOLD))).toBeInTheDocument();
+    expect(within(rows[2]).getByText(formatOccupiedPeriod(OTHER_HOLD, formatDateTimeRange))).toBeInTheDocument();
   });
 
   it("SCRUM491_AC4_one_conflict_reads_in_the_singular_and_missing_names_read_plainly", async () => {
@@ -451,7 +451,7 @@ describe("SCRUM491_AC4 VenueHoldsPanel what is in the way", () => {
     await screen.findByRole("heading", { name: /in the way/ });
     const item = document.querySelector(".venue-holds__conflict-list li");
     expect(item.querySelectorAll("span")).toHaveLength(1);
-    expect(item).toHaveTextContent(`Blocked${formatRange(BLOCK.startsAt, BLOCK.endsAt)}`);
+    expect(item).toHaveTextContent(`Blocked${formatDateTimeRange(BLOCK.startsAt, BLOCK.endsAt)}`);
   });
 
   it("SCRUM491_AC4_changing_a_field_clears_the_list", async () => {

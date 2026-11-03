@@ -28,20 +28,20 @@
  *    worth stating precisely, because it decides what a route still has to do:
  *    getEventRequestForOrganiser and updateEventRequest take the Organiser and
  *    enforce it; createEventRequest stamps one; getEventRequestById,
- *    submitEventRequest, listEventRequestsForReview and
- *    getEventRequestForCoordinator take none and check none, so a route
- *    calling any of those must prove the caller's right to read or write
- *    itself first. For the first two that proof is ownership; for the two
- *    coordinator reads it is a role gate, because a coordinator may read any
- *    event past draft. The same rule covers coordinators acting on an event
- *    (SCRUM-332): requestEventClarification and reassignEventRequest take the
- *    coordinator, and the event's assigned coordinator is enforced, by the
- *    first itself and by 018's function for the second.
- *    listEventRequestsForCoordinator (SCRUM-333) takes the coordinator and
- *    reads only the events assigned to them. listCoordinators and
- *    listAssignmentHistory (SCRUM-334) take no owner and check none, so their
- *    routes prove the right to read: the role for the coordinator list, and
- *    for the history the same proof the event needs. Role, and the
+ *    submitEventRequest and getEventRequestForCoordinator take none and check
+ *    none, so a route calling any of those must prove the caller's right to
+ *    read or write itself first. For the first two that proof is ownership;
+ *    for the coordinator read it is the role gate and then
+ *    getEventRequestForCoordinatorReader (SCRUM-444): a coordinator reads only the events
+ *    they hold, and the Lead reads all. The same rule covers coordinators
+ *    acting on an event (SCRUM-332): requestEventClarification takes the
+ *    coordinator and enforces the assigned one itself, and since SCRUM-444
+ *    (055) reassignEventRequest is the Lead's alone, enforced by the function.
+ *    listEventRequestsForReview and listEventRequestsForCoordinator
+ *    (SCRUM-333) take the coordinator and read only the events assigned to
+ *    them. listAssignmentHistory (SCRUM-334) takes no owner and checks none,
+ *    so its routes prove the right to read: the same proof the event needs.
+ *    Role, and the
  *    caller's relationship to an event, arrive with the JWT and belong in
  *    middleware. A service that quietly enforced half of it would make the
  *    other half look unnecessary.
@@ -275,11 +275,11 @@ const translateError = createPgTranslator({
     // alone, and those messages do need the wrapping.
 
     // insufficient_privilege: the caller is not the event's assigned
-    // coordinator (SCRUM-327 AC6). 403 rather than this module's usual 404 for
-    // someone else's record: the caller is a coordinator who can already see
-    // this event in the shared queue, so the 403 reveals nothing (errors.js
-    // explains). Postgres also uses 42501 for its own "permission denied", but
-    // the API connects with the secret key, which is never refused on a table.
+    // coordinator (SCRUM-327 AC6), or for a handover not the Lead (055). 403,
+    // not 404. Since SCRUM-444 a non-holder no longer reads the event, so on a
+    // write this 403 does tell them the id exists; the reads answer 404.
+    // Postgres also uses 42501 for its own "permission denied", but the API
+    // connects with the secret key, which is never refused on a table.
     '42501': forbidden,
 
     // invalid_parameter_value: the person named as the new coordinator does not
@@ -1687,20 +1687,20 @@ export async function getConfirmedArrangementsForOrganiser(id, organiserId, { cl
 /**
  * One event request, for any Event Coordinator.
  *
- * SCRUM-332, for SCRUM-327 AC7: after a handover the previous coordinator can
- * still view the event, and only stops being able to change it. Before this,
- * no coordinator could read a single event at all. getEventRequestForOrganiser
+ * Unscoped: for write paths, whose SQL checks the holder. Reads use getEventRequestForCoordinatorReader.
+ *
+ * SCRUM-332 (SCRUM-327 AC7): before this, no coordinator could read a single
+ * event at all. getEventRequestForOrganiser
  * answers 404 to anyone but its Organiser, and the queue covers only
  * submitted, under_review and pending_clarification. So once an event was
  * approved or confirmed, nobody on ConnectSphere's side could open it, while
  * AC6 still let its coordinator hand it over.
  *
- * No organiser id and no coordinator id, and neither is compared. That is the
- * rule this module's header states, and listEventRequestsForReview already
- * follows it: a function that takes no owner checks none, and the caller
- * proves the right to read. Here the proof is the role gate on the route
- * (GET /:id/review, behind coordinatorOnly). Which coordinator holds an event
- * decides who may change it, never who may read it.
+ * No organiser id and no coordinator id, and neither is compared: a function
+ * that takes no owner checks none, and the caller proves the right to read.
+ * Since SCRUM-444 the read routes do that through
+ * getEventRequestForCoordinatorReader, so only the holder and the Lead read an
+ * event. Its other callers are writes, which their own checks refuse.
  *
  * The one thing refused is a draft, answered with exactly the NotFoundError a
  * missing id gets, message included. A draft is the Organiser's private
@@ -1829,18 +1829,9 @@ export async function getEventRequestStatusHistory(id, userId, { client } = {}) 
 export async function getEventClarificationHistory(id, userId, role, { client } = {}) {
   requireCallerId(userId, 'userId');
   const db = await resolveClient(client);
-  const request = await getEventRequestById(id, { client: db });
-  const isOwner = request.organiserId === userId;
-  // SCRUM-486 (SCRUM-521): the Lead reads it as a coordinator does. The event
-  // screen the Lead hands an event over from shows this history, and the
-  // route has no role gate of its own, so this check is the gate; with the
-  // Lead left out it answered 404 and that section of the screen failed.
-  const isCoordinatorTeam =
-    (role === ROLE.EVENT_COORDINATOR || role === ROLE.EVENT_COORDINATOR_LEAD)
-    && request.status !== STATUS.DRAFT;
-  if (!isOwner && !isCoordinatorTeam) {
-    throw new NotFoundError(`Event request ${id} not found`);
-  }
+  // The route has no role gate of its own, so this is the gate. SCRUM-444 AC1:
+  // the holder now, not any coordinator; the Lead still, for the hand-over screen.
+  await requireHistoryReader(db, id, userId, role);
 
   const { data: entries, error } = await db
     .from('event_request_clarification_history')
@@ -1864,20 +1855,92 @@ export async function getEventClarificationHistory(id, userId, role, { client } 
 }
 
 /**
- * Who may read a request's decision and change histories: the Organiser, and
- * once it is past draft a Lead or the coordinator assigned to it now. Anyone
- * else gets the same NotFoundError a missing id gets.
+ * SCRUM-444 AC1, AC4: the Lead reads every event; an Event Coordinator only the
+ * ones they hold, so a previous holder is refused like anyone else. Anyone else
+ * gets a missing id's NotFoundError: a 403 would confirm the event exists. The
+ * message carries the id as the caller typed it, as a missing id's does; the
+ * stored one would differ in case and give the event away.
+ *
+ * Called by getEventRequestForCoordinatorReader, never inside
+ * getEventRequestForCoordinator. That read's other callers are writes already
+ * holder-checked in SQL or by assertCheckable; narrowed, their 42501 and 403
+ * would become 404s.
+ *
+ * @param {{id: string, assignedCoordinatorId: string|null}} event
+ * @param {string} userId  the caller, from the JWT
+ * @param {string} role    the caller's role, from the JWT
+ * @param {string} [requestedId]  the id as requested; event.id when not given
+ * @throws {NotFoundError}
+ */
+export function assertCoordinatorMayRead(event, userId, role, requestedId = event.id) {
+  if (role === ROLE.EVENT_COORDINATOR_LEAD) return;
+  if (role === ROLE.EVENT_COORDINATOR && userId && event.assignedCoordinatorId === userId) return;
+  throw new NotFoundError(`Event request ${requestedId} not found`);
+}
+
+/**
+ * SCRUM-444: a malformed event id is a 400 before any read, not Postgres's
+ * 22P02 from the uuid cast, which arrives as a 500.
+ *
+ * @param {*} id
+ * @throws {ValidationError}
+ */
+export function requirePlausibleEventId(id) {
+  if (!isPlausibleId(id)) {
+    throw new ValidationError('Invalid event request id', [{ field: 'id', message: 'must be a valid id' }]);
+  }
+}
+
+/** What assertCoordinatorMayRead needs, for the routes that use nothing else of the event. */
+const CHECK_COLUMNS = 'id, status, assigned_coordinator_id';
+
+/**
+ * SCRUM-444 AC1, AC4: the one way a coordinator read route reads its event, so
+ * the holder check cannot be left out of a route again: a malformed id is a
+ * 400, and a missing id, a draft and a non-holder the same 404.
+ *
+ * @param {string} id  the id as requested
+ * @param {object} options
+ * @param {string} options.userId  the caller, from the JWT
+ * @param {string} options.role    the caller's role, from the JWT
+ * @param {object} [options.client]
+ * @param {boolean} [options.withClosingNotes]  as getEventRequestForCoordinator's
+ * @param {'check'} [options.columns]  'check' reads only id, status and
+ *   assigned_coordinator_id, and returns { id, status, assignedCoordinatorId }
+ * @returns {Promise<object>} the stored request, in camelCase
+ * @throws {ValidationError} a malformed id
+ * @throws {NotFoundError}   no such request, a draft, or a caller who may not read it
+ */
+export async function getEventRequestForCoordinatorReader(id, {
+  userId, role, client, withClosingNotes = false, columns,
+} = {}) {
+  requirePlausibleEventId(id);
+
+  let event;
+  if (columns === 'check') {
+    const row = await readEventRequestRow(id, CHECK_COLUMNS, client);
+    if (row.status === STATUS.DRAFT) throw new NotFoundError(`Event request ${id} not found`);
+    event = { id: row.id, status: row.status, assignedCoordinatorId: row.assigned_coordinator_id };
+  } else {
+    event = await getEventRequestForCoordinator(id, { client, withClosingNotes });
+  }
+
+  assertCoordinatorMayRead(event, userId, role, id);
+  return event;
+}
+
+/**
+ * Who may read a request's clarification, decision and change histories: the
+ * Organiser, and once it is past draft whoever assertCoordinatorMayRead allows.
+ * Anyone else gets the same NotFoundError a missing id gets.
  */
 async function requireHistoryReader(db, id, userId, role) {
   const request = await getEventRequestById(id, { client: db });
-  const pastDraft = request.status !== STATUS.DRAFT;
-  const mayRead =
-    request.organiserId === userId
-    || (pastDraft && role === ROLE.EVENT_COORDINATOR_LEAD)
-    || (pastDraft && role === ROLE.EVENT_COORDINATOR && request.assignedCoordinatorId === userId);
-  if (!mayRead) {
+  if (request.organiserId === userId) return;
+  if (request.status === STATUS.DRAFT) {
     throw new NotFoundError(`Event request ${id} not found`);
   }
+  assertCoordinatorMayRead(request, userId, role, id);
 }
 
 /**
@@ -1885,9 +1948,9 @@ async function requireHistoryReader(db, id, userId, role) {
  * current, oldest first. An entry superseded by a reopen is what marks a request
  * as a resubmission; an approval superseded by a rejection (SCRUM-347) does not.
  *
- * Narrower than the clarification history: past rejection notes are for the
- * Organiser, the Lead who assigns the request, and the coordinator it is
- * assigned to now (AC5), not every coordinator.
+ * Past rejection notes are for the Organiser, the Lead who assigns the request,
+ * and the coordinator it is assigned to now (AC5), the clarification history's
+ * readers since SCRUM-444.
  */
 export async function getEventDecisionHistory(id, userId, role, { client } = {}) {
   requireCallerId(userId, 'userId');
@@ -1916,101 +1979,29 @@ export async function getEventDecisionHistory(id, userId, role, { client } = {})
 }
 
 /**
- * Every event request awaiting a decision, oldest waiting first.
+ * The caller's events awaiting a decision, oldest waiting first: a coordinator
+ * reads only the events they hold. submitted_at, nulls last, then id, so that
+ * touching a row never reorders the queue.
  *
- * SCRUM-45. The Event Coordinator's review queue, and the fix for the reported
- * bug that a submitted request never appears on the Coordinator side: until
- * now every read in this module was scoped to one organiser_id, so a second
- * person could not see the row at all.
- *
- * No organiserId, and assertOrganiser is deliberately NOT called. That is the
- * rule this module's header states rather than an exception to it: a function
- * taking no organiser checks none, and the caller proves the right to read.
- * Here the proof is the role gate on the route, which is the only proof
- * available -- a queue that crosses every Organiser is precisely a read that
- * no ownership check could scope.
- *
- * Which statuses count is not decided here. COORDINATOR_QUEUE_STATUSES owns
- * that, and its docstring carries the argument -- including that excluding
- * `draft` is the access control for a queue every Coordinator can see.
- *
- * SCRUM-486 (SCRUM-520), AC2-06: only requests someone holds. Since 052 a
- * submitted request has no coordinator until the Event Coordinator Lead
- * assigns one, and until then it is the Lead's alone: it is listed in the
- * Lead's unassigned queue (listUnassignedEventRequests), and every coordinator
- * action on it is refused (052's start_event_review and decide_event_request,
- * and requestEventClarification here). Listed in this queue it would be a row
- * every coordinator can open and do nothing with. So the read also requires
- * assigned_coordinator_id is not null, and every status it listed before is
- * still listed for a request that has a coordinator.
- *
- * Why there is still a shared queue at all, when every request in it now
- * belongs to somebody. Because the customer distinguishes managing an event
- * from viewing one. Managing is restricted: only the coordinator assigned to
- * an event may act on it (SCRUM-327 AC6, AC7). Viewing is not: SCRUM-444 AC1
- * lets any coordinator view any event, which GET /:id/review already serves
- * (SCRUM-332). This queue is that viewing right as a worklist -- what
- * colleagues have waiting -- and it is what a coordinator covering for a
- * colleague, or choosing who to hand an event to, needs to see. Taking it
- * away would remove something the customer allowed in order to enforce a
- * restriction the customer never made. What SCRUM-486 does reserve is the
- * choice of who takes a new request, which is the Lead's; so the only
- * requests kept out are the ones that belong to nobody. That is a customer
- * distinction, not a preference, and it is the whole of the filter.
- *
- * Four choices worth defending:
- *
- *  - The same COLUMNS every other read uses, so a queue row is byte-identical
- *    in shape to the row GET /:id returns. That is what lets the Coordinator UI
- *    render a full detail panel from a row it already holds instead of paying
- *    for a second route.
- *
- *  - submitted_at ASC -- oldest waiting first. updated_at DESC, which the
- *    organiser list uses above, would be actively wrong here: it is maintained
- *    by a trigger, so a Coordinator merely touching a request would bounce it
- *    back to the top of their own queue and bury whatever has actually been
- *    waiting longest.
- *
- *  - nullsFirst: false is mandatory, not a default spelled out. 005's check
- *    constrains submitted_at on drafts only, so a non-draft row may legitimately
- *    carry a null one, and Postgres sorts nulls first on ASC. "No recorded
- *    submission time" must go to the back rather than jump a queue ordered by
- *    how long people have waited.
- *
- *  - The id tiebreak is the same one listEventRequestsForOrganiser gives its
- *    own reason for: a bulk update writes a single now() across many rows, and
- *    an undefined tiebreak lets two refetches of identical data come back in
- *    different orders.
- *
- * No join to profiles, so organiser_id comes back as a bare uuid with no name
- * attached. That is the established answer on this codebase (venueService's
- * changedBy and eventRequestId do the same) and it is also the privacy floor
- * of the shared queue: a Coordinator learns what was asked for, not who to
- * contact about it. Render it as an identifier.
- *
- * listEventRequestsForCoordinator, below, does show the organiser's name, and
- * that is not a contradiction. The floor is for a queue every coordinator
- * sees, of work most of them do not hold. "My events" holds only the events
- * the caller is responsible for, where contacting the organiser is the job.
- * Its docstring gives the argument in full.
- *
- * Unpaginated, like every other list in this API. Bounded in practice by the
- * status filter -- a decided request drops out -- but say it rather than
- * discover it.
- *
+ * @param {string} coordinatorId  the caller, from the JWT -- never the query string
  * @param {object} [options]
  * @param {object} [options.client]
  * @returns {Promise<object[]>} possibly empty, in camelCase, across all Organisers
+ * @throws {ValidationError} when no coordinator was supplied
  */
-export async function listEventRequestsForReview({ client } = {}) {
+export async function listEventRequestsForReview(coordinatorId, { client } = {}) {
+  // Refused before the client is touched, as in listEventRequestsForCoordinator:
+  // the id comes from the token, so a missing one is a caller bug.
+  requireCallerId(coordinatorId, 'coordinatorId');
   const db = await resolveClient(client);
 
   const { data, error } = await db
     .from('event_requests')
     .select(ATTENTION_COLUMNS)
     .in('status', COORDINATOR_QUEUE_STATUSES)
-    // SCRUM-486 AC2-06: a request nobody holds is the Lead's (see above).
-    .not('assigned_coordinator_id', 'is', null)
+    // SCRUM-444 D3: the caller's own events. Also keeps out a request nobody
+    // holds, which is the Lead's (SCRUM-486 AC2-06).
+    .eq('assigned_coordinator_id', coordinatorId)
     .order('submitted_at', { ascending: true, nullsFirst: false })
     .order('id', { ascending: true });
 
@@ -2028,11 +2019,9 @@ export async function listEventRequestsForReview({ client } = {}) {
  *
  * SCRUM-333, for SCRUM-327 AC11: each coordinator has a "My events" list
  * showing the events assigned to them, grouped by status, earliest event
- * first. It sits beside the shared queue: the queue is every coordinator's
- * view of work awaiting a decision, whoever holds it, and this is the view of
- * work one person does hold. (Before SCRUM-486 the queue was described as work
- * nobody holds yet; since 052 that work is the Lead's unassigned queue, and
- * this queue lists only requests someone holds.)
+ * first. It sits beside the queue: since SCRUM-444 both list only the
+ * caller's events, the queue those awaiting a decision and this one all of
+ * them. (Work nobody holds yet is the Lead's unassigned queue, since 052.)
  *
  * No status filter. The queue leaves decided statuses out because it is a
  * worklist, and a worklist that kept them would never empty. This is a list
@@ -2049,15 +2038,12 @@ export async function listEventRequestsForReview({ client } = {}) {
  * submission at all. Since SCRUM-355's 015, reopening clears the coordinator
  * too, so a draft reopened since then is not listed here.
  *
- * Why this list shows the organiser's name, when listEventRequestsForReview
- * calls leaving it out "the privacy floor of the shared queue": that floor is
- * for a queue every coordinator sees, of events none of them has taken on, so
- * a coordinator learns what was asked for and not who to contact. These are
- * events the caller is responsible for, and AC7 makes them the one person who
- * can act on them. Contacting the organiser is part of that job. The two lists
- * answer the question differently because the work is the caller's here and
- * nobody's there. profiles has full_name but no email, so a name is all there
- * is to show.
+ * Why this list shows the organiser's name: these are events the caller is
+ * responsible for, and AC7 makes them the one person who can act on them.
+ * Contacting the organiser is part of that job. (The queue left names out when
+ * it listed colleagues' events too; since SCRUM-444 it lists only the
+ * caller's.) profiles has full_name but no email, so a name is all there is to
+ * show.
  *
  * Why the names are a second read rather than a join in the select. PostgREST
  * embeds one table in another only along a foreign key between them, and
@@ -2333,62 +2319,6 @@ async function readNames(db, ids) {
 
 
 /**
- * Every Event Coordinator, as { id, fullName }, for the reassign picker.
- *
- * SCRUM-334, for SCRUM-327 AC9: the outgoing coordinator chooses who to hand
- * the event to, so the screen needs the people they can choose from.
- *
- * This is the first read in the API that lists users, so it is the first that
- * could be used to enumerate staff. It selects only what the picker shows, the
- * id and the name, never the whole row: no role, no created_at. Who may call it
- * is decided at the route, which puts it behind coordinatorOnly.
- *
- * { id, fullName } because the object is the person, so its keys are that
- * person's columns in camelCase, the rule toEventRequest follows.
- * organiserName on "My events" is prefixed only because it names someone else
- * on an event's row.
- *
- * Ordered by full_name, nulls last, then id. A picker is scanned by a person
- * looking for a colleague, so alphabetical is what they need; id alone would
- * be stable but would look random. full_name is nullable, so a coordinator
- * with no name goes to the end rather than the top, and the id orders those,
- * and any two people with the same name, the same way every time. A
- * coordinator with no name is still listed: they can still take an event.
- *
- * The caller is included. Someone cannot hand an event to themselves, so the
- * picker leaves them out, which is presentation. Doing it here would make
- * this "everyone but me".
- *
- * The role comes from ROLE in domain/userRole.js rather than a literal, so it
- * is the same string requireRole checks. It is also the value 014 and 015
- * select coordinators by.
- *
- * @param {object} [options]
- * @param {object} [options.client]
- * @returns {Promise<Array<{ id: string, fullName: string|null }>>} possibly empty
- */
-export async function listCoordinators({ client } = {}) {
-  const db = await resolveClient(client);
-
-  const { data, error } = await db
-    .from('profiles')
-    .select('id, full_name')
-    .eq('role', ROLE.EVENT_COORDINATOR)
-    .order('full_name', { ascending: true, nullsFirst: false })
-    .order('id', { ascending: true });
-
-  if (error) throw translateError(error);
-
-  // No coordinators is not an error. Nobody can be handed an event, and the
-  // picker says so; that is its message to show.
-  return (data ?? []).map((profile) => ({
-    id: profile.id,
-    fullName: profile.full_name ?? null,
-  }));
-}
-
-
-/**
  * The Event Coordinator Lead's unassigned queue (SCRUM-486 AC2): every
  * submitted request with no coordinator, oldest first.
  *
@@ -2439,14 +2369,10 @@ export async function listUnassignedEventRequests({ client } = {}) {
  * Every Event Coordinator, with their count of active events, for the Lead's
  * assignment picker (SCRUM-486 AC3).
  *
- * SCRUM-519. A read of its own rather than listCoordinators widened, for
- * three reasons. listCoordinators is SCRUM-334's handover picker, read by
- * every coordinator; adding workload to it would show every coordinator
- * everyone's caseload, which no story asked for. Its route is behind
- * coordinatorOnly, and SCRUM-485 pins that a Lead is refused it; widening the
- * gate would undo that deliberately pinned refusal for a need a separate route
- * meets without it. And a route of its own makes its gate say exactly who
- * reads workload: the Lead.
+ * SCRUM-519. A read of its own, behind leadOnly, so its gate says exactly who
+ * reads workload: the Lead. Since SCRUM-444 (D5) it is the only list of
+ * coordinators: the holder's handover picker, listCoordinators, went with the
+ * holder's right to hand over.
  *
  * Only event_coordinator: the Lead cannot be assigned events (the team's
  * 11 October decision), and one role per account means this excludes every

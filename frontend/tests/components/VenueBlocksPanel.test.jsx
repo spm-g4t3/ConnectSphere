@@ -6,7 +6,7 @@
 //
 // The four block calls in venueService are mocked, so nothing touches the
 // network. Timezone-safe: fixtures are instants relative to the real clock
-// with day-sized margins, expected ranges come from formatRange, sent
+// with day-sized margins, expected ranges come from formatDateTimeRange, sent
 // timestamps are checked by offset shape and getTime(), and datetime-local
 // inputs are set with fireEvent.change. No fake timers.
 
@@ -21,13 +21,12 @@ import {
   removeVenueBlock,
   updateVenueBlock,
 } from "../../src/services/venueService";
-import { formatRange } from "../../src/services/displayFormat";
+import { formatDateTime, formatDateTimeRange } from "../../src/services/displayFormat";
 import { formatOccupiedPeriod } from "../../src/services/occupiedPeriodDisplay";
 import { toDatetimeLocalValue } from "../../src/services/datetimeFormat";
 import { getVenueBlockHistory } from "../../src/services/venueService";
-import { formatTimestamp } from "../../src/services/displayFormat";
 import { deferred } from "../helpers/async.js";
-import { sgTime } from "../helpers/singaporeTime.js";
+import { stubDialogElement } from "../helpers/dialog.js";
 
 vi.mock("../../src/services/venueService", () => ({
   listVenueBlocks: vi.fn(),
@@ -122,7 +121,7 @@ const MSG = {
   blockGone: "That block no longer exists. The list has been refreshed.",
   unknown409: "This block changed while you were working on it. The list has been refreshed.",
   removeFailed: "Could not remove this block. Please try again.",
-  confirmRemove: "Remove this block? Bookings it flagged stay flagged for review.",
+  confirmRemove: "Bookings it flagged stay flagged for review.",
   endedNote: "Ended blocks are kept as a record and can't be changed.",
   retiredTitle: "A retired venue cannot be blocked.",
 };
@@ -153,8 +152,19 @@ async function renderPanel(venue = VENUE) {
 }
 
 /** The <li> for a block, found by its formatted range. */
+/** A button inside the open confirmation dialog. */
+function dialogButton(name) {
+  return within(screen.getByRole("dialog")).getByRole("button", { name });
+}
+
+function removeDialog() {
+  return screen.getByRole("dialog", { name: "Remove this block?" });
+}
+
+stubDialogElement();
+
 function rowFor(block) {
-  return screen.getByText(formatRange(block.startsAt, block.endsAt)).closest("li");
+  return screen.getByText(formatDateTimeRange(block.startsAt, block.endsAt)).closest("li");
 }
 
 function startInput() {
@@ -209,7 +219,7 @@ async function reachConflict(user, conflicts = [BOOKING_A, BOOKING_B]) {
 async function confirmOverride(user, count) {
   const noun = count === 1 ? "booking" : "bookings";
   await user.click(screen.getByRole("button", { name: `Override and flag ${count} ${noun}` }));
-  await user.click(screen.getByRole("button", { name: "Yes, override" }));
+  await user.click(dialogButton("Override and flag"));
 }
 
 function noticeEl() {
@@ -218,7 +228,7 @@ function noticeEl() {
 
 function panelAlert() {
   // The panel-level alert is the direct child of .venue-blocks.
-  return document.querySelector(".venue-blocks > p.venue-blocks__error[role='alert']");
+  return document.querySelector(".venue-blocks > .ui-error-notice[role='alert']");
 }
 
 function expectNoUuidInText() {
@@ -240,16 +250,16 @@ describe("VenueBlocksPanel list", () => {
     const upcoming = rowFor(UPCOMING);
     expect(within(upcoming).getByText("Maintenance")).toBeInTheDocument();
     expect(within(upcoming).getByText("Aircon servicing")).toBeInTheDocument();
-    expect(within(upcoming).getByText("Upcoming")).toHaveClass("status--block-upcoming");
+    expect(within(upcoming).getByText("Upcoming")).toHaveClass("ui-status-badge", "ui-status-badge--danger");
 
     const inEffect = rowFor(IN_EFFECT);
     expect(within(inEffect).getByText("Internal activity")).toBeInTheDocument();
-    expect(within(inEffect).getByText("In effect")).toHaveClass("status--block-in_effect");
+    expect(within(inEffect).getByText("In effect")).toHaveClass("ui-status-badge", "ui-status-badge--danger");
     expect(inEffect.querySelector(".venue-blocks__notes")).toBeNull();
 
     const ended = rowFor(ENDED);
     expect(within(ended).getByText("Safety")).toBeInTheDocument();
-    expect(within(ended).getByText("Ended")).toHaveClass("status--block-ended");
+    expect(within(ended).getByText("Ended")).toHaveClass("ui-status-badge", "ui-status-badge--neutral");
     expect(ended).toHaveClass("venue-blocks__item--ended");
 
     // Server order is kept.
@@ -470,7 +480,7 @@ describe("VenueBlocksPanel conflicts and override (AC3)", () => {
     expect(screen.getByText("Tech Talk")).toBeInTheDocument();
     expect(screen.getByText("Career Fair")).toBeInTheDocument();
     expect(
-      screen.getByText(formatRange(BOOKING_A.startsAt, BOOKING_A.endsAt)),
+      screen.getByText(formatDateTimeRange(BOOKING_A.startsAt, BOOKING_A.endsAt)),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Choose a different period" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Override and flag 2 bookings" })).toBeEnabled();
@@ -495,7 +505,7 @@ describe("VenueBlocksPanel conflicts and override (AC3)", () => {
     expect(
       screen.getByText("Flag these bookings for review and notify each event's coordinator?"),
     ).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Yes, override" }));
+    await user.click(dialogButton("Override and flag"));
 
     expect(createVenueBlock).toHaveBeenCalledTimes(2);
     const [venueId, second] = vi.mocked(createVenueBlock).mock.calls[1];
@@ -531,11 +541,11 @@ describe("VenueBlocksPanel conflicts and override (AC3)", () => {
     expect(items).toHaveLength(2);
     expect(within(items[0]).getByText("Tech Talk")).toBeInTheDocument();
     expect(
-      within(items[0]).getByText(formatRange(BOOKING_A.startsAt, BOOKING_A.endsAt)),
+      within(items[0]).getByText(formatDateTimeRange(BOOKING_A.startsAt, BOOKING_A.endsAt)),
     ).toBeInTheDocument();
     expect(within(items[1]).getByText("Career Fair")).toBeInTheDocument();
     expect(
-      within(items[1]).getByText(formatRange(BOOKING_B.startsAt, BOOKING_B.endsAt)),
+      within(items[1]).getByText(formatDateTimeRange(BOOKING_B.startsAt, BOOKING_B.endsAt)),
     ).toBeInTheDocument();
 
     // The full event request id is only in the title, never in the text.
@@ -583,11 +593,11 @@ describe("VenueBlocksPanel conflicts and override (AC3)", () => {
     await waitFor(() => expect(noticeEl()).toHaveTextContent(MSG.saved));
     const item = within(noticeEl()).getByRole("listitem");
     expect(within(item).getByText("Tech Talk")).toBeInTheDocument();
-    expect(within(item).getByText(formatOccupiedPeriod(padded))).toBeInTheDocument();
-    expect(formatOccupiedPeriod(padded)).toBe(
-      `Setup ${formatRange(padded.occupiedStartsAt, padded.startsAt)} · ` +
-        `Event ${formatRange(padded.startsAt, padded.endsAt)} · ` +
-        `Turnaround ${formatRange(padded.endsAt, padded.occupiedEndsAt)}`,
+    expect(within(item).getByText(formatOccupiedPeriod(padded, formatDateTimeRange))).toBeInTheDocument();
+    expect(formatOccupiedPeriod(padded, formatDateTimeRange)).toBe(
+      `Setup ${formatDateTimeRange(padded.occupiedStartsAt, padded.startsAt)} · ` +
+        `Event ${formatDateTimeRange(padded.startsAt, padded.endsAt)} · ` +
+        `Turnaround ${formatDateTimeRange(padded.endsAt, padded.occupiedEndsAt)}`,
     );
   });
 
@@ -605,7 +615,7 @@ describe("VenueBlocksPanel conflicts and override (AC3)", () => {
     await waitFor(() => expect(noticeEl()).toHaveTextContent(MSG.saved));
     const item = within(noticeEl()).getByRole("listitem");
     expect(
-      within(item).getByText(formatRange(unpadded.startsAt, unpadded.endsAt)),
+      within(item).getByText(formatDateTimeRange(unpadded.startsAt, unpadded.endsAt)),
     ).toBeInTheDocument();
     expect(item).not.toHaveTextContent(/Setup |Turnaround |·/);
   });
@@ -631,9 +641,9 @@ describe("VenueBlocksPanel conflicts and override (AC3)", () => {
     expect(screen.getByText("Hackathon")).toBeInTheDocument();
     expect(screen.queryByText("Tech Talk")).not.toBeInTheDocument();
     expect(screen.getByText(MSG.changedSince)).toBeInTheDocument();
-    expect(screen.getByText(MSG.changedSince)).toHaveAttribute("role", "alert");
+    expect(screen.getByText(MSG.changedSince).closest('[role="alert"]')).toHaveClass("ui-error-notice");
     // The confirm closed itself: nobody confirms bookings they have not seen.
-    expect(screen.queryByRole("button", { name: "Yes, override" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Override and flag 1 booking" })).toBeEnabled();
     expect(noticeEl()).toBeNull();
 
@@ -728,12 +738,12 @@ describe("VenueBlocksPanel conflicts and override (AC3)", () => {
     vi.mocked(createVenueBlock).mockReturnValueOnce(pending.promise);
     await confirmOverride(user, 2);
 
-    expect(screen.getByRole("button", { name: "Flagging..." })).toBeDisabled();
+    expect(dialogButton("Flagging...")).toBeDisabled();
     expect(screen.getByRole("button", { name: "Choose a different period" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Saving..." })).toBeDisabled();
 
     // A second click while in flight sends nothing.
-    fireEvent.click(screen.getByRole("button", { name: "Flagging..." }));
+    fireEvent.click(dialogButton("Flagging..."));
     expect(createVenueBlock).toHaveBeenCalledTimes(2);
 
     await act(async () => pending.resolve({ block: UPCOMING, flaggedBookings: [BOOKING_A] }));
@@ -965,7 +975,7 @@ describe("VenueBlocksPanel edit (AC4)", () => {
       expect(listVenueBlocks).toHaveBeenCalledTimes(2);
       await waitFor(() =>
         expect(
-          screen.queryByText(formatRange(UPCOMING.startsAt, UPCOMING.endsAt)),
+          screen.queryByText(formatDateTimeRange(UPCOMING.startsAt, UPCOMING.endsAt)),
         ).not.toBeInTheDocument(),
       );
       expectNoUuidInText();
@@ -1008,46 +1018,44 @@ describe("VenueBlocksPanel remove (AC4)", () => {
     const { user } = await renderPanel();
     await askToRemove(user);
 
-    const row = rowFor(UPCOMING);
-    expect(within(row).getByText(MSG.confirmRemove)).toBeInTheDocument();
-    expect(within(row).getByRole("button", { name: "Yes, remove" })).toBeEnabled();
-    expect(within(row).getByRole("button", { name: "Cancel" })).toBeEnabled();
-    expect(within(row).queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+    const dialog = removeDialog();
+    expect(dialog).toHaveTextContent(MSG.confirmRemove);
+    // It names this row's block, not another's.
+    expect(dialog).toHaveTextContent(`Maintenance: ${formatDateTimeRange(UPCOMING.startsAt, UPCOMING.endsAt)}`);
+    expect(within(dialog).getByRole("button", { name: "Remove block" })).toBeEnabled();
+    expect(within(dialog).getByRole("button", { name: "Keep block" })).toBeEnabled();
     expect(removeVenueBlock).not.toHaveBeenCalled();
-    // Only this row asks.
-    expect(within(rowFor(IN_EFFECT)).queryByText(MSG.confirmRemove)).not.toBeInTheDocument();
   });
 
   it("SCRUM17_AC4_Cancel_backs_out_without_a_request", async () => {
     const { user } = await renderPanel();
     await askToRemove(user);
-    await user.click(within(rowFor(UPCOMING)).getByRole("button", { name: "Cancel" }));
+    await user.click(dialogButton("Keep block"));
 
-    expect(screen.queryByText(MSG.confirmRemove)).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(within(rowFor(UPCOMING)).getByRole("button", { name: "Remove" })).toBeEnabled();
     expect(removeVenueBlock).not.toHaveBeenCalled();
   });
 
-  it("SCRUM17_AC4_Yes_remove_calls_removeVenueBlock_shows_Removing_then_refetches", async () => {
+  it("SCRUM17_AC4_confirming_remove_calls_removeVenueBlock_shows_Removing_then_refetches", async () => {
     const { user } = await renderPanel();
     const pending = deferred();
     vi.mocked(removeVenueBlock).mockReturnValue(pending.promise);
 
     await askToRemove(user);
-    await user.click(within(rowFor(UPCOMING)).getByRole("button", { name: "Yes, remove" }));
+    await user.click(dialogButton("Remove block"));
 
     expect(removeVenueBlock).toHaveBeenCalledTimes(1);
     expect(removeVenueBlock).toHaveBeenCalledWith(VENUE.id, UPCOMING.id);
 
-    const row = rowFor(UPCOMING);
-    expect(within(row).getByRole("button", { name: "Removing..." })).toBeDisabled();
-    expect(within(row).getByRole("button", { name: "Cancel" })).toBeDisabled();
+    expect(dialogButton("Removing...")).toBeDisabled();
+    expect(dialogButton("Keep block")).toBeDisabled();
     // Other rows' actions are disabled while a removal is in flight.
     expect(within(rowFor(IN_EFFECT)).getByRole("button", { name: "Edit" })).toBeDisabled();
     expect(within(rowFor(IN_EFFECT)).getByRole("button", { name: "Remove" })).toBeDisabled();
 
     // A second click while in flight sends nothing.
-    fireEvent.click(within(row).getByRole("button", { name: "Removing..." }));
+    fireEvent.click(dialogButton("Removing..."));
     expect(removeVenueBlock).toHaveBeenCalledTimes(1);
 
     vi.mocked(listVenueBlocks).mockResolvedValue([IN_EFFECT, ENDED]);
@@ -1058,7 +1066,7 @@ describe("VenueBlocksPanel remove (AC4)", () => {
     expect(listVenueBlocks).toHaveBeenCalledTimes(2);
     await waitFor(() =>
       expect(
-        screen.queryByText(formatRange(UPCOMING.startsAt, UPCOMING.endsAt)),
+        screen.queryByText(formatDateTimeRange(UPCOMING.startsAt, UPCOMING.endsAt)),
       ).not.toBeInTheDocument(),
     );
     expect(within(rowFor(IN_EFFECT)).getByRole("button", { name: "Remove" })).toBeEnabled();
@@ -1075,7 +1083,7 @@ describe("VenueBlocksPanel remove (AC4)", () => {
       vi.mocked(removeVenueBlock).mockRejectedValue(err());
 
       await askToRemove(user);
-      await user.click(within(rowFor(UPCOMING)).getByRole("button", { name: "Yes, remove" }));
+      await user.click(dialogButton("Remove block"));
 
       await waitFor(() => expect(panelAlert()).toHaveTextContent(message));
       expect(within(rowFor(UPCOMING)).queryByRole("alert")).not.toBeInTheDocument();
@@ -1090,7 +1098,7 @@ describe("VenueBlocksPanel remove (AC4)", () => {
     vi.mocked(removeVenueBlock).mockRejectedValue(httpError(500));
 
     await askToRemove(user);
-    await user.click(within(rowFor(UPCOMING)).getByRole("button", { name: "Yes, remove" }));
+    await user.click(dialogButton("Remove block"));
 
     const row = rowFor(UPCOMING);
     await waitFor(() => expect(within(row).getByRole("alert")).toHaveTextContent(MSG.removeFailed));
@@ -1099,7 +1107,7 @@ describe("VenueBlocksPanel remove (AC4)", () => {
     expect(listVenueBlocks).toHaveBeenCalledTimes(1);
     // Back to the plain buttons, ready to retry.
     expect(within(row).getByRole("button", { name: "Remove" })).toBeEnabled();
-    expect(within(row).queryByText(MSG.confirmRemove)).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expectNoUuidInText();
   });
 
@@ -1108,7 +1116,7 @@ describe("VenueBlocksPanel remove (AC4)", () => {
     vi.mocked(removeVenueBlock).mockRejectedValue(httpError(403));
 
     await askToRemove(user, IN_EFFECT);
-    await user.click(within(rowFor(IN_EFFECT)).getByRole("button", { name: "Yes, remove" }));
+    await user.click(dialogButton("Remove block"));
 
     await waitFor(() =>
       expect(within(rowFor(IN_EFFECT)).getByRole("alert")).toHaveTextContent(
@@ -1122,7 +1130,7 @@ describe("VenueBlocksPanel remove (AC4)", () => {
     const { user } = await renderPanel();
     vi.mocked(removeVenueBlock).mockRejectedValue(httpError(500));
     await askToRemove(user);
-    await user.click(within(rowFor(UPCOMING)).getByRole("button", { name: "Yes, remove" }));
+    await user.click(dialogButton("Remove block"));
     await waitFor(() => expect(within(rowFor(UPCOMING)).getByRole("alert")).toBeInTheDocument());
 
     await user.click(screen.getByRole("button", { name: "+ Add a block" }));
@@ -1209,11 +1217,11 @@ describe("VenueBlocksPanel audit line and history (SCRUM-131, AC4)", () => {
     vi.mocked(listVenueBlocks).mockResolvedValue([audited(UPCOMING)]);
     await renderWithUser();
 
-    expect(auditOf(UPCOMING)).toHaveTextContent(`Created ${formatTimestamp(CREATED_AT)} by you`, {
+    expect(auditOf(UPCOMING)).toHaveTextContent(`Created ${formatDateTime(CREATED_AT)} by you`, {
       normalizeWhitespace: true,
     });
     expect(auditOf(UPCOMING).textContent).toBe(
-      `Created ${sgTime(CREATED_AT)} by you`,
+      `Created ${formatDateTime(CREATED_AT)} by you`,
     );
     // Never changed, so no amendment is named.
     expect(auditOf(UPCOMING).textContent).not.toContain("Last amended");
@@ -1228,7 +1236,7 @@ describe("VenueBlocksPanel audit line and history (SCRUM-131, AC4)", () => {
 
     const audit = auditOf(UPCOMING);
     expect(audit.textContent).toBe(
-      `Created ${formatTimestamp(CREATED_AT)} by you · Last amended ${formatTimestamp(AMENDED_AT)} by d2a3b4c5`,
+      `Created ${formatDateTime(CREATED_AT)} by you · Last amended ${formatDateTime(AMENDED_AT)} by d2a3b4c5`,
     );
     expect(audit.querySelector("code")).toHaveAttribute("title", OTHER);
     expect(audit.textContent).not.toContain(OTHER);
@@ -1242,7 +1250,7 @@ describe("VenueBlocksPanel audit line and history (SCRUM-131, AC4)", () => {
     ]);
     await renderWithUser();
     expect(auditOf(UPCOMING).textContent).toBe(
-      `Created ${formatTimestamp(CREATED_AT)} outside the app`,
+      `Created ${formatDateTime(CREATED_AT)} outside the app`,
     );
   });
 
@@ -1260,7 +1268,7 @@ describe("VenueBlocksPanel audit line and history (SCRUM-131, AC4)", () => {
     await renderWithUser(VENUE, {});
 
     const audit = auditOf(UPCOMING);
-    expect(audit.textContent).toBe(`Created ${formatTimestamp(CREATED_AT)} by d1000000`);
+    expect(audit.textContent).toBe(`Created ${formatDateTime(CREATED_AT)} by d1000000`);
     expect(audit.querySelector("code")).toHaveAttribute("title", ME);
     expect(audit.textContent).not.toContain("you");
   });
@@ -1369,13 +1377,13 @@ describe("VenueBlocksPanel audit line and history (SCRUM-131, AC4)", () => {
   it("SCRUM17_AC4_History_stays_enabled_during_a_remove_confirm_and_while_it_is_in_flight", async () => {
     const { user } = await renderWithUser();
     await user.click(within(rowFor(UPCOMING)).getByRole("button", { name: "Remove" }));
-    expect(within(rowFor(UPCOMING)).getByText(MSG.confirmRemove)).toBeInTheDocument();
+    expect(removeDialog()).toBeInTheDocument();
     expect(historyButton(UPCOMING)).toBeEnabled();
 
     const pending = deferred();
     vi.mocked(removeVenueBlock).mockReturnValue(pending.promise);
-    await user.click(within(rowFor(UPCOMING)).getByRole("button", { name: "Yes, remove" }));
-    expect(within(rowFor(UPCOMING)).getByRole("button", { name: "Removing..." })).toBeDisabled();
+    await user.click(dialogButton("Remove block"));
+    expect(dialogButton("Removing...")).toBeDisabled();
 
     for (const block of BLOCKS) expect(historyButton(block)).toBeEnabled();
     await user.click(historyButton(UPCOMING));
@@ -1445,7 +1453,7 @@ describe("VenueBlocksPanel audit line and history (SCRUM-131, AC4)", () => {
     vi.mocked(removeVenueBlock).mockResolvedValue(undefined);
     vi.mocked(listVenueBlocks).mockResolvedValue([audited(UPCOMING)]);
     await user.click(within(rowFor(IN_EFFECT)).getByRole("button", { name: "Remove" }));
-    await user.click(within(rowFor(IN_EFFECT)).getByRole("button", { name: "Yes, remove" }));
+    await user.click(dialogButton("Remove block"));
     await waitFor(() => expect(noticeEl()).toHaveTextContent(MSG.removed));
     await waitFor(() => expect(listVenueBlocks).toHaveBeenCalledTimes(2));
 
@@ -1539,7 +1547,7 @@ describe("VenueBlocksPanel coverage gaps (SCRUM-132)", () => {
     expect(items).toHaveLength(2);
     for (const item of items) {
       expect(within(item).getByText("Unnamed event")).toBeInTheDocument();
-      expect(within(item).getByText(formatRange(bare.startsAt, bare.endsAt))).toBeInTheDocument();
+      expect(within(item).getByText(formatDateTimeRange(bare.startsAt, bare.endsAt))).toBeInTheDocument();
       const code = within(item).getByText("no event");
       expect(code.tagName).toBe("CODE");
       expect(code).not.toHaveAttribute("title");

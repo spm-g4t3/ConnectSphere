@@ -118,11 +118,10 @@ export class UnauthorizedError extends AppError {
  * should not learn that, such as an Organiser probing for someone else's
  * request, and for them the answer stays 404.
  *
- * A coordinator is not that caller. Every Event Coordinator already sees every
- * queued event in the shared review queue (SCRUM-45), so a 403 tells them
- * nothing about which ids exist that they did not already know. What it tells
- * them is the true reason: the event exists, and it is not theirs to hand
- * over. A 404 there would be a false answer protecting nothing.
+ * A coordinator was not that caller while every one saw every queued event
+ * (SCRUM-45). Since SCRUM-444 a coordinator reads only the events they hold, so
+ * a write's 403 does confirm the id to a non-holder: the writes keep the
+ * function's refusal (SCRUM-444 AC2), and the reads answer 404.
  *
  * So use this only where the caller can already see the record. Anywhere the
  * existence of a record is itself the secret, keep answering 404.
