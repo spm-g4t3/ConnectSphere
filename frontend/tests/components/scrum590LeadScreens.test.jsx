@@ -380,6 +380,14 @@ describe("SCRUM590_AC4 loading, empty and error states and dates", () => {
     expect(within(alert).queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
   });
 
+  it.each(READS)("SCRUM590_AC4_a_404_on_%s_offers_no_Try_again", async (_name, service, show) => {
+    vi.mocked(service).mockRejectedValue(httpError(404));
+    show();
+
+    const alert = await screen.findByRole("alert");
+    expect(within(alert).queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+  });
+
   it("SCRUM590_AC4_a_refused_filter_offers_no_Try_again", async () => {
     const user = userEvent.setup();
     await renderAssignedEvents();
