@@ -302,7 +302,7 @@ describe("SCRUM379 completing from the event screen", () => {
     await harness.user.click(screen.getByRole("button", { name: "Continue" }));
     await harness.user.click(screen.getByRole("button", { name: "Yes, mark as completed" }));
 
-    expect(await screen.findByText("Completed", { selector: ".status-badge" })).toBeInTheDocument();
+    expect(await screen.findByText("Completed", { selector: ".ui-status-badge" })).toBeInTheDocument();
     expect(completeEventRequest).toHaveBeenCalledExactlyOnceWith(REQUEST_ID, { closingNotes: "Attendance 180." });
     expect(screen.getByRole("status")).toHaveTextContent("Marked as completed.");
     expect(closingNotesSection()).toBeInTheDocument();

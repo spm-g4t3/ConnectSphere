@@ -106,6 +106,8 @@ function renderPage(request, props = {}) {
 }
 
 const panel = () => screen.queryByRole("region", { name: "Submit for the safety check" });
+// The status badge under the event's title, in the screen's header.
+const statusBadge = () => screen.getByRole("heading", { level: 2 }).closest("header").querySelector(".ui-status-badge");
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -148,7 +150,7 @@ describe("SCRUM363 coordinator confirmation", () => {
     await user.click(screen.getByRole("button", { name: "Preview significant change" }));
     await user.click(await screen.findByLabelText("I have reviewed this impact and confirm applying the significant change."));
     await user.click(screen.getByRole("button", { name: "Confirm significant change" }));
-    await waitFor(() => expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("Planning"));
+    await waitFor(() => expect(statusBadge()).toHaveTextContent("Planning"));
     expect(screen.queryByText("Event confirmed successfully.")).not.toBeInTheDocument();
     expect(confirmPanel()).not.toBeInTheDocument();
     expect(applySignificantEventChange).toHaveBeenCalledExactlyOnceWith(EVENT_ID, {
@@ -197,7 +199,7 @@ describe("SCRUM363 coordinator confirmation", () => {
 
     expect(await screen.findByRole("status")).toHaveTextContent("Event confirmed successfully.");
     expect(screen.getAllByText("Event confirmed successfully.")).toHaveLength(1);
-    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("Confirmed");
+    expect(statusBadge()).toHaveTextContent("Confirmed");
     expect(confirmPanel()).not.toBeInTheDocument();
     expect(screen.queryByText("Safety approval complete")).not.toBeInTheDocument();
     expect(refresh).toHaveBeenCalledTimes(1);
@@ -223,7 +225,7 @@ describe("SCRUM363 coordinator confirmation", () => {
     await user.click(confirm);
     await screen.findByText('Event confirmed successfully.');
     rerender(<MemoryRouter><CoordinatorRequestDetail request={eventRequest()} /></MemoryRouter>);
-    expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent('Planning');
+    expect(statusBadge()).toHaveTextContent('Planning');
     expect(screen.queryByText('Event confirmed successfully.')).not.toBeInTheDocument();
     rerender(<MemoryRouter><CoordinatorRequestDetail request={safetyApproved()} /></MemoryRouter>);
     expect(await screen.findByRole('button', { name: 'Confirm Event' })).toBeInTheDocument();
@@ -338,7 +340,7 @@ describe("SCRUM489_AC6 the page after a submission", () => {
     await user.click(submit);
 
     await waitFor(() => expect(panel()).not.toBeInTheDocument());
-    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("Safety check");
+    expect(statusBadge()).toHaveTextContent("Safety check");
     expect(screen.queryByText("Planning")).not.toBeInTheDocument();
     expect(onChangeRequestProcessed).toHaveBeenCalledTimes(1);
   });

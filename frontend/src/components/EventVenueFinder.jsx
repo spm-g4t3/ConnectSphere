@@ -187,7 +187,8 @@ const RESULT_CODE_LISTS = [
  * One matching venue: its name as the heading, the rest as a <dl>, then the
  * SCRUM-191 check and SCRUM-254 request buttons.
  */
-function VenueResult({ venue, headingId, checkDisabled, onCheck, requestDisabled, lockedReason, onRequest }) {
+function VenueResult({ venue, headingId, headingLevel, checkDisabled, onCheck, requestDisabled, lockedReason, onRequest }) {
+  const Heading = `h${headingLevel}`;
   // SCRUM-525: the hint that explains a locked Request button, by id.
   const lockedHintId = `${headingId}-locked`;
   const rows = [
@@ -202,7 +203,7 @@ function VenueResult({ venue, headingId, checkDisabled, onCheck, requestDisabled
   ];
   return (
     <article className="event-venue-finder__result" aria-labelledby={headingId}>
-      <h4 id={headingId}>{venue.name}</h4>
+      <Heading id={headingId}>{venue.name}</Heading>
       <dl>
         {rows.map(({ term, value }) => (
           <div key={term} className="event-venue-finder__result-row">
@@ -351,6 +352,8 @@ export default function EventVenueFinder({
   replacing,
   onStopReplacing,
   onReplacementRefused,
+  // Each result's heading, one under the section the finder sits in.
+  headingLevel = 4,
 }) {
   // Lazy: the function runs on the first render only. See the header.
   const [seed] = useState(() => seedFromEvent(request));
@@ -678,6 +681,7 @@ export default function EventVenueFinder({
                 <VenueResult
                   venue={venue}
                   headingId={`${idPrefix}-venue-${venue.id}`}
+                  headingLevel={headingLevel}
                   checkDisabled={!canCheck}
                   onCheck={openCheck}
                   requestDisabled={!eligibility.eligible || isLocked(venue.id)}

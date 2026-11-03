@@ -28,8 +28,12 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { normaliseRole } from "../auth/normaliseRole";
+import { canRetryRead } from "../services/apiErrors";
 import { getEventRequestForReview } from "../services/eventRequestService";
 import CoordinatorRequestDetail from "./CoordinatorRequestDetail";
+import ErrorNotice from "./ui/ErrorNotice";
+import LoadingText from "./ui/LoadingText";
+import useFocusAfterRetry from "./useFocusAfterRetry";
 
 // Keyed by status, as every load in this frontend is, never on the server's
 // text. 404 covers a draft, a missing id and, since SCRUM-444, an event the
@@ -52,6 +56,7 @@ export default function EventRequestReviewPage() {
   const [request, setRequest] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [retryable, setRetryable] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -63,6 +68,7 @@ export default function EventRequestReviewPage() {
         (isLead && status === 404 ? LEAD_NOT_FOUND : LOAD_ERROR_MESSAGES[status]) ||
           "This event request could not be loaded. Please try again.",
       );
+      setRetryable(canRetryRead(err));
     } finally {
       setLoading(false);
     }
@@ -72,26 +78,33 @@ export default function EventRequestReviewPage() {
     load();
   }, [load]);
 
-  if (loading) return <p>Loading...</p>;
-
-  if (error) {
-    return (
-      <p className="coordinator-clarification__error" role="alert">
-        {error}
-      </p>
-    );
-  }
+  // Only Try again shows the loading text again: the refreshes after a
+  // decision keep the screen mounted, so it keeps its own state.
+  const retryLoad = useCallback(() => {
+    setLoading(true);
+    return load();
+  }, [load]);
+  // The page section stays mounted through a retry, so focus lands on it
+  // whether the read then succeeds or fails again.
+  const { headingRef, retry } = useFocusAfterRetry(retryLoad);
 
   // After a handover, a decision or a processed change request, read the
   // event again, so the screen shows where it stands now. The screen keeps
   // its own state (who it was handed to) across the refresh.
   return (
-    <section>
-      <CoordinatorRequestDetail
-        request={request}
-        onChangeRequestProcessed={load}
-        onReviewDecisionProcessed={load}
-      />
+    <section ref={headingRef} tabIndex={-1}>
+      {loading ? (
+        <LoadingText />
+      ) : error ? (
+        <ErrorNotice message={error} onRetry={retryable ? retry : undefined} />
+      ) : (
+        <CoordinatorRequestDetail
+          asPage
+          request={request}
+          onChangeRequestProcessed={load}
+          onReviewDecisionProcessed={load}
+        />
+      )}
     </section>
   );
 }

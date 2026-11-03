@@ -21,8 +21,10 @@ const DECISION_LABEL = {
  *                                                 the request is a resubmission
  * @param {boolean} [props.showReason]  false beside a current rejection, whose
  *                                      own reason is the one to act on (SCRUM-347)
+ * @param {number} [props.headingLevel]  the level of its "Previous decisions" heading
  */
-export default function DecisionHistory({ eventRequestId, view = "organiser", showReason = true }) {
+export default function DecisionHistory({ eventRequestId, view = "organiser", showReason = true, headingLevel = 3 }) {
+  const Heading = `h${headingLevel}`;
   // Tagged with the request it was read for, so switching requests never shows
   // the previous one's decisions or error while the new read is in flight.
   const [result, setResult] = useState(null);
@@ -64,7 +66,7 @@ export default function DecisionHistory({ eventRequestId, view = "organiser", sh
           <p>{latestRejection.decisionNote || "No reason was recorded."}</p>
         </div>
       )}
-      <h3>Previous decisions</h3>
+      <Heading>Previous decisions</Heading>
       <ol className="decision-history__list">
         {entries.map((entry) => (
           <li key={entry.id}>

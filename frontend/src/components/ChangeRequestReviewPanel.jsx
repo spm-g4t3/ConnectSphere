@@ -75,12 +75,13 @@ function ImpactStat({ label, value }) {
   );
 }
 
-function SignificantImpact({ impact }) {
+function SignificantImpact({ impact, headingLevel }) {
+  const Heading = `h${headingLevel}`;
   const bookings = impact.venueBookings ?? [];
   const pending = impact.pendingBookingRequests ?? [];
   return (
     <div className="event-significant-change__impact" aria-label="Significant change impact preview">
-      <h4>What the significant part will affect</h4>
+      <Heading>What the significant part will affect</Heading>
       <div className="event-significant-change__stats">
         <ImpactStat label="Venue bookings to flag" value={bookings.length} />
         <ImpactStat label="Equipment reservations to flag" value={(impact.equipmentReservations ?? []).length} />
@@ -126,8 +127,10 @@ function ChangeRow({ row, changeClass }) {
  * @param {boolean} props.canProcess    the signed-in user holds the event
  * @param {() => void} [props.onProcessed]  re-read the event: fields and status may have changed
  * @param {(text: string) => void} [props.onEquipmentAccepted]  hand off to the equipment section
+ * @param {number} [props.headingLevel]  the section's heading level
  */
-export default function ChangeRequestReviewPanel({ eventRequest, canProcess, onProcessed, onEquipmentAccepted }) {
+export default function ChangeRequestReviewPanel({ eventRequest, canProcess, onProcessed, onEquipmentAccepted, headingLevel = 3 }) {
+  const Heading = `h${headingLevel}`;
   const [listed, setListed] = useState(null);
   const [version, setVersion] = useState(0);
   const [review, setReview] = useState(null);
@@ -296,7 +299,7 @@ export default function ChangeRequestReviewPanel({ eventRequest, canProcess, onP
         {preview.revertsEvent && (
           <p className="event-significant-change__notice">Accepting returns this event to Approved.</p>
         )}
-        {preview.impact && <SignificantImpact impact={preview.impact} />}
+        {preview.impact && <SignificantImpact impact={preview.impact} headingLevel={headingLevel + 1} />}
 
         {mode === "cancel" ? (
           <div className="change-request-review__cancel">
@@ -351,7 +354,7 @@ export default function ChangeRequestReviewPanel({ eventRequest, canProcess, onP
 
   return (
     <section className="change-request-review" aria-label="Organiser change requests">
-      <h3>Organiser change requests</h3>
+      <Heading>Organiser change requests</Heading>
       {listed?.id !== eventRequest.id && <p>Loading change requests...</p>}
       {listed?.id === eventRequest.id && listed.error && (
         <p className="coordinator-clarification__error" role="alert">{listed.error}</p>

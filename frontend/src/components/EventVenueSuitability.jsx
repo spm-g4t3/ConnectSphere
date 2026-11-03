@@ -91,7 +91,8 @@ function namesText(names) {
   return Array.isArray(names) ? names.filter(Boolean).join(", ") : "";
 }
 
-function BookingSuitability({ item }) {
+function BookingSuitability({ item, headingLevel }) {
+  const Heading = `h${headingLevel}`;
   const name = item?.venueName ?? "This venue";
   const statusLabel = item?.statusDisplay?.label ?? item?.status ?? null;
   const retired = item?.error?.code === "VENUE_RETIRED";
@@ -106,7 +107,7 @@ function BookingSuitability({ item }) {
 
   return (
     <li className="event-venue-suitability__item">
-      <h4>{name}</h4>
+      <Heading>{name}</Heading>
       <p className="event-venue-suitability__meta">
         {item?.venueLocation && <span>{item.venueLocation}</span>}
         {statusLabel && <span>Booking: {statusLabel}</span>}
@@ -156,7 +157,8 @@ function BookingSuitability({ item }) {
   );
 }
 
-export default function EventVenueSuitability({ eventRequestId, onLoaded }) {
+// headingLevel: each venue's heading, one under the section this sits in.
+export default function EventVenueSuitability({ eventRequestId, onLoaded, headingLevel = 4 }) {
   // Starts as loading, so the effect never has to set state before its call.
   const [state, setState] = useState({ status: "loading", items: [], error: null });
   // Bumped by "Recheck" and "Try again" to run the effect once more.
@@ -219,7 +221,7 @@ export default function EventVenueSuitability({ eventRequestId, onLoaded }) {
       {state.status === "done" && state.items.length > 0 && (
         <ul className="event-venue-suitability__list" aria-label="Requested venues">
           {state.items.map((item, i) => (
-            <BookingSuitability key={item?.bookingId ?? i} item={item} />
+            <BookingSuitability key={item?.bookingId ?? i} item={item} headingLevel={headingLevel} />
           ))}
         </ul>
       )}

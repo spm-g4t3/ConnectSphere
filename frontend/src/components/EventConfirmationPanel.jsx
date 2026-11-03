@@ -12,7 +12,9 @@ const ACCESS_ERRORS = {
   404: "This event is no longer available.",
 };
 
-export default function EventConfirmationPanel({ eventRequest, onConfirmed, onStale }) {
+// headingLevel: the event screen's section level, where this panel sits.
+export default function EventConfirmationPanel({ eventRequest, onConfirmed, onStale, headingLevel = 3 }) {
+  const Heading = `h${headingLevel}`;
   const revision = `${eventRequest.id}:${eventRequest.updatedAt ?? ""}`;
   const [readiness, setReadiness] = useState(null);
   const [acknowledgedRevision, setAcknowledgedRevision] = useState(null);
@@ -121,7 +123,7 @@ export default function EventConfirmationPanel({ eventRequest, onConfirmed, onSt
 
   return (
     <section className="safety-check-submission" aria-label="Confirm event">
-      <h3>Confirm Event</h3>
+      <Heading>Confirm Event</Heading>
       <p>Every arrangement below must be ready. Confirmation checks the current arrangements again.</p>
       {loading && <LoadingText />}
       {!loading && readError && (

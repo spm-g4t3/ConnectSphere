@@ -123,8 +123,11 @@ function FlaggedReservations({ line }) {
  * @param {string}  props.requestId   the event request's id
  * @param {string}  props.status      the event's current status, e.g. "approved"
  * @param {boolean} props.canEdit     true for the event's assigned coordinator
+ * @param {number}  [props.headingLevel]  the section's heading level
  */
-export default function EventEquipmentSection({ requestId, status, canEdit }) {
+export default function EventEquipmentSection({ requestId, status, canEdit, headingLevel = 3 }) {
+  const Heading = `h${headingLevel}`;
+  const SubHeading = `h${headingLevel + 1}`;
   const [equipment, setEquipment] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
@@ -329,12 +332,12 @@ export default function EventEquipmentSection({ requestId, status, canEdit }) {
 
   return (
     <section className="event-equipment">
-      <h3>
+      <Heading>
         Equipment needed
         {request && (
           <span className="event-equipment__status">{request.statusLabel}</span>
         )}
-      </h3>
+      </Heading>
 
       {request?.status === "cannot_be_fully_arranged" && (
         <p className="event-equipment__alert" role="status">
@@ -487,7 +490,7 @@ export default function EventEquipmentSection({ requestId, status, canEdit }) {
 
       {editable && (
         <form className="event-equipment__form event-equipment__add" noValidate onSubmit={handleAdd}>
-          <h4>Add equipment</h4>
+          <SubHeading>Add equipment</SubHeading>
           {typesError && (
             <p className="coordinator-clarification__error" role="status">
               {typesError}

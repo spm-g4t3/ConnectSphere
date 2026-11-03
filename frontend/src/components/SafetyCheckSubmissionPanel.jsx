@@ -45,7 +45,9 @@ function isAboutTheNote(data) {
   return Array.isArray(data?.details) && data.details.some((entry) => entry?.field === "note");
 }
 
-export default function SafetyCheckSubmissionPanel({ eventRequest, onSubmitted, onStale }) {
+// headingLevel: the event screen's section level, where this panel sits.
+export default function SafetyCheckSubmissionPanel({ eventRequest, onSubmitted, onStale, headingLevel = 3 }) {
+  const Heading = `h${headingLevel}`;
   const [readiness, setReadiness] = useState(null);
   const [loading, setLoading] = useState(true);
   // null, or whether reading again could help.
@@ -121,7 +123,7 @@ export default function SafetyCheckSubmissionPanel({ eventRequest, onSubmitted, 
 
   return (
     <section className="safety-check-submission" aria-label="Submit for the safety check">
-      <h3>Submit for the safety check</h3>
+      <Heading>Submit for the safety check</Heading>
       <p>
         A Safety Officer checks the arrangements before the event can be
         confirmed. Every item below must be met first.

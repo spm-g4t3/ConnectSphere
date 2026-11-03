@@ -27,13 +27,14 @@ const LIST_ERROR_MESSAGES = {
 };
 const LIST_DEFAULT_ERROR = "Flagged bookings could not be loaded.";
 
-function FlaggedBooking({ item, busy, cancelling, error, replacing, onCancel, onReplace }) {
+function FlaggedBooking({ item, headingLevel, busy, cancelling, error, replacing, onCancel, onReplace }) {
+  const Heading = `h${headingLevel}`;
   const regionId = `event-flagged-booking-${item.id}`;
 
   return (
     <li className="pending-bookings__card" aria-labelledby={`${regionId}-venue`}>
       <div className="pending-bookings__detail">
-        <h4 id={`${regionId}-venue`}>{venueText(item)}</h4>
+        <Heading id={`${regionId}-venue`}>{venueText(item)}</Heading>
         <dl>
           <dt>Booking period</dt>
           <dd>{formatVenuePeriod(item.startsAt, item.endsAt)}</dd>
@@ -43,7 +44,7 @@ function FlaggedBooking({ item, busy, cancelling, error, replacing, onCancel, on
 
         <FlaggedBookingFlagDetail
           item={item}
-          headingLevel={5}
+          headingLevel={headingLevel + 1}
           reasonsNote={<p className="pending-bookings__event-status">Alternative arrangements are required.</p>}
           replacementsNote={
             <p className="pending-bookings__event-status">
@@ -78,7 +79,9 @@ function FlaggedBooking({ item, busy, cancelling, error, replacing, onCancel, on
   );
 }
 
-export default function EventFlaggedBookings({ eventRequestId, replacingId, onReplace, onCancelled, onLoaded }) {
+// headingLevel: the section's own heading; the event screen's section level.
+export default function EventFlaggedBookings({ eventRequestId, replacingId, onReplace, onCancelled, onLoaded, headingLevel = 3 }) {
+  const Heading = `h${headingLevel}`;
   const [bookings, setBookings] = useState([]);
   const [error, setError] = useState(null);
   const [cancellingId, setCancellingId] = useState(null);
@@ -154,7 +157,7 @@ export default function EventFlaggedBookings({ eventRequestId, replacingId, onRe
 
   return (
     <section className="event-flagged-bookings">
-      <h3>Flagged bookings</h3>
+      <Heading>Flagged bookings</Heading>
       {error && (
         <div className="pending-bookings__error" role="alert">
           <p>{error}</p>
@@ -179,6 +182,7 @@ export default function EventFlaggedBookings({ eventRequestId, replacingId, onRe
             <FlaggedBooking
               key={item.id}
               item={item}
+              headingLevel={headingLevel + 1}
               busy={cancellingId !== null}
               cancelling={cancellingId === item.id}
               error={cardError?.id === item.id ? cardError.message : null}

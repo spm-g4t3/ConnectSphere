@@ -68,14 +68,15 @@ function ReleaseForm({ id, busy, onConfirm, onKeep }) {
   );
 }
 
-function VenueBooking({ row, open, busy, error, onOpen, onKeep, onConfirm }) {
+function VenueBooking({ row, headingLevel, open, busy, error, onOpen, onKeep, onConfirm }) {
+  const Heading = `h${headingLevel}`;
   const headingId = `event-venue-booking-${row.id}`;
   const released = row.status === "released";
 
   return (
     <li className="pending-bookings__card" aria-labelledby={headingId}>
       <div className="pending-bookings__detail">
-        <h4 id={headingId}>{venueOf(row)}</h4>
+        <Heading id={headingId}>{venueOf(row)}</Heading>
         <dl>
           <dt>Booking period</dt>
           <dd>{formatVenuePeriod(row.startsAt, row.endsAt)}</dd>
@@ -108,7 +109,9 @@ function VenueBooking({ row, open, busy, error, onOpen, onKeep, onConfirm }) {
   );
 }
 
-export default function EventVenueBookings({ eventRequestId, onReleased, onStale }) {
+// headingLevel: the section's own heading; the event screen's section level.
+export default function EventVenueBookings({ eventRequestId, onReleased, onStale, headingLevel = 3 }) {
+  const Heading = `h${headingLevel}`;
   const [rows, setRows] = useState([]);
   const [error, setError] = useState(null);
   const [openId, setOpenId] = useState(null);
@@ -181,7 +184,7 @@ export default function EventVenueBookings({ eventRequestId, onReleased, onStale
 
   return (
     <section className="event-flagged-bookings event-venue-bookings">
-      <h3>Venue bookings</h3>
+      <Heading>Venue bookings</Heading>
       <p>To use another venue, request it from Find a venue below.</p>
       {error && (
         <div className="pending-bookings__error" role="alert">
@@ -207,6 +210,7 @@ export default function EventVenueBookings({ eventRequestId, onReleased, onStale
             <VenueBooking
               key={row.id}
               row={row}
+              headingLevel={headingLevel + 1}
               open={openId === row.id}
               busy={releasingId !== null}
               error={cardError?.id === row.id ? cardError.message : null}

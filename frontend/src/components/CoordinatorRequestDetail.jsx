@@ -15,14 +15,9 @@
 // IS the detail response. A second round trip would re-download bytes the
 // caller is passing in.
 //
-// The cost is that this panel has no URL, so a reload returns the Coordinator
-// to the queue. That matches every other entity view in this app -- the
-// catalogue, the organiser's requests and the change-request panels all live
-// in `activePanel` state -- so it is the house behaviour rather than a
-// regression. If a shareable link is ever wanted, the backend plan records
-// what to add (a coordinatorOnly GET /:id/review) rather than leaving it to
-// be rediscovered. (SCRUM-332 has since built that route; nothing here uses
-// it yet.)
+// Opened from a list it lives in `activePanel` state, so a reload returns to
+// the list. /event-requests/:id (EventRequestReviewPage) is its own URL: it
+// reads GET /:id/review and mounts this with `asPage`.
 //
 // SCRUM-334 added the event's coordinator and assignment history, and the
 // Reassign action (the Lead's since SCRUM-444), which opens ReassignEventPanel
@@ -73,6 +68,7 @@ import SafetyApprovalNotice from "./SafetyApprovalNotice";
 import EventConfirmationPanel from "./EventConfirmationPanel";
 import EventCompletionPanel from "./EventCompletionPanel";
 import RegistrationCounts from "./RegistrationCounts";
+import StatusBadge from "./ui/StatusBadge";
 import { isRegistrationConfigurable } from "../services/registrationStatuses";
 import {
   decideEventRequest,
@@ -83,9 +79,14 @@ import {
 import {
   CANCELLABLE_STATUSES,
   readStatusDisplay,
-  statusClassName,
+  statusTone,
 } from "../services/eventRequestStatusDisplay";
-import { formatTimestamp, orNotSpecified } from "../services/displayFormat";
+import {
+  formatDateTimeRangeOrFallback,
+  formatTimestamp,
+  orNotSpecified,
+  pluralise,
+} from "../services/displayFormat";
 import { STATUSES_ALLOWING_ORDINARY_EDITS, detailFieldList } from "../services/eventDetailFields";
 import { formatVenueTimestamp, isReplyOverdue, venueTomorrow } from "../services/datetimeFormat";
 import { canMarkCompleted, closingNotesOf, eventHasEnded } from "../services/eventCompletion";
@@ -187,10 +188,16 @@ function liveRequestsFrom(items) {
   return venues;
 }
 
+/**
+ * @param {object} props
+ * @param {boolean} [props.asPage]  true at /event-requests/:id, where the event's
+ *                                  name is the page's h1; inside a list it is h2
+ */
 export default function CoordinatorRequestDetail({
   request,
   onReviewDecisionProcessed,
   onChangeRequestProcessed,
+  asPage = false,
 }) {
   // A mutation response belongs to the parent record it started from.
   const [localUpdate, setLocalUpdate] = useState(null);
@@ -544,561 +551,589 @@ export default function CoordinatorRequestDetail({
     );
   }
 
+  // One level under the title wherever the screen is mounted, so none is skipped.
+  const Title = asPage ? "h1" : "h2";
+  const sectionLevel = asPage ? 2 : 3;
+  const SectionHeading = `h${sectionLevel}`;
+  // A queue row has no organiser name (see Provenance), so the line leaves it out.
+  const facts = [
+    formatDateTimeRangeOrFallback(current.proposedStart, current.proposedEnd, "Date not set"),
+    capacity === null ? null : pluralise(capacity, "attendee"),
+    request.organiserName || null,
+  ].filter(Boolean).join(" · ");
+
   return (
     <div className="coordinator-request-detail">
-      <h2>
-        {current.eventName}
-        <span className={`status-badge ${statusClassName(display.group)}`}>
-          {display.label}
-        </span>
-        <NeedsAttentionBadge event={current} />
-      </h2>
-      <p>{display.description}</p>
-      <NeedsAttentionReasons event={current} />
-      <SafetyApprovalNotice status={current.status} />
-      {/* The panel shows a refusal only for the revision it refused; once a
-          refetch moves the event on, or unmounts the panel, show it here. */}
-      {confirmationFeedback?.eventId === current.id && (confirmationFeedback.success
-        ? current.status === "confirmed"
-        : !canConfirm || confirmationFeedback.updatedAt !== current.updatedAt) && (
-        <p role={confirmationFeedback.success ? "status" : "alert"}>{confirmationFeedback.message}</p>
-      )}
-      {canConfirm && (
-        <EventConfirmationPanel
-          key={current.id}
-          eventRequest={current}
-          onConfirmed={(updated) => {
-            setUpdatedRequest(updated);
-            setConfirmationFeedback({ eventId: updated.id, success: true, message: "Event confirmed successfully." });
-            onChangeRequestProcessed?.();
-          }}
-          onStale={(message) => {
-            setUpdatedRequest(null);
-            setConfirmationFeedback({ eventId: current.id, updatedAt: current.updatedAt, success: false, message });
-            return onChangeRequestProcessed?.();
-          }}
-        />
-      )}
-      {/* SCRUM-460 AC6: the assigned Coordinator sees the waiting-list count. */}
-      {isAssignedCoordinator && isRegistrationConfigurable(current.status) && (
-        <RegistrationCounts eventId={current.id} />
-      )}
-      {isAssignedCoordinator && [
-        "approved",
-        "confirmed",
-        "safety_review",
-        "safety_approved",
-      ].includes(current.status) && (
-        <button
-          className="coordinator-request-detail__significant-change"
-          type="button"
-          onClick={() => setSignificantChangePage(true)}
-        >
-          Revise event details
-        </button>
-      )}
-      {canEditDetails && (
-        <button
-          className="coordinator-request-detail__edit-details"
-          type="button"
-          onClick={() => setDetailsEditPage(true)}
-        >
-          Edit event information
-        </button>
-      )}
-      {detailsSaved?.eventId === current.id && (
-        <p className="coordinator-request-detail__edit-saved" role="status">{detailsSaved.message}</p>
-      )}
-      {canComplete && (
-        <button
-          className="coordinator-request-detail__complete"
-          type="button"
-          onClick={() => setCompletionPage(true)}
-        >
-          Mark as completed
-        </button>
-      )}
-      {awaitingEnd && (
-        <p className="coordinator-request-detail__complete-hint">
-          You can mark this event as completed once it has ended
-          {current.proposedEnd ? ` (${formatVenueTimestamp(current.proposedEnd)})` : ""}.
+      <header className="coordinator-request-detail__header">
+        <Title className="coordinator-request-detail__title">{current.eventName}</Title>
+        <p className="coordinator-request-detail__badges">
+          <StatusBadge tone={statusTone(display.group)}>{display.label}</StatusBadge>
+          <NeedsAttentionBadge event={current} />
         </p>
-      )}
-      {completedNotice?.eventId === current.id && current.status === "completed" && (
-        <p className="coordinator-request-detail__completed-notice" role="status">
-          Marked as completed.
-        </p>
-      )}
-      {isAssignedCoordinator && CANCELLABLE_STATUSES.has(current.status) && (
-        <button
-          className="coordinator-request-detail__cancel"
-          type="button"
-          onClick={() => setCancellationPage(true)}
-        >
-          Cancel event
-        </button>
-      )}
-      {/* SCRUM-347: only an Approved event is rejected; Confirmed ones are cancelled. */}
-      {isAssignedCoordinator && current.status === "approved" && (
-        <button
-          className="coordinator-request-detail__reject"
-          type="button"
-          onClick={() => setRejectionPage(true)}
-        >
-          Reject event
-        </button>
-      )}
-      {/* SCRUM-489 AC1: the holder, while Approved. The server checks both again. */}
-      {isAssignedCoordinator && current.status === "approved" && (
-        <SafetyCheckSubmissionPanel
-          key={current.id}
-          eventRequest={current}
-          onSubmitted={(updated) => {
-            setUpdatedRequest(updated);
-            onChangeRequestProcessed?.();
-          }}
-          onStale={() => onChangeRequestProcessed?.()}
-        />
-      )}
-
-      {closingNotes && (
-        <section className="coordinator-request-detail__closing-notes">
-          <h3>Closing notes</h3>
-          <p>{closingNotes.recorded ? closingNotes.text : "No closing notes were recorded."}</p>
-          <p className="coordinator-request-detail__closing-notes-audience">
-            Only coordinators can see these notes. The organiser cannot.
-          </p>
-        </section>
-      )}
-
-      <section>
-        <h3>The request</h3>
-        <ul>
-          <li>
-            <strong>Purpose</strong>
-            <span>{orNotSpecified(current.purpose)}</span>
-          </li>
-          <li>
-            <strong>Description</strong>
-            <span>{orNotSpecified(current.description)}</span>
-          </li>
-          <li>
-            <strong>Proposed period</strong>
-            <span>
-              {formatTimestamp(current.proposedStart, "Not recorded")} &ndash;{" "}
-              {formatTimestamp(current.proposedEnd, "Not recorded")}
-            </span>
-          </li>
-          <li>
-            <strong>Expected attendance</strong>
-            <span>{capacity === null ? "Not specified" : `${capacity} people`}</span>
-          </li>
-        </ul>
-      </section>
-
-      <section>
-        <h3>Requirements</h3>
-        {/* All three verbatim, and none of them parsed. They are free prose --
-            "a large room, ideally tiered seating" -- and guessing a search
-            term out of that would return no venues and read as "no venues
-            exist". Show, don't parse. */}
-        <ul>
-          <li>
-            <strong>Venue</strong>
-            <span>{orNotSpecified(current.venueRequirements)}</span>
-          </li>
-          <li>
-            <strong>Accessibility</strong>
-            <span>{orNotSpecified(current.accessibilityRequirements)}</span>
-          </li>
-          <li>
-            <strong>Equipment</strong>
-            <span>{orNotSpecified(current.equipmentRequirements)}</span>
-          </li>
-        </ul>
-      </section>
-
-      {/* SCRUM-402 AC8: an accepted equipment change moves the screen here, with
-          what the Organiser asked for above the lines it is to be made on. */}
-      <div className="change-request-review__equipment" ref={equipmentSectionRef} tabIndex={-1} aria-label="Equipment">
-        {equipmentHandOff && (
-          <p className="change-request-review__notice" role="status">
-            The organiser asked for this equipment change: {equipmentHandOff}
-          </p>
+        <p className="coordinator-request-detail__facts">{facts}</p>
+        <p>{display.description}</p>
+        <NeedsAttentionReasons event={current} />
+        <SafetyApprovalNotice status={current.status} />
+        {/* The panel shows a refusal only for the revision it refused; once a
+            refetch moves the event on, or unmounts the panel, show it here. */}
+        {confirmationFeedback?.eventId === current.id && (confirmationFeedback.success
+          ? current.status === "confirmed"
+          : !canConfirm || confirmationFeedback.updatedAt !== current.updatedAt) && (
+          <p role={confirmationFeedback.success ? "status" : "alert"}>{confirmationFeedback.message}</p>
         )}
-        <EventEquipmentSection
-          requestId={request.id}
-          status={current.status}
-          canEdit={isAssignedCoordinator && current.status !== "cancelled"}
-        />
-      </div>
-
-      {/* SCRUM-402: the Organiser's change requests, a submission at a time. */}
-      <ChangeRequestReviewPanel
-        eventRequest={current}
-        canProcess={isAssignedCoordinator}
-        onProcessed={() => onChangeRequestProcessed?.()}
-        onEquipmentAccepted={setEquipmentHandOff}
-      />
-
-      <section>
-        <h3>Provenance</h3>
-        <ul>
-          <li>
-            <strong>Submitted</strong>
-            <span>{formatTimestamp(request.submittedAt, "Not recorded")}</span>
-          </li>
-          <li>
-            {/* The name when the row has one, the bare uuid when it does not.
-                A queue row never has one: the queue joins no profiles row,
-                which is the privacy floor of a queue every Coordinator can
-                read. A "My events" row does (SCRUM-333), because those are
-                events this coordinator is responsible for, where contacting
-                the Organiser is the job. The uuid is rendered as an
-                identifier so it never reads as a label. */}
-            <strong>Organiser</strong>
-            {request.organiserName ? (
-              <span>{request.organiserName}</span>
-            ) : (
-              <code title={request.organiserId ?? undefined}>
-                {request.organiserId ?? "unknown"}
-              </code>
-            )}
-          </li>
-        </ul>
-      </section>
-
-      {/* SCRUM-334: who holds the event now, and how it got there, with the
-          handover notes, which every coordinator may read. Read fresh when this
-          panel opens, so it is the current coordinator even if the row this
-          panel was opened from is a little out of date. */}
-      <section>
-        <h3>Coordinator</h3>
-        <AssignmentHistory
-          key={historyVersion}
-          eventRequestId={request.id}
-          view="coordinator"
-          currentCoordinatorId={assignedCoordinatorId}
-        />
-
-        {handedOverTo && (
-          <p className="coordinator-reassign__notice" role="status">
-            Handed over to {handedOverTo.fullName ?? "the coordinator you chose"}.
-          </p>
-        )}
-
-        {canReassign && (
-          <div className="coordinator-reassign">
-            <button type="button" onClick={() => setReassigning(true)}>
-              Hand over to another coordinator
-            </button>
-          </div>
-        )}
-      </section>
-
-      {/* Only the assigned coordinator may read the list; the server checks again. */}
-      {isAssignedCoordinator && mayHaveRegistrationList(current.status) && (
-        <p>
-          <Link to={`/events/${current.id}/registrations`}>View registrations</Link>
-        </p>
-      )}
-
-      {/* SCRUM-19. What the decision section shows, in order:
-
-            1. A recorded decision, read-only, whatever the status now is. An
-               approved event later confirmed or cancelled still carries its
-               decision, and AC9 says it is not edited. Checked on the decision
-               itself rather than a list of "decided" statuses, so no status
-               vocabulary is copied here for it.
-            2. Pending clarification: the existing waiting panel.
-            3. Submitted: Start review, for the assigned coordinator.
-            4. Under review: Approve, Reject and Return for amendment, for the
-               assigned coordinator.
-            Anyone else sees what is happening but nothing to press.
-
-            The status and ownership checks here are a convenience, not the
-            gate: the server refuses regardless, and the error tables above say
-            why in words. */}
-      {current.decision ? (
-        <section>
-          <h3>Decision</h3>
-          <DecisionOutcome request={current} view="coordinator" />
-        </section>
-      ) : current.status === "pending_clarification" ? (
-        <section>
-          <h3>Waiting for organiser reply</h3>
-          <div className="clarification-current">
-            <strong>Current question</strong>
-            <p>{current.clarificationNote || "No clarification question was recorded."}</p>
-            {current.clarificationReplyByDate && (
-              <span>
-                Reply by {formatTimestamp(current.clarificationReplyByDate, "Not recorded")}
-                {isReplyOverdue(current.clarificationReplyByDate) && (
-                  <strong className="clarification-overdue"> · Overdue</strong>
-                )}
-              </span>
-            )}
-          </div>
-          <ClarificationHistoryDialog
-            eventRequestId={request.id}
-            eventName={request.eventName}
-            isOpenQuestion
-            latestQuestion={current.clarificationNote}
+        {canConfirm && (
+          <EventConfirmationPanel
+            key={current.id}
+            eventRequest={current}
+            headingLevel={sectionLevel}
+            onConfirmed={(updated) => {
+              setUpdatedRequest(updated);
+              setConfirmationFeedback({ eventId: updated.id, success: true, message: "Event confirmed successfully." });
+              onChangeRequestProcessed?.();
+            }}
+            onStale={(message) => {
+              setUpdatedRequest(null);
+              setConfirmationFeedback({ eventId: current.id, updatedAt: current.updatedAt, success: false, message });
+              return onChangeRequestProcessed?.();
+            }}
           />
-          {isAssignedCoordinator && (
-            <form className="coordinator-clarification" onSubmit={handleCloseClarification}>
-              <label>
-                Note explaining why you are closing this request
-                <textarea
-                  value={closureNote}
-                  onChange={(event) => setClosureNote(event.target.value)}
-                  rows={3}
-                  maxLength={2000}
-                  required
-                />
-              </label>
-              {closureError && <p role="alert">{closureError}</p>}
-              <button type="submit" disabled={closingClarification || !closureNote.trim()}>
-                {closingClarification ? "Closing..." : "Close clarification"}
-              </button>
-            </form>
-          )}
-        </section>
-      ) : current.status === "submitted" ? (
-        <section>
-          <h3>Review</h3>
-          {isAssignedCoordinator ? (
-            <div className="coordinator-start-review">
-              <p>
-                Start the review to approve, reject, or return this request for
-                amendment. You will be recorded as its reviewer.
+        )}
+        {/* SCRUM-460 AC6: the assigned Coordinator sees the waiting-list count. */}
+        {isAssignedCoordinator && isRegistrationConfigurable(current.status) && (
+          <RegistrationCounts eventId={current.id} headingLevel={sectionLevel} />
+        )}
+        {isAssignedCoordinator && [
+          "approved",
+          "confirmed",
+          "safety_review",
+          "safety_approved",
+        ].includes(current.status) && (
+          <button
+            className="coordinator-request-detail__significant-change"
+            type="button"
+            onClick={() => setSignificantChangePage(true)}
+          >
+            Revise event details
+          </button>
+        )}
+        {canEditDetails && (
+          <button
+            className="coordinator-request-detail__edit-details"
+            type="button"
+            onClick={() => setDetailsEditPage(true)}
+          >
+            Edit event information
+          </button>
+        )}
+        {detailsSaved?.eventId === current.id && (
+          <p className="coordinator-request-detail__edit-saved" role="status">{detailsSaved.message}</p>
+        )}
+        {canComplete && (
+          <button
+            className="coordinator-request-detail__complete"
+            type="button"
+            onClick={() => setCompletionPage(true)}
+          >
+            Mark as completed
+          </button>
+        )}
+        {awaitingEnd && (
+          <p className="coordinator-request-detail__complete-hint">
+            You can mark this event as completed once it has ended
+            {current.proposedEnd ? ` (${formatVenueTimestamp(current.proposedEnd)})` : ""}.
+          </p>
+        )}
+        {completedNotice?.eventId === current.id && current.status === "completed" && (
+          <p className="coordinator-request-detail__completed-notice" role="status">
+            Marked as completed.
+          </p>
+        )}
+        {isAssignedCoordinator && CANCELLABLE_STATUSES.has(current.status) && (
+          <button
+            className="coordinator-request-detail__cancel"
+            type="button"
+            onClick={() => setCancellationPage(true)}
+          >
+            Cancel event
+          </button>
+        )}
+        {/* SCRUM-347: only an Approved event is rejected; Confirmed ones are cancelled. */}
+        {isAssignedCoordinator && current.status === "approved" && (
+          <button
+            className="coordinator-request-detail__reject"
+            type="button"
+            onClick={() => setRejectionPage(true)}
+          >
+            Reject event
+          </button>
+        )}
+        {/* SCRUM-489 AC1: the holder, while Approved. The server checks both again. */}
+        {isAssignedCoordinator && current.status === "approved" && (
+          <SafetyCheckSubmissionPanel
+            key={current.id}
+            eventRequest={current}
+            headingLevel={sectionLevel}
+            onSubmitted={(updated) => {
+              setUpdatedRequest(updated);
+              onChangeRequestProcessed?.();
+            }}
+            onStale={() => onChangeRequestProcessed?.()}
+          />
+        )}
+      </header>
+
+      {/* Main column, then the rail: one column until the screen itself is wide. */}
+      <div className="coordinator-request-detail__body">
+        <div className="coordinator-request-detail__main">
+          {closingNotes && (
+            <section className="coordinator-request-detail__closing-notes">
+              <SectionHeading>Closing notes</SectionHeading>
+              <p>{closingNotes.recorded ? closingNotes.text : "No closing notes were recorded."}</p>
+              <p className="coordinator-request-detail__closing-notes-audience">
+                Only coordinators can see these notes. The organiser cannot.
               </p>
-              {startReviewError && (
-                <p className="coordinator-clarification__error" role="alert">
-                  {startReviewError}
-                </p>
-              )}
-              <button type="button" disabled={startingReview} onClick={handleStartReview}>
-                {startingReview ? "Starting..." : "Start review"}
-              </button>
-            </div>
-          ) : current.assignedCoordinatorId == null ? (
-            // SCRUM-486 AC8-04 (SCRUM-519). Since 052 a submitted request can
-            // have no coordinator: it is in the Lead's unassigned queue. Every
-            // coordinator can still open it (SCRUM-332), and "waiting for the
-            // assigned coordinator" would name someone who does not exist.
-            // isAssignedCoordinator is false for everyone here, so nobody is
-            // offered Start review, which 052 would refuse anyway.
-            <p>Waiting for the Event Coordinator Lead to assign this request to a coordinator.</p>
-          ) : (
-            <p>Waiting for the assigned coordinator to start the review.</p>
+            </section>
           )}
-        </section>
-      ) : current.status === "under_review" ? (
-        <section>
-          <h3>Coordinator decision</h3>
-          {isAssignedCoordinator ? (
-            <div className="coordinator-clarification">
-              {/* One note for all three actions. Whichever is chosen, the note
-                  is read by the Organiser: as the rejection reason, the
-                  approval note, or the amendment instructions. One box means
-                  the note cannot be typed into the wrong one. */}
-              <label>
-                Note for the Organiser
-                <textarea
-                  value={reviewNote}
-                  onChange={(event) => setReviewNote(event.target.value)}
-                  rows={4}
-                  maxLength={2000}
-                  placeholder="Required to reject or to return for amendment; optional when approving."
-                />
-              </label>
-              <details className="coordinator-clarification__amendments" open>
-                <summary>Let the Organiser amend specific fields (optional)</summary>
-                <fieldset className="coordinator-clarification__fields">
-                  <legend>Fields that need changing</legend>
-                  <p>Leave all fields unchecked for a question-only clarification.</p>
-                  {CLARIFICATION_FIELDS.map(([field, label]) => (
-                    <label key={field}>
-                      <input
-                        type="checkbox"
-                        checked={requestedFields.includes(field)}
-                        onChange={(event) => {
-                          setRequestedFields((previous) => event.target.checked
-                            ? [...previous, field]
-                            : previous.filter((item) => item !== field));
-                        }}
-                      />
-                      {label}
-                    </label>
-                  ))}
-                </fieldset>
-              </details>
-              <label>
-                Optional reply-by date
-                <input
-                  type="date"
-                  min={minReplyByDate}
-                  value={replyByDate}
-                  onChange={(event) => setReplyByDate(event.target.value)}
-                />
-              </label>
-              {(decisionError || reviewDecisionError) && (
-                <p className="coordinator-clarification__error" role="alert">
-                  {decisionError || reviewDecisionError}
-                </p>
+
+          <section>
+            <SectionHeading>The request</SectionHeading>
+            <ul>
+              <li>
+                <strong>Purpose</strong>
+                <span>{orNotSpecified(current.purpose)}</span>
+              </li>
+              <li>
+                <strong>Description</strong>
+                <span>{orNotSpecified(current.description)}</span>
+              </li>
+              <li>
+                <strong>Proposed period</strong>
+                <span>
+                  {formatTimestamp(current.proposedStart, "Not recorded")} &ndash;{" "}
+                  {formatTimestamp(current.proposedEnd, "Not recorded")}
+                </span>
+              </li>
+              <li>
+                <strong>Expected attendance</strong>
+                <span>{capacity === null ? "Not specified" : `${capacity} people`}</span>
+              </li>
+            </ul>
+          </section>
+
+          <section>
+            <SectionHeading>Requirements</SectionHeading>
+            {/* All three verbatim, and none of them parsed. They are free prose --
+                "a large room, ideally tiered seating" -- and guessing a search
+                term out of that would return no venues and read as "no venues
+                exist". Show, don't parse. */}
+            <ul>
+              <li>
+                <strong>Venue</strong>
+                <span>{orNotSpecified(current.venueRequirements)}</span>
+              </li>
+              <li>
+                <strong>Accessibility</strong>
+                <span>{orNotSpecified(current.accessibilityRequirements)}</span>
+              </li>
+              <li>
+                <strong>Equipment</strong>
+                <span>{orNotSpecified(current.equipmentRequirements)}</span>
+              </li>
+            </ul>
+          </section>
+
+          {/* SCRUM-402 AC8: an accepted equipment change moves the screen here, with
+              what the Organiser asked for above the lines it is to be made on. */}
+          <div className="change-request-review__equipment" ref={equipmentSectionRef} tabIndex={-1} aria-label="Equipment">
+            {equipmentHandOff && (
+              <p className="change-request-review__notice" role="status">
+                The organiser asked for this equipment change: {equipmentHandOff}
+              </p>
+            )}
+            <EventEquipmentSection
+              requestId={request.id}
+              status={current.status}
+              headingLevel={sectionLevel}
+              canEdit={isAssignedCoordinator && current.status !== "cancelled"}
+            />
+          </div>
+
+          {/* SCRUM-402: the Organiser's change requests, a submission at a time. */}
+          <ChangeRequestReviewPanel
+            eventRequest={current}
+            canProcess={isAssignedCoordinator}
+            onProcessed={() => onChangeRequestProcessed?.()}
+            onEquipmentAccepted={setEquipmentHandOff}
+            headingLevel={sectionLevel}
+          />
+
+          {/* Only the assigned coordinator may read the list; the server checks again. */}
+          {isAssignedCoordinator && mayHaveRegistrationList(current.status) && (
+            <p>
+              <Link to={`/events/${current.id}/registrations`}>View registrations</Link>
+            </p>
+          )}
+
+          {/* SCRUM-19. What the decision section shows, in order:
+
+                1. A recorded decision, read-only, whatever the status now is. An
+                   approved event later confirmed or cancelled still carries its
+                   decision, and AC9 says it is not edited. Checked on the decision
+                   itself rather than a list of "decided" statuses, so no status
+                   vocabulary is copied here for it.
+                2. Pending clarification: the existing waiting panel.
+                3. Submitted: Start review, for the assigned coordinator.
+                4. Under review: Approve, Reject and Return for amendment, for the
+                   assigned coordinator.
+                Anyone else sees what is happening but nothing to press.
+
+                The status and ownership checks here are a convenience, not the
+                gate: the server refuses regardless, and the error tables above say
+                why in words. */}
+          {current.decision ? (
+            <section>
+              <SectionHeading>Decision</SectionHeading>
+              <DecisionOutcome request={current} view="coordinator" />
+            </section>
+          ) : current.status === "pending_clarification" ? (
+            <section>
+              <SectionHeading>Waiting for organiser reply</SectionHeading>
+              <div className="clarification-current">
+                <strong>Current question</strong>
+                <p>{current.clarificationNote || "No clarification question was recorded."}</p>
+                {current.clarificationReplyByDate && (
+                  <span>
+                    Reply by {formatTimestamp(current.clarificationReplyByDate, "Not recorded")}
+                    {isReplyOverdue(current.clarificationReplyByDate) && (
+                      <strong className="clarification-overdue"> · Overdue</strong>
+                    )}
+                  </span>
+                )}
+              </div>
+              <ClarificationHistoryDialog
+                eventRequestId={request.id}
+                eventName={request.eventName}
+                isOpenQuestion
+                latestQuestion={current.clarificationNote}
+              />
+              {isAssignedCoordinator && (
+                <form className="coordinator-clarification" onSubmit={handleCloseClarification}>
+                  <label>
+                    Note explaining why you are closing this request
+                    <textarea
+                      value={closureNote}
+                      onChange={(event) => setClosureNote(event.target.value)}
+                      rows={3}
+                      maxLength={2000}
+                      required
+                    />
+                  </label>
+                  {closureError && <p role="alert">{closureError}</p>}
+                  <button type="submit" disabled={closingClarification || !closureNote.trim()}>
+                    {closingClarification ? "Closing..." : "Close clarification"}
+                  </button>
+                </form>
               )}
-              <div className="coordinator-review-actions">
-                <button className="coordinator-review-actions__approve" type="button" disabled={processingReviewDecision} onClick={() => handleDecision("approved")}>
-                  {processingReviewDecision ? "Saving..." : "Approve request"}
-                </button>
-                <button className="coordinator-review-actions__reject" type="button" disabled={processingReviewDecision} onClick={() => handleDecision("rejected")}>
-                  Reject request
-                </button>
-                <button className="coordinator-review-actions__return" type="button" disabled={processingReviewDecision} onClick={handleReturnForAmendment}>
-                  Return for amendment
+            </section>
+          ) : current.status === "submitted" ? (
+            <section>
+              <SectionHeading>Review</SectionHeading>
+              {isAssignedCoordinator ? (
+                <div className="coordinator-start-review">
+                  <p>
+                    Start the review to approve, reject, or return this request for
+                    amendment. You will be recorded as its reviewer.
+                  </p>
+                  {startReviewError && (
+                    <p className="coordinator-clarification__error" role="alert">
+                      {startReviewError}
+                    </p>
+                  )}
+                  <button type="button" disabled={startingReview} onClick={handleStartReview}>
+                    {startingReview ? "Starting..." : "Start review"}
+                  </button>
+                </div>
+              ) : current.assignedCoordinatorId == null ? (
+                // SCRUM-486 AC8-04 (SCRUM-519). Since 052 a submitted request can
+                // have no coordinator: it is in the Lead's unassigned queue. Every
+                // coordinator can still open it (SCRUM-332), and "waiting for the
+                // assigned coordinator" would name someone who does not exist.
+                // isAssignedCoordinator is false for everyone here, so nobody is
+                // offered Start review, which 052 would refuse anyway.
+                <p>Waiting for the Event Coordinator Lead to assign this request to a coordinator.</p>
+              ) : (
+                <p>Waiting for the assigned coordinator to start the review.</p>
+              )}
+            </section>
+          ) : current.status === "under_review" ? (
+            <section>
+              <SectionHeading>Coordinator decision</SectionHeading>
+              {isAssignedCoordinator ? (
+                <div className="coordinator-clarification">
+                  {/* One note for all three actions. Whichever is chosen, the note
+                      is read by the Organiser: as the rejection reason, the
+                      approval note, or the amendment instructions. One box means
+                      the note cannot be typed into the wrong one. */}
+                  <label>
+                    Note for the Organiser
+                    <textarea
+                      value={reviewNote}
+                      onChange={(event) => setReviewNote(event.target.value)}
+                      rows={4}
+                      maxLength={2000}
+                      placeholder="Required to reject or to return for amendment; optional when approving."
+                    />
+                  </label>
+                  <details className="coordinator-clarification__amendments" open>
+                    <summary>Let the Organiser amend specific fields (optional)</summary>
+                    <fieldset className="coordinator-clarification__fields">
+                      <legend>Fields that need changing</legend>
+                      <p>Leave all fields unchecked for a question-only clarification.</p>
+                      {CLARIFICATION_FIELDS.map(([field, label]) => (
+                        <label key={field}>
+                          <input
+                            type="checkbox"
+                            checked={requestedFields.includes(field)}
+                            onChange={(event) => {
+                              setRequestedFields((previous) => event.target.checked
+                                ? [...previous, field]
+                                : previous.filter((item) => item !== field));
+                            }}
+                          />
+                          {label}
+                        </label>
+                      ))}
+                    </fieldset>
+                  </details>
+                  <label>
+                    Optional reply-by date
+                    <input
+                      type="date"
+                      min={minReplyByDate}
+                      value={replyByDate}
+                      onChange={(event) => setReplyByDate(event.target.value)}
+                    />
+                  </label>
+                  {(decisionError || reviewDecisionError) && (
+                    <p className="coordinator-clarification__error" role="alert">
+                      {decisionError || reviewDecisionError}
+                    </p>
+                  )}
+                  <div className="coordinator-review-actions">
+                    <button className="coordinator-review-actions__approve" type="button" disabled={processingReviewDecision} onClick={() => handleDecision("approved")}>
+                      {processingReviewDecision ? "Saving..." : "Approve request"}
+                    </button>
+                    <button className="coordinator-review-actions__reject" type="button" disabled={processingReviewDecision} onClick={() => handleDecision("rejected")}>
+                      Reject request
+                    </button>
+                    <button className="coordinator-review-actions__return" type="button" disabled={processingReviewDecision} onClick={handleReturnForAmendment}>
+                      Return for amendment
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <p>Only the assigned coordinator can decide this request.</p>
+              )}
+            </section>
+          ) : null}
+
+          {/* SCRUM-355 AC5: a resubmission says so, with the decisions before this
+              one. Only its coordinator and the Lead may read them, as the server rules. */}
+          {(isAssignedCoordinator || isLead) && (
+            <DecisionHistory eventRequestId={request.id} view="coordinator" headingLevel={sectionLevel} />
+          )}
+
+          {/* SCRUM-387 AC7: who may read it, as the server rules. Keyed on the
+              event's updatedAt, so an edit or a significant change re-reads it. */}
+          {(isAssignedCoordinator || isLead) && (
+            <section className="event-change-history" aria-label="Change history">
+              <SectionHeading>Change history</SectionHeading>
+              <EventChangeHistory key={current.updatedAt ?? ""} eventRequestId={current.id} />
+            </section>
+          )}
+
+          {request.status !== "pending_clarification" && (
+            <section className="coordinator-clarification-history">
+              <SectionHeading>Clarification history</SectionHeading>
+              <ClarificationHistoryDialog
+                eventRequestId={request.id}
+                eventName={request.eventName}
+              />
+            </section>
+          )}
+
+          {/* SCRUM-141: the search runs here, pre-filled from this event. Keyed
+              by the id AND the three fields it seeds from, so opening a
+              different event re-seeds the form, and so does an approved change
+              request that moves this event's period or attendance -- the form
+              must never offer stale event values as if they were current. A
+              refresh that changes nothing else keeps the coordinator's edits.
+              It gets `current`, not `request`, so an event approved in this
+              panel can have a venue requested for it straight away (SCRUM-254:
+              each result's "Request this venue"). userId is passed only while
+              this user is the assigned coordinator, so a handover made here
+              (handedOverTo) turns the request buttons off even though `current`
+              still names this user. A sent request refreshes the parent's list
+              and the Venue suitability section above. */}
+          {/* SCRUM-192 (SCRUM-188 AC6, Week 7): the event's requested and booked
+              venues, rechecked live against the event as it is now. Keyed like
+              EventVenueFinder, so an approved change request that moves the
+              period or attendance remounts it and the recheck happens as the
+              change lands; venueVersion adds a booking just sent below. Shown
+              only to the assigned coordinator, the one the server answers.
+              SCRUM-188: what it loads tells Find a venue which venues already
+              have a live request (onLoaded -> liveRequests; per venue since
+              SCRUM-525). */}
+          {/* SCRUM-266: the assigned coordinator's flagged bookings, hidden when
+              there are none. Cancelling one reloads Venue suitability below. */}
+          {isAssignedCoordinator && (
+            <EventFlaggedBookings
+              key={`${current.id}|${flaggedVersion}`}
+              eventRequestId={current.id}
+              replacingId={replacing?.id ?? null}
+              headingLevel={sectionLevel}
+              // Find a venue moves focus to its notice, which brings it into view.
+              onReplace={(item) => {
+                setReplacing({
+                  id: item.id,
+                  venueName: item.venueName || "Unknown venue",
+                  startsAt: item.startsAt,
+                  endsAt: item.endsAt,
+                });
+              }}
+              onCancelled={(item) => {
+                setReplacing((cur) => (cur?.id === item.id ? null : cur));
+                setVenueVersion((n) => n + 1);
+                onChangeRequestProcessed?.();
+              }}
+              // A booking resolved elsewhere is no longer one to replace.
+              onLoaded={(items) => setReplacing((cur) => (cur && !items.some((i) => i.id === cur.id) ? null : cur))}
+            />
+          )}
+          {/* SCRUM-492: the holder releases one approved venue while the event is
+              Approved. Not keyed on venueVersion, which a release bumps, so the
+              section keeps its own "was released" notice. */}
+          {isAssignedCoordinator && current.status === "approved" && (
+            <EventVenueBookings
+              key={`${current.id}|${current.proposedStart}|${current.proposedEnd}`}
+              eventRequestId={current.id}
+              headingLevel={sectionLevel}
+              onReleased={() => {
+                setVenueVersion((n) => n + 1);
+                onChangeRequestProcessed?.();
+              }}
+              onStale={() => onChangeRequestProcessed?.()}
+            />
+          )}
+          {isAssignedCoordinator && (
+            <section className="event-venue-suitability-section">
+              <SectionHeading>Venue suitability</SectionHeading>
+              <EventVenueSuitability
+                key={`${current.id}|${current.proposedStart}|${current.proposedEnd}|${current.expectedAttendance}|${venueVersion}`}
+                eventRequestId={current.id}
+                onLoaded={(items) => setLiveVenueRequests({ eventId: current.id, venues: liveRequestsFrom(items) })}
+                headingLevel={sectionLevel + 1}
+              />
+            </section>
+          )}
+
+          <section>
+            <SectionHeading>Find a venue</SectionHeading>
+            <EventVenueFinder
+              key={`${current.id}|${current.proposedStart}|${current.proposedEnd}|${current.expectedAttendance}`}
+              request={current}
+              headingLevel={sectionLevel + 1}
+              userId={isAssignedCoordinator && current.status !== "cancelled" ? user.id : undefined}
+              // Only while the Venue suitability section is shown: the lock hint
+              // says "See it under Venue suitability above", and after a handover
+              // made here that section is gone while this state remains. The
+              // buttons stay off anyway, for eligibility's reason, shown once.
+              liveRequests={
+                isAssignedCoordinator && liveVenueRequests.eventId === current.id ? liveVenueRequests.venues : undefined
+              }
+              onRequestSubmitted={() => {
+                setVenueVersion((n) => n + 1);
+                // SCRUM-266: a replacement sent is listed under its flagged booking.
+                if (replacing) {
+                  setReplacing(null);
+                  setFlaggedVersion((n) => n + 1);
+                }
+                onChangeRequestProcessed?.();
+              }}
+              // SCRUM-525 (R13): a venue refused as already requested reloads
+              // Venue suitability, so the request it collided with is listed.
+              onVenueAlreadyRequested={() => setVenueVersion((n) => n + 1)}
+              replacing={isAssignedCoordinator ? replacing : null}
+              onStopReplacing={() => setReplacing(null)}
+              onReplacementRefused={() => {
+                setReplacing(null);
+                setFlaggedVersion((n) => n + 1);
+              }}
+            />
+            <p className="event-venue-finder__browse">
+              <Link to="/venue-search">Browse all venues</Link>
+            </p>
+          </section>
+        </div>
+
+        <aside className="coordinator-request-detail__rail" aria-label="Event facts">
+          <section>
+            <SectionHeading>Provenance</SectionHeading>
+            <ul>
+              <li>
+                <strong>Submitted</strong>
+                <span>{formatTimestamp(request.submittedAt, "Not recorded")}</span>
+              </li>
+              <li>
+                {/* The name when the row has one, the bare uuid when it does not.
+                    A queue row never has one: the queue joins no profiles row,
+                    which is the privacy floor of a queue every Coordinator can
+                    read. A "My events" row does (SCRUM-333), because those are
+                    events this coordinator is responsible for, where contacting
+                    the Organiser is the job. The uuid is rendered as an
+                    identifier so it never reads as a label. */}
+                <strong>Organiser</strong>
+                {request.organiserName ? (
+                  <span>{request.organiserName}</span>
+                ) : (
+                  <code title={request.organiserId ?? undefined}>
+                    {request.organiserId ?? "unknown"}
+                  </code>
+                )}
+              </li>
+            </ul>
+          </section>
+
+          {/* SCRUM-334: who holds the event now, and how it got there, with the
+              handover notes, which every coordinator may read. Read fresh when this
+              panel opens, so it is the current coordinator even if the row this
+              panel was opened from is a little out of date. */}
+          <section>
+            <SectionHeading>Coordinator</SectionHeading>
+            <AssignmentHistory
+              key={historyVersion}
+              eventRequestId={request.id}
+              view="coordinator"
+              currentCoordinatorId={assignedCoordinatorId}
+              headingLevel={sectionLevel + 1}
+            />
+
+            {handedOverTo && (
+              <p className="coordinator-reassign__notice" role="status">
+                Handed over to {handedOverTo.fullName ?? "the coordinator you chose"}.
+              </p>
+            )}
+
+            {canReassign && (
+              <div className="coordinator-reassign">
+                <button type="button" onClick={() => setReassigning(true)}>
+                  Hand over to another coordinator
                 </button>
               </div>
-            </div>
-          ) : (
-            <p>Only the assigned coordinator can decide this request.</p>
-          )}
-        </section>
-      ) : null}
-
-      {/* SCRUM-355 AC5: a resubmission says so, with the decisions before this
-          one. Only its coordinator and the Lead may read them, as the server rules. */}
-      {(isAssignedCoordinator || isLead) && (
-        <DecisionHistory eventRequestId={request.id} view="coordinator" />
-      )}
-
-      {/* SCRUM-387 AC7: who may read it, as the server rules. Keyed on the
-          event's updatedAt, so an edit or a significant change re-reads it. */}
-      {(isAssignedCoordinator || isLead) && (
-        <section className="event-change-history" aria-label="Change history">
-          <h3>Change history</h3>
-          <EventChangeHistory key={current.updatedAt ?? ""} eventRequestId={current.id} />
-        </section>
-      )}
-
-      {request.status !== "pending_clarification" && (
-        <section className="coordinator-clarification-history">
-          <h3>Clarification history</h3>
-          <ClarificationHistoryDialog
-            eventRequestId={request.id}
-            eventName={request.eventName}
-          />
-        </section>
-      )}
-
-      {/* SCRUM-141: the search runs here, pre-filled from this event. Keyed
-          by the id AND the three fields it seeds from, so opening a
-          different event re-seeds the form, and so does an approved change
-          request that moves this event's period or attendance -- the form
-          must never offer stale event values as if they were current. A
-          refresh that changes nothing else keeps the coordinator's edits.
-          It gets `current`, not `request`, so an event approved in this
-          panel can have a venue requested for it straight away (SCRUM-254:
-          each result's "Request this venue"). userId is passed only while
-          this user is the assigned coordinator, so a handover made here
-          (handedOverTo) turns the request buttons off even though `current`
-          still names this user. A sent request refreshes the parent's list
-          and the Venue suitability section above. */}
-      {/* SCRUM-192 (SCRUM-188 AC6, Week 7): the event's requested and booked
-          venues, rechecked live against the event as it is now. Keyed like
-          EventVenueFinder, so an approved change request that moves the
-          period or attendance remounts it and the recheck happens as the
-          change lands; venueVersion adds a booking just sent below. Shown
-          only to the assigned coordinator, the one the server answers.
-          SCRUM-188: what it loads tells Find a venue which venues already
-          have a live request (onLoaded -> liveRequests; per venue since
-          SCRUM-525). */}
-      {/* SCRUM-266: the assigned coordinator's flagged bookings, hidden when
-          there are none. Cancelling one reloads Venue suitability below. */}
-      {isAssignedCoordinator && (
-        <EventFlaggedBookings
-          key={`${current.id}|${flaggedVersion}`}
-          eventRequestId={current.id}
-          replacingId={replacing?.id ?? null}
-          // Find a venue moves focus to its notice, which brings it into view.
-          onReplace={(item) => {
-            setReplacing({
-              id: item.id,
-              venueName: item.venueName || "Unknown venue",
-              startsAt: item.startsAt,
-              endsAt: item.endsAt,
-            });
-          }}
-          onCancelled={(item) => {
-            setReplacing((cur) => (cur?.id === item.id ? null : cur));
-            setVenueVersion((n) => n + 1);
-            onChangeRequestProcessed?.();
-          }}
-          // A booking resolved elsewhere is no longer one to replace.
-          onLoaded={(items) => setReplacing((cur) => (cur && !items.some((i) => i.id === cur.id) ? null : cur))}
-        />
-      )}
-      {/* SCRUM-492: the holder releases one approved venue while the event is
-          Approved. Not keyed on venueVersion, which a release bumps, so the
-          section keeps its own "was released" notice. */}
-      {isAssignedCoordinator && current.status === "approved" && (
-        <EventVenueBookings
-          key={`${current.id}|${current.proposedStart}|${current.proposedEnd}`}
-          eventRequestId={current.id}
-          onReleased={() => {
-            setVenueVersion((n) => n + 1);
-            onChangeRequestProcessed?.();
-          }}
-          onStale={() => onChangeRequestProcessed?.()}
-        />
-      )}
-      {isAssignedCoordinator && (
-        <section className="event-venue-suitability-section">
-          <h3>Venue suitability</h3>
-          <EventVenueSuitability
-            key={`${current.id}|${current.proposedStart}|${current.proposedEnd}|${current.expectedAttendance}|${venueVersion}`}
-            eventRequestId={current.id}
-            onLoaded={(items) => setLiveVenueRequests({ eventId: current.id, venues: liveRequestsFrom(items) })}
-          />
-        </section>
-      )}
-
-      <section>
-        <h3>Find a venue</h3>
-        <EventVenueFinder
-          key={`${current.id}|${current.proposedStart}|${current.proposedEnd}|${current.expectedAttendance}`}
-          request={current}
-          userId={isAssignedCoordinator && current.status !== "cancelled" ? user.id : undefined}
-          // Only while the Venue suitability section is shown: the lock hint
-          // says "See it under Venue suitability above", and after a handover
-          // made here that section is gone while this state remains. The
-          // buttons stay off anyway, for eligibility's reason, shown once.
-          liveRequests={
-            isAssignedCoordinator && liveVenueRequests.eventId === current.id ? liveVenueRequests.venues : undefined
-          }
-          onRequestSubmitted={() => {
-            setVenueVersion((n) => n + 1);
-            // SCRUM-266: a replacement sent is listed under its flagged booking.
-            if (replacing) {
-              setReplacing(null);
-              setFlaggedVersion((n) => n + 1);
-            }
-            onChangeRequestProcessed?.();
-          }}
-          // SCRUM-525 (R13): a venue refused as already requested reloads
-          // Venue suitability, so the request it collided with is listed.
-          onVenueAlreadyRequested={() => setVenueVersion((n) => n + 1)}
-          replacing={isAssignedCoordinator ? replacing : null}
-          onStopReplacing={() => setReplacing(null)}
-          onReplacementRefused={() => {
-            setReplacing(null);
-            setFlaggedVersion((n) => n + 1);
-          }}
-        />
-        <p className="event-venue-finder__browse">
-          <Link to="/venue-search">Browse all venues</Link>
-        </p>
-      </section>
+            )}
+          </section>
+        </aside>
+      </div>
     </div>
   );
 }

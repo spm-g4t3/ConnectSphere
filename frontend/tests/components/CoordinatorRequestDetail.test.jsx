@@ -809,8 +809,8 @@ describe("SCRUM19 statuses with nothing to decide", () => {
       decidedAt: "2026-01-15T09:00:00+08:00",
     }));
 
-    const heading = screen.getByRole("heading", { name: new RegExp(`IS212 Industry Night\\s*${label}`) });
-    expect(within(heading).getByText(label)).toHaveClass("status-badge");
+    const header = screen.getByRole("heading", { level: 2, name: "IS212 Industry Night" }).closest("header");
+    expect(within(header).getByText(label)).toHaveClass("ui-status-badge");
     expect(screen.getByText(description)).toBeInTheDocument();
     if (status === "safety_approved") {
       expect(screen.getByText("Safety approval complete").closest(".safety-approval-notice"))
@@ -1302,7 +1302,7 @@ describe("SCRUM266 flagged bookings on the event view", () => {
 
   const flaggedSection = () => screen.queryByRole("heading", { name: "Flagged bookings" })?.closest("section") ?? null;
   const finder = () => screen.getByRole("heading", { name: "Find a venue" }).closest("section");
-  const header = () => screen.getByRole("heading", { level: 2 });
+  const header = () => screen.getByRole("heading", { level: 2 }).closest("header");
   const replaceButton = async () =>
     within((await screen.findByRole("heading", { name: "Flagged bookings" })).closest("section")).getByRole("button", {
       name: "Find a replacement venue",

@@ -275,13 +275,14 @@ function AppRoutes() {
             /assigned-events above, the list SCRUM-486 built and SCRUM-487
             extended into the coordinator overview (see the page's header).
 
-            The coordinator wrapper for both roles, because App.css colours the
-            status badge under .dashboard--coordinator only. */}
+            The coordinator wrapper for both roles, because App.css styles the
+            event screen under .dashboard--coordinator. --event-page widens this
+            page only, so the screen has room for its rail. */}
         <Route
           path="/event-requests/:eventRequestId"
           element={
             <ProtectedRoute allowedRoles={["event_coordinator", "event_coordinator_lead"]}>
-              <div className="dashboard dashboard--coordinator">
+              <div className="dashboard dashboard--coordinator dashboard--event-page">
                 <EventRequestReviewPage />
               </div>
             </ProtectedRoute>
