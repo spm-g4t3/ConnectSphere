@@ -113,4 +113,4 @@ The shared project has a venue named "Meeting room" in Singapore; if yours does 
 ## Not checked by hand
 
 - Where focus lands when an event is listed twice in My events (Needs attention and its group): covered by `SCRUM586_AC7_an_event_listed_twice_returns_focus_to_the_copy_it_was_opened_from` in `scrum586CoordinatorKeyboard.test.jsx`.
-- That no screen in scope calls a browser dialog in any code path: covered by `SCRUM586_AC7_…_never_calls_a_browser_dialog`.
+- That no screen in scope calls a browser dialog in any code path: covered by `SCRUM586_AC6_…_never_calls_a_browser_dialog`.

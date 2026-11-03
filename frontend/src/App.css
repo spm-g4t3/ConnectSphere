@@ -218,7 +218,7 @@ button { cursor: pointer; }
 .dashboard--coordinator .coordinator-request-detail h3 { color: var(--teal-dark); font-size: 1rem; margin: 0 0 12px; }
 .dashboard .coordinator-request-detail .coordinator-request-detail__title { line-height: 1.25; margin: 0 0 var(--space-2); overflow-wrap: anywhere; }
 .dashboard .coordinator-request-detail .coordinator-request-detail__badges { align-items: center; display: flex; flex-wrap: wrap; gap: var(--space-2); margin: 0 0 var(--space-2); }
-.dashboard .coordinator-request-detail .coordinator-request-detail__facts { color: var(--color-ink); margin: 0 0 var(--space-2); }
+.dashboard .coordinator-request-detail .coordinator-request-detail__facts { color: var(--color-ink); margin: 0 0 var(--space-2); overflow-wrap: anywhere; }
 .dashboard--coordinator .coordinator-request-detail__header > p { line-height: 1.5; }
 /* The event screen sits in narrow dashboard cards and on its own wide page, so
    it splits into main column and rail on its own width, not the viewport's. */

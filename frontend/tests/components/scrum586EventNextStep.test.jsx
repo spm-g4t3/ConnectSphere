@@ -336,3 +336,44 @@ describe("SCRUM586_AC5 deciding with the radio cards", () => {
     expect(within(nextStep()).getByRole("button", { name: "Saving..." })).toBeDisabled();
   });
 });
+
+describe("SCRUM586_AC4 a failed step is a notice without try again", () => {
+  // The step's own button is the retry, so a second one beside it would repeat it.
+  const expectNoticeWithoutRetry = async (message) => {
+    const alert = await within(nextStep()).findByRole("alert");
+    expect(alert).toHaveClass("ui-error-notice");
+    expect(alert).toHaveTextContent(message);
+    expect(within(alert).queryByRole("button")).not.toBeInTheDocument();
+  };
+
+  it("SCRUM586_AC4_a_failed_start_review_is_a_notice_without_try_again", async () => {
+    vi.mocked(eventRequestService.startEventReview).mockRejectedValue(new Error("down"));
+    const user = userEvent.setup();
+    renderDetail(HOLDER, eventRequest("submitted"));
+
+    await user.click(within(nextStep()).getByRole("button", { name: "Start review" }));
+
+    await expectNoticeWithoutRetry("The review could not be started. Please try again.");
+  });
+
+  it("SCRUM586_AC4_a_failed_decision_is_a_notice_without_try_again", async () => {
+    vi.mocked(eventRequestService.decideEventRequest).mockRejectedValue(new Error("down"));
+    const user = userEvent.setup();
+    renderDetail(HOLDER, eventRequest("under_review"));
+
+    await decide(user, "Approve request");
+
+    await expectNoticeWithoutRetry("The decision could not be recorded. Please try again.");
+  });
+
+  it("SCRUM586_AC4_a_failed_close_clarification_is_a_notice_without_try_again", async () => {
+    vi.mocked(eventRequestService.closeEventClarification).mockRejectedValue(new Error("down"));
+    const user = userEvent.setup();
+    renderDetail(HOLDER, eventRequest("pending_clarification"));
+
+    await user.type(within(nextStep()).getByLabelText("Note explaining why you are closing this request"), "Settled by phone.");
+    await user.click(within(nextStep()).getByRole("button", { name: "Close clarification" }));
+
+    await expectNoticeWithoutRetry("Could not close the clarification request.");
+  });
+});

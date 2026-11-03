@@ -69,6 +69,7 @@ import EventConfirmationPanel from "./EventConfirmationPanel";
 import EventCompletionPanel from "./EventCompletionPanel";
 import RegistrationCounts from "./RegistrationCounts";
 import Button from "./ui/Button";
+import ErrorNotice from "./ui/ErrorNotice";
 import StatusBadge from "./ui/StatusBadge";
 import Tabs from "./ui/Tabs";
 import useReturnFocus from "./useReturnFocus";
@@ -902,7 +903,7 @@ export default function CoordinatorRequestDetail({
                           required
                         />
                       </label>
-                      {closureError && <p role="alert">{closureError}</p>}
+                      {closureError && <ErrorNotice message={closureError} />}
                       <Button type="submit" disabled={closingClarification || !closureNote.trim()}>
                         {closingClarification ? "Closing..." : "Close clarification"}
                       </Button>
@@ -917,11 +918,7 @@ export default function CoordinatorRequestDetail({
                     Start the review to approve, reject, or return this request for
                     amendment. You will be recorded as its reviewer.
                   </p>
-                  {startReviewError && (
-                    <p className="coordinator-clarification__error" role="alert">
-                      {startReviewError}
-                    </p>
-                  )}
+                  {startReviewError && <ErrorNotice message={startReviewError} />}
                   <Button disabled={startingReview} onClick={handleStartReview}>
                     {startingReview ? "Starting..." : "Start review"}
                   </Button>
@@ -1011,11 +1008,7 @@ export default function CoordinatorRequestDetail({
                       </label>
                     </>
                   )}
-                  {(decisionError || reviewDecisionError) && (
-                    <p className="coordinator-clarification__error" role="alert">
-                      {decisionError || reviewDecisionError}
-                    </p>
-                  )}
+                  {(decisionError || reviewDecisionError) && <ErrorNotice message={decisionError || reviewDecisionError} />}
                   <div className="coordinator-review-actions">
                     <Button
                       variant={chosenDecision?.variant ?? "primary"}

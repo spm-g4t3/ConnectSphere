@@ -435,14 +435,14 @@ const SCOPED_FILES = [
 /** Calls to the browser's own dialogs, bare or through window, comments left out. */
 const BROWSER_DIALOG = /(?:\bwindow\s*\.\s*|(?<![\w.$]))(?:confirm|alert|prompt)\s*\(/;
 
-describe("SCRUM586 AC7 no browser dialogs", () => {
-  it.each(SCOPED_FILES)("SCRUM586_AC7_%s_never_calls_a_browser_dialog", (file) => {
+describe("SCRUM586 AC6 no browser dialogs", () => {
+  it.each(SCOPED_FILES)("SCRUM586_AC6_%s_never_calls_a_browser_dialog", (file) => {
     const source = readFileSync(resolve(SRC, file), "utf8").replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
 
     expect(source).not.toMatch(BROWSER_DIALOG);
   });
 
-  it("SCRUM586_AC7_the_guard_catches_each_form_of_call", () => {
+  it("SCRUM586_AC6_the_guard_catches_each_form_of_call", () => {
     for (const call of ["window.confirm(x)", "if (confirm('Sure?'))", "alert(message)", "window.prompt('Why?')"]) {
       expect(call).toMatch(BROWSER_DIALOG);
     }
@@ -479,6 +479,10 @@ describe("SCRUM586 AC8 the 360px rules", () => {
       expect(rule).toMatch(/min-width:\s*0/);
     },
   );
+
+  it("SCRUM586_AC8_a_long_unbroken_organiser_name_wraps_in_the_event_facts", () => {
+    expect(rulesFor(".dashboard .coordinator-request-detail .coordinator-request-detail__facts", APP_CSS)).toMatch(/overflow-wrap:\s*anywhere/);
+  });
 
   it("SCRUM586_AC8_the_stepper_keeps_each_dot_beside_its_label", () => {
     // .dashboard li turns every row into a column at phone width.

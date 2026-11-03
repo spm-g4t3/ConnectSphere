@@ -396,3 +396,32 @@ describe("SCRUM586_AC3 every button in the tabs and the rail is shared", () => {
     expect(screen.getByRole("button", { name: "Hand over to another coordinator" })).toHaveClass("ui-button", "ui-button--secondary");
   });
 });
+
+describe("SCRUM586_AC9 who sees the previous decisions is unchanged", () => {
+  const PREVIOUS = [{
+    id: "d1", decision: "rejected", decisionNote: "Too few marshals.", decidedByName: "Priya Nair",
+    decidedAt: "2026-01-05T03:00:00Z", supersededReason: "reopened_for_revision", supersededAt: "2026-01-06T03:00:00Z",
+  }];
+
+  it.each([
+    ["the holder", HOLDER],
+    ["the Lead", LEAD],
+  ])("SCRUM586_AC9_%s_sees_the_previous_decisions_in_activity", async (_name, user) => {
+    vi.mocked(eventRequestService.getEventDecisionHistory).mockResolvedValue(PREVIOUS);
+    renderDetail(user);
+
+    expect(await within(panel("Activity")).findByRole("region", { name: "Previous decisions", hidden: true })).toBeInTheDocument();
+    expect(eventRequestService.getEventDecisionHistory).toHaveBeenCalledWith(ID);
+  });
+
+  it("SCRUM586_AC9_a_coordinator_who_neither_holds_it_nor_leads_never_reads_the_previous_decisions", async () => {
+    vi.mocked(eventRequestService.getEventDecisionHistory).mockResolvedValue(PREVIOUS);
+    renderDetail(NOT_HOLDER);
+    // Activity still shows, for the decision, so the history's absence is not the tab's.
+    expect(panelHeadings("Activity", 3)).toContain("Decision");
+    await screen.findAllByRole("tab");
+
+    expect(eventRequestService.getEventDecisionHistory).not.toHaveBeenCalled();
+    expect(screen.queryByRole("region", { name: "Previous decisions", hidden: true })).not.toBeInTheDocument();
+  });
+});
