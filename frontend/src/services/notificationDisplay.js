@@ -50,7 +50,9 @@
 //     eventName, coordinatorId, coordinatorName, startsAt, submittedAt }
 //   booking_request_approved and booking_request_rejected (066, SCRUM-258):
 //     { eventRequestId, eventName, venueId, venueName, startsAt, endsAt,
-//     decidedAt, reason, suggestedAlternative }
+//     decidedAt, reason, suggestedAlternative, previousStartsAt,
+//     previousEndsAt }; previous* (057) are null unless an approval moved the
+//     request to its event's new times
 //   booking_request_conflicting (066): { eventRequestId, eventName, venueId,
 //     venueName, startsAt, endsAt, approvedBookingId, approvedEventRequestId,
 //     approvedEventName, approvedStartsAt, approvedEndsAt }
@@ -73,9 +75,11 @@
 //   flagged_booking_resolved (SCRUM-266): { audience, outcome, eventRequestId,
 //     eventName, venueId, venueName, startsAt, endsAt, reason, resolvedAt,
 //     resolvedByRole, replacementBookingId, replacementVenueName,
-//     replacementStartsAt, replacementEndsAt }; audience is coordinator or
-//     organiser, outcome reinstated, cancelled or replaced, and the
-//     replacement* fields are null unless replaced
+//     replacementStartsAt, replacementEndsAt, previousStartsAt,
+//     previousEndsAt }; audience is coordinator or organiser, outcome
+//     reinstated, cancelled or replaced, the replacement* fields are null
+//     unless replaced, and previous* null unless a reinstatement moved the
+//     booking to its event's new times
 //   booking_released (089, SCRUM-492): { eventRequestId, eventName, venueId,
 //     venueName, startsAt, endsAt, releasedBy, releasedByName, reason }
 //   booking_request_conflict_cleared (089, 038): { eventRequestId, eventName,
@@ -141,6 +145,16 @@ const REGISTRATION_CLOSED_CAUSES = Object.freeze({
 function isInstant(value) {
   if (value === null || value === undefined || value === "") return false;
   return !Number.isNaN(new Date(value).getTime());
+}
+
+/**
+ * "moved from <previous> to <new>" when a decision moved a booking to its
+ * event's new times, else null; the period alone would read as unchanged.
+ */
+function movedPeriod(payload) {
+  if (!isInstant(payload.previousStartsAt) || !isInstant(payload.previousEndsAt)) return null;
+  const previous = formatDateTimeRange(payload.previousStartsAt, payload.previousEndsAt);
+  return `moved from ${previous} to ${formatDateTimeRange(payload.startsAt, payload.endsAt)}`;
 }
 
 /**
@@ -472,9 +486,12 @@ const DESCRIBERS = {
   // 066 (SCRUM-258 AC6). Sent to the event's coordinator when Venue Staff
   // decide on one of its requests.
   booking_request_approved(payload, { eventName, venueName }) {
+    const moved = movedPeriod(payload);
     return {
       headline: `${venueName} was approved for ${eventName}`,
-      detail: `It is booked for ${formatDateTimeRange(payload.startsAt, payload.endsAt)}.`,
+      detail: moved
+        ? `It is booked at the event's new times, ${moved}.`
+        : `It is booked for ${formatDateTimeRange(payload.startsAt, payload.endsAt)}.`,
     };
   },
 
@@ -543,9 +560,13 @@ const DESCRIBERS = {
     const reason = `Reason: ${asSentence(payload.reason || NO_REASON)}`;
 
     if (payload.outcome === "reinstated") {
+      const moved = movedPeriod(payload);
+      const booked = moved
+        ? `It is booked again at the event's new times, ${moved}.`
+        : `It is booked again for ${formatDateTimeRange(payload.startsAt, payload.endsAt)}.`;
       return {
         headline: `${venueName} for ${eventName} was reinstated`,
-        detail: `It is booked again for ${formatDateTimeRange(payload.startsAt, payload.endsAt)}. ${reason}`,
+        detail: `${booked} ${reason}`,
       };
     }
     if (payload.outcome === "cancelled") {

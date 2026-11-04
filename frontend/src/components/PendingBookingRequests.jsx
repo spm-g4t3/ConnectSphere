@@ -27,6 +27,7 @@ import {
 import { decisionErrorMessage, isStaleDecisionError } from "../services/bookingRequestErrors";
 import { statusMessageOf } from "../services/apiErrors";
 import { asList } from "../services/displayFormat";
+import { eventMovedFromRequest, expectedPeriod } from "../services/flaggedBookingDisplay";
 
 const LIST_ERROR_MESSAGES = {
   403: "Only Venue Staff can see pending booking requests.",
@@ -190,7 +191,8 @@ export default function PendingBookingRequests({ onDecided, asPage = false }) {
   }
 
   function approve(target) {
-    return decide(target, "approve", () => approveBookingRequest(target.id));
+    const expected = expectedPeriod(target, eventMovedFromRequest(target));
+    return decide(target, "approve", () => approveBookingRequest(target.id, expected));
   }
 
   function handleToggle(id) {

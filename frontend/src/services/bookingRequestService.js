@@ -112,11 +112,15 @@ export async function releaseVenueBooking(id, reason) {
  * Every open booking request Venue Staff decide on (GET /booking-requests/pending,
  * SCRUM-258 AC1): pending and conflicting, oldest first, across all venues.
  *
- * Each item carries the event, the period and the occupied period (setup and
- * turnaround included), the expected attendance, layout, requirements, setup
+ * Each item carries the event, the request's period, the event's current
+ * period (`eventStartsAt`/`eventEndsAt`, which an approval books) and the
+ * occupied period of that booking (setup and turnaround included), the expected attendance, layout, requirements, setup
  * notes, the suitability result with any overrides, a `statusDisplay`, and
  * `overlapping`: other events' open requests at the same venue whose occupied
- * periods overlap it, in submission order. Not re-sorted by callers: the
+ * periods overlap it, in submission order; `conflictingWith`, the approved or
+ * flagged bookings the period an approval books clashes with (pending
+ * requests too); and `replaces`, the flagged or since-reinstated booking the
+ * request was raised to replace, or null. Not re-sorted by callers: the
  * server's order is the queue's.
  *
  * Failures: 401, 403 (not Venue Staff), 500. None open is 200 [].
@@ -133,17 +137,22 @@ export async function getPendingBookingRequests() {
  * The server re-checks everything under its locks (AC2), so a request that
  * looked approvable on screen can still be refused. Failures: 400 (malformed
  * id), 401, 403, 404, and 409 with a `code`: BOOKING_NOT_PENDING,
- * EVENT_NOT_BOOKABLE, BOOKING_PERIOD_STALE (the event's dates moved since the
- * request), VENUE_RETIRED, BOOKING_CHANGED, or BOOKING_PERIOD_CONFLICT with
- * `conflicts` shaped as createBookingRequest's.
+ * EVENT_NOT_BOOKABLE, BOOKING_PERIOD_STALE (the event has no period),
+ * BOOKING_PERIOD_CHANGED (the event's times changed after the queue loaded,
+ * so the expected period no longer matches), VENUE_RETIRED, BOOKING_CHANGED,
+ * or BOOKING_PERIOD_CONFLICT with `conflicts` shaped as createBookingRequest's.
  *
  * @param {string} id  the request's id
+ * @param {Object} expected  the period the card showed approving books: the
+ *   event's times when it moved, else the request's own (SCRUM-593)
+ * @param {string} expected.expectedStartsAt  ISO 8601
+ * @param {string} expected.expectedEndsAt    ISO 8601
  * @returns {Promise<Object>} the request, now approved, with decidedBy,
  *   decidedAt, markedConflicting (ids of the other events' requests it made
  *   conflicting) and convertedHoldId (the event's own hold it converted, or null)
  */
-export async function approveBookingRequest(id) {
-  return postData(`/booking-requests/${id}/approve`);
+export async function approveBookingRequest(id, { expectedStartsAt, expectedEndsAt }) {
+  return postData(`/booking-requests/${id}/approve`, { expectedStartsAt, expectedEndsAt });
 }
 
 /**

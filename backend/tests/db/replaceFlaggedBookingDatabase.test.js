@@ -15,7 +15,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createSchemaDb, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
 import { queriesFor, refusal } from './helpers/queries.js';
-import { decideBooking } from './helpers/bookingFlow.js';
+import { decideBooking, reinstateBooking } from './helpers/bookingFlow.js';
 import { flagForReason } from './helpers/flaggedBookings.js';
 import { clientsCanExecute } from './helpers/grants.js';
 import { at } from '../fixtures/time.js';
@@ -214,6 +214,7 @@ describe('SCRUM-266: a coordinator lists and replaces flagged bookings', () => {
 
       expect(row.replaces).toEqual({
         booking_id: isFlagged,
+        status: 'flagged_for_review',
         venue_name: venue.name,
         starts_at: expect.any(String),
         ends_at: expect.any(String),
@@ -223,20 +224,29 @@ describe('SCRUM-266: a coordinator lists and replaces flagged bookings', () => {
       expect((await queued(ordinary)).replaces).toBeNull();
     });
 
-    it.each([
-      ['reinstated', () => ['select reinstate_flagged_booking($1, $2, $3)', staff, 'Block moved']],
-      ['cancelled', () => ['select cancel_flagged_booking($1, $2, $3)', coordinator, 'Not needed']],
-    ])('SCRUM266_W7_once_the_flagged_booking_is_%s_the_queue_shows_no_replaces', async (_label, resolve) => {
+    it('SCRUM266_W7_once_the_flagged_booking_is_cancelled_the_queue_shows_no_replaces', async () => {
       const event = await makeEvent();
       const isFlagged = await flagged(event);
       const replacement = (await request(event, await makeVenue(), isFlagged)).booking.id;
-      const [sql, caller, reason] = resolve();
-      await one(sql, [isFlagged, caller, reason]);
+      await one('select cancel_flagged_booking($1, $2, $3)', [isFlagged, coordinator, 'Not needed']);
 
       const row = await queued(replacement);
 
       expect(row.status).toBe('pending');
       expect(row.replaces).toBeNull();
+    });
+
+    // Approving the replacement leaves a reinstated booking alone, so the event
+    // would hold both venues; Venue Staff still need to see that.
+    it('SCRUM593_AC9_once_the_flagged_booking_is_reinstated_the_queue_still_names_it_as_approved', async () => {
+      const event = await makeEvent();
+      const isFlagged = await flagged(event);
+      const replacement = (await request(event, await makeVenue(), isFlagged)).booking.id;
+      await reinstateBooking(db, isFlagged, { caller: staff });
+
+      const row = await queued(replacement);
+
+      expect(row.replaces).toMatchObject({ booking_id: isFlagged, status: 'approved' });
     });
   });
 
@@ -342,6 +352,8 @@ describe('SCRUM-266: a coordinator lists and replaces flagged bookings', () => {
             venueName: await venueName(flaggedRow.venue_id),
             startsAt: expect.any(String),
             endsAt: expect.any(String),
+            previousStartsAt: null,
+            previousEndsAt: null,
             reason: 'Replaced by an approved booking',
             resolvedAt: expect.any(String),
             resolvedByRole: 'venue_staff',
@@ -390,7 +402,7 @@ describe('SCRUM-266: a coordinator lists and replaces flagged bookings', () => {
       const event = await makeEvent();
       const isFlagged = await flagged(event);
       const replacement = (await request(event, await makeVenue(), isFlagged)).booking.id;
-      await one('select reinstate_flagged_booking($1, $2, $3)', [isFlagged, staff, 'Block moved']);
+      await reinstateBooking(db, isFlagged, { caller: staff });
 
       const result = await decide(replacement);
 

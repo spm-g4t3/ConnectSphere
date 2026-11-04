@@ -490,6 +490,15 @@ describe("describeNotification: Venue Staff decisions (SCRUM-258 AC6)", () => {
     });
   });
 
+  it("SCRUM593_AC11_an_approval_that_moved_the_request_says_from_and_to_which_times", () => {
+    const previousStartsAt = "2026-09-30T14:00:00+08:00";
+    const previousEndsAt = "2026-09-30T16:00:00+08:00";
+    expect(of("booking_request_approved", { ...DECISION, previousStartsAt, previousEndsAt }).detail).toBe(
+      "It is booked at the event's new times, moved from " +
+        `${formatDateTimeRange(previousStartsAt, previousEndsAt)} to ${formatDateTimeRange(DECISION.startsAt, DECISION.endsAt)}.`,
+    );
+  });
+
   it("SCRUM258_AC6_rejected_ends_the_reason_with_a_full_stop_before_the_alternative", () => {
     expect(of("booking_request_rejected", {
       ...DECISION,
@@ -829,6 +838,16 @@ describe("describeNotification: flagged_booking_resolved (SCRUM-266 AC6)", () =>
       headline: "Hall A for Tech Talk was reinstated",
       detail: `It is booked again for ${RESOLVED_RANGE}. Reason: Maintenance finished early.`,
     });
+  });
+
+  it("SCRUM593_AC10_a_reinstatement_that_moved_the_booking_says_from_and_to_which_times", () => {
+    const previousStartsAt = "2026-09-30T14:00:00+08:00";
+    const previousEndsAt = "2026-09-30T16:00:00+08:00";
+    expect(resolved({ previousStartsAt, previousEndsAt }).detail).toBe(
+      "It is booked again at the event's new times, moved from " +
+        `${formatDateTimeRange(previousStartsAt, previousEndsAt)} to ${RESOLVED_RANGE}. ` +
+        "Reason: Maintenance finished early.",
+    );
   });
 
   it("SCRUM266_AC6_cancelled_tells_the_coordinator_they_can_request_another_venue", () => {

@@ -15,7 +15,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createSchemaDb, returnToLeadQueue, seedBooking, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
 import { queriesFor, refusal } from './helpers/queries.js';
-import { approveBooking, decideBooking } from './helpers/bookingFlow.js';
+import { approveBooking, decideBooking, reinstateBooking } from './helpers/bookingFlow.js';
 import { flagForReason, flaggedByBlock } from './helpers/flaggedBookings.js';
 import { clientsCanExecute } from './helpers/grants.js';
 import { at } from '../fixtures/time.js';
@@ -75,10 +75,7 @@ describe('SCRUM-266 AC3 and AC5: cancelling a flagged booking', () => {
   const cancel = async (bookingId, { caller = coordinator, reason = 'Venue no longer fits' } = {}) =>
     (await one('select cancel_flagged_booking($1, $2, $3) as result', [bookingId, caller, reason])).result;
 
-  const reinstate = async (bookingId) =>
-    (
-      await one('select reinstate_flagged_booking($1, $2, $3) as result', [bookingId, staff, 'Block moved'])
-    ).result;
+  const reinstate = (bookingId) => reinstateBooking(db, bookingId, { caller: staff });
 
   const bookingRow = (id) => one('select * from bookings where id = $1', [id]);
   const eventRow = (id) => one('select * from event_requests where id = $1', [id]);
@@ -442,6 +439,8 @@ describe('SCRUM-266 AC3 and AC5: cancelling a flagged booking', () => {
             venueName: (await one('select name from venues where id = $1', [venueId])).name,
             startsAt: expect.any(String),
             endsAt: expect.any(String),
+            previousStartsAt: null,
+            previousEndsAt: null,
             reason: 'Venue closed for repairs',
             resolvedAt: expect.any(String),
             resolvedByRole: 'venue_staff',

@@ -90,19 +90,25 @@ export function createBookingRequestRouter({
    * SCRUM-259: every pending or conflicting booking request (066), oldest
    * first, for Venue Staff to decide on, each with its status and the other
    * events' open requests whose occupied periods overlap it, in submission
-   * order. A conflicting one also carries conflictingWith: the bookings
-   * occupying its period now, [] once that clash is gone (and on pending rows).
-   * replaces is the flagged booking a request would replace, null otherwise.
+   * order. Each also carries conflictingWith: the bookings occupying the
+   * period an approval would book, [] when none do. replaces is the booking a
+   * request would replace (status flagged_for_review, or approved once
+   * reinstated), null when it replaces none or that booking was cancelled.
    *
    * Behind venueStaffOnly, and list_pending_booking_requests (078) checks the
    * caller's role again. A bare array; none pending is 200 [], never 404.
    * Declared before any /:id route, so "pending" is never read as an id.
    *
+   * SCRUM-593: suitabilityAtNewTimes is the suitability at the event's current
+   * period ({ suitable, criteria, checked }, as a request stores it) when
+   * approving would move the request there; null when it would not, or when
+   * that check failed.
+   *
    * Statuses: 200, 401, 403 for the wrong role or no role, 500 for anything
    * untyped.
    */
   router.get('/pending', venueStaffOnly, async (req, res) => {
-    const requests = await listPendingBookingRequests(req.user.id, { client });
+    const requests = await listPendingBookingRequests(req.user.id, { client, checkSuitability });
     res.status(200).json(requests);
   });
 
@@ -182,19 +188,27 @@ export function createBookingRequestRouter({
    * other events' requests it made conflicting, and `convertedHoldId`: the
    * event's hold on the venue it converted, or null (both 066).
    *
+   * Body: { expectedStartsAt, expectedEndsAt } -- the period Venue Staff were
+   * shown (the event's current one), ISO 8601 with an offset, both required.
+   *
    * Behind venueStaffOnly, and decide_booking_request (066) checks the role
    * again. No pre-check: whether the request is still pending, the event still
-   * live and on the same dates, and the venue still free for the padded period
-   * are answered under its locks. There is no body; the caller is always
-   * req.user.id.
+   * live and still at the period shown, and the venue still free for the
+   * event's current padded period (which an approval moves the request to)
+   * are answered under its locks. A move records the suitability at the new
+   * period, unsuitable or not. The caller is always req.user.id.
    *
-   * Statuses: 400 malformed id; 401; 403 wrong role or no role; 404 no such
-   * request; 409 with `code`: BOOKING_NOT_PENDING, EVENT_NOT_BOOKABLE,
-   * BOOKING_PERIOD_STALE, VENUE_RETIRED, or BOOKING_PERIOD_CONFLICT with
-   * `conflicts` (see approveBookingRequest).
+   * Statuses: 400 malformed id, or a missing or malformed expected period;
+   * 401; 403 wrong role or no role; 404 no such request; 409 with `code`:
+   * BOOKING_NOT_PENDING, EVENT_NOT_BOOKABLE, BOOKING_PERIOD_STALE,
+   * BOOKING_PERIOD_CHANGED (not the period shown), VENUE_RETIRED, or
+   * BOOKING_PERIOD_CONFLICT with `conflicts` (see approveBookingRequest).
    */
   router.post('/:id/approve', venueStaffOnly, guardBooking, async (req, res) => {
-    const booking = await approveBookingRequest(req.params.id, req.user.id, { client });
+    const booking = await approveBookingRequest(req.params.id, req.user.id, req.body ?? {}, {
+      client,
+      checkSuitability,
+    });
     res.status(200).json(booking);
   });
 

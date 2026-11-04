@@ -39,6 +39,7 @@ import { createErrorCollector, throwIfInvalid, checkOptionalText } from './colle
 import { checkCodeArray } from './venueValidation.js';
 import { checkAttendance } from './eventRequestValidation.js';
 import { SUITABILITY_CHECK_CRITERIA } from '../domain/venueMatching.js';
+import { checkTimestamp } from './timestampValidation.js';
 
 /** Mirrors bookings_setup_notes_length in 030. */
 export const SETUP_NOTES_MAX_LENGTH = 1000;
@@ -247,6 +248,45 @@ export function validateCreateBookingRequest(input) {
     expectedAttendance,
     replacesBookingId,
   };
+}
+
+/**
+ * SCRUM-593: the period Venue Staff were shown for an approval, both ends
+ * required. The function refuses it if the period it would book has changed
+ * since, so nothing is approved at times nobody saw.
+ *
+ * @param {{add: function(string, string): void}} errors
+ * @param {object} input  expectedStartsAt and expectedEndsAt, ISO 8601 with an offset
+ * @returns {{startsAt?: string, endsAt?: string}} each trimmed, when valid
+ */
+export function checkExpectedPeriod(errors, input) {
+  const period = {};
+  for (const [field, key] of [['expectedStartsAt', 'startsAt'], ['expectedEndsAt', 'endsAt']]) {
+    const value = input[field];
+    if (value === undefined || value === null || value === '') {
+      errors.add(field, 'is required');
+    } else if (checkTimestamp(errors, field, value) !== null) {
+      period[key] = value.trim();
+    }
+  }
+  return period;
+}
+
+/**
+ * SCRUM-593: what Venue Staff send to approve a request.
+ *
+ * @param {object} input  see checkExpectedPeriod
+ * @returns {{startsAt: string, endsAt: string}}
+ * @throws {ValidationError} listing every problem found
+ */
+export function validateApproveBookingRequest(input) {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+    throw new ValidationError('Invalid approval -- expected an object');
+  }
+  const errors = createErrorCollector();
+  const period = checkExpectedPeriod(errors, input);
+  throwIfInvalid(errors, 'Invalid approval');
+  return period;
 }
 
 /** Mirrors the 1000-character cap 066 puts on decision_reason and suggested_alternative. */

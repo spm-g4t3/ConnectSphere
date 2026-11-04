@@ -29,8 +29,9 @@ vi.mock("../../src/services/flaggedBookingService", () => ({
 
 const STARTS = "2026-12-01T09:00:00+08:00";
 const ENDS = "2026-12-01T17:00:00+08:00";
-const EVENT_STARTS = "2026-12-02T09:00:00+08:00";
-const EVENT_ENDS = "2026-12-02T17:00:00+08:00";
+// Inside the booking, so it still covers its event and reinstating keeps its times.
+const EVENT_STARTS = "2026-12-01T10:00:00+08:00";
+const EVENT_ENDS = "2026-12-01T16:00:00+08:00";
 const BLOCK_STARTS = "2026-12-01T08:00:00+08:00";
 const BLOCK_ENDS = "2026-12-01T18:00:00+08:00";
 const FLAGGED_AT = "2026-11-20T10:30:00+08:00";
@@ -352,7 +353,7 @@ describe("the reason (AC2, AC3)", () => {
     fireEvent.change(within(region).getByLabelText(REINSTATE_LABEL), { target: { value: `  ${"x".repeat(1000)}  ` } });
     await user.click(within(region).getByRole("button", { name: "Reinstate" }));
 
-    expect(reinstateFlaggedBooking).toHaveBeenCalledWith("1", "x".repeat(1000));
+    expect(reinstateFlaggedBooking).toHaveBeenCalledWith("1", "x".repeat(1000), expect.anything());
   });
 
   it("SCRUM266_AC2_a_corrected_reason_clears_the_field_error_and_is_sent_trimmed", async () => {
@@ -369,7 +370,7 @@ describe("the reason (AC2, AC3)", () => {
     await user.click(within(region).getByRole("button", { name: "Reinstate" }));
 
     expect(reinstateFlaggedBooking).toHaveBeenCalledTimes(1);
-    expect(reinstateFlaggedBooking).toHaveBeenCalledWith("1", "Block lifted early");
+    expect(reinstateFlaggedBooking).toHaveBeenCalledWith("1", "Block lifted early", expect.anything());
     expect(cancelFlaggedBooking).not.toHaveBeenCalled();
   });
 
@@ -451,7 +452,7 @@ describe("resolving (AC2, AC3)", () => {
     expect(await screen.findByRole("status")).toHaveTextContent(
       "Reinstated the booking of Hall 1 for Event 1; it is approved again.",
     );
-    expect(reinstateFlaggedBooking).toHaveBeenCalledWith("1", "Block lifted");
+    expect(reinstateFlaggedBooking).toHaveBeenCalledWith("1", "Block lifted", expect.anything());
     expect(getFlaggedBookings).toHaveBeenCalledTimes(2);
     expect(screen.queryByText("Event 1")).not.toBeInTheDocument();
     expect(screen.queryByRole("region")).not.toBeInTheDocument();
@@ -656,7 +657,7 @@ describe("refusals (AC2, AC3)", () => {
     expect(await screen.findByRole("status")).toHaveTextContent(
       "Reinstated the booking of Hall 1 for Event 1; it is approved again.",
     );
-    expect(reinstateFlaggedBooking).toHaveBeenNthCalledWith(2, "1", "Block shortened");
+    expect(reinstateFlaggedBooking).toHaveBeenNthCalledWith(2, "1", "Block shortened", expect.anything());
     expect(getFlaggedBookings).toHaveBeenCalledTimes(2);
     expect(screen.queryByText("Event 1")).not.toBeInTheDocument();
     expect(screen.getByText("Event 2")).toBeInTheDocument();
@@ -668,7 +669,7 @@ describe("refusals (AC2, AC3)", () => {
   it.each([
     ["SAFETY_FLAG_NOT_REINSTATABLE", conflict("SAFETY_FLAG_NOT_REINSTATABLE"), /flagged by the safety review/],
     ["EVENT_NOT_BOOKABLE", conflict("EVENT_NOT_BOOKABLE"), /no longer approved, in the safety check, or confirmed/],
-    ["BOOKING_PERIOD_STALE", conflict("BOOKING_PERIOD_STALE"), /dates have changed/],
+    ["BOOKING_PERIOD_STALE", conflict("BOOKING_PERIOD_STALE"), /The event has no date and time set/],
     ["VENUE_RETIRED", conflict("VENUE_RETIRED"), /retired/],
     ["a 500", httpError(500, { error: "database prose 3f2a9c1e" }), /Could not resolve the flagged booking/],
   ])("SCRUM266_AC2_a_%s_refusal_is_explained_in_the_card_with_no_clash_list", async (_label, err, pattern) => {
@@ -843,5 +844,190 @@ describe("FlaggedBookingCard on its own", () => {
     expect(onReinstate).toHaveBeenCalledWith(booking, "A");
     expect(onCancel).toHaveBeenCalledWith(booking, "B");
     expect(onToggle).toHaveBeenCalledWith("1");
+  });
+});
+
+describe("a booking whose event has moved (SCRUM-593)", () => {
+  const MOVED = { eventStartsAt: "2026-12-03T09:00:00+08:00", eventEndsAt: "2026-12-03T17:00:00+08:00" };
+  const APPROVE_LABEL = "Reason for approving (required)";
+
+  it("SCRUM593_AC10_a_moved_booking_shows_its_new_period_and_offers_approve_at_new_times", async () => {
+    vi.mocked(getFlaggedBookings).mockResolvedValue([item("1", MOVED)]);
+    const { user } = renderList();
+    await screen.findByText("Event 1");
+    const region = await openCard(user, "1");
+
+    const period = within(region).getByText("Booking period", { selector: "dt" }).nextElementSibling;
+    expect(period).toHaveTextContent(formatVenuePeriod(STARTS, ENDS));
+    expect(period).toHaveTextContent(`Moves to ${formatVenuePeriod(MOVED.eventStartsAt, MOVED.eventEndsAt)}`);
+    expect(within(region).getByLabelText(APPROVE_LABEL)).toBeInTheDocument();
+    expect(within(region).getByRole("button", { name: "Approve at new times" })).toBeEnabled();
+    expect(within(region).queryByRole("button", { name: "Reinstate" })).not.toBeInTheDocument();
+  });
+
+  it("SCRUM593_AC10_a_booking_that_still_covers_its_event_keeps_reinstate", async () => {
+    vi.mocked(getFlaggedBookings).mockResolvedValue([item("1")]);
+    const { user } = renderList();
+    await screen.findByText("Event 1");
+    const region = await openCard(user, "1");
+
+    expect(within(region).queryByText(/Moves to/)).not.toBeInTheDocument();
+    expect(within(region).getByRole("button", { name: "Reinstate" })).toBeEnabled();
+    expect(within(region).queryByRole("button", { name: "Approve at new times" })).not.toBeInTheDocument();
+  });
+
+  it("SCRUM593_AC10_a_safety_flagged_booking_offers_no_approval_even_if_moved", async () => {
+    vi.mocked(getFlaggedBookings).mockResolvedValue([item("1", { ...SAFETY, ...MOVED })]);
+    const { user } = renderList();
+    await screen.findByText("Event 1");
+    const region = await openCard(user, "1");
+
+    expect(within(region).queryByRole("button", { name: "Approve at new times" })).not.toBeInTheDocument();
+    expect(within(region).queryByLabelText(APPROVE_LABEL)).not.toBeInTheDocument();
+    expect(within(region).queryByText(/Moves to/)).not.toBeInTheDocument();
+  });
+
+  it("SCRUM593_AC10_approving_a_moved_booking_sends_the_reason_and_says_it_was_approved_at_the_new_times", async () => {
+    const sent = deferred();
+    vi.mocked(getFlaggedBookings).mockResolvedValueOnce([item("1", MOVED)]).mockResolvedValueOnce([]);
+    vi.mocked(reinstateFlaggedBooking).mockReturnValue(sent.promise);
+    const { user } = renderList();
+    await screen.findByText("Event 1");
+    const region = await openCard(user, "1");
+
+    await user.type(within(region).getByLabelText(APPROVE_LABEL), "Free on the new date");
+    await user.click(within(region).getByRole("button", { name: "Approve at new times" }));
+    expect(within(region).getByRole("button", { name: "Approving..." })).toBeDisabled();
+    await act(async () =>
+      sent.resolve({
+        id: "1",
+        status: "approved",
+        startsAt: MOVED.eventStartsAt,
+        endsAt: MOVED.eventEndsAt,
+        resolution: { previousStartsAt: STARTS, previousEndsAt: ENDS },
+      }),
+    );
+
+    // The period the card showed, so the server refuses it if the event moved again.
+    expect(reinstateFlaggedBooking).toHaveBeenCalledWith("1", "Free on the new date", {
+      expectedStartsAt: MOVED.eventStartsAt,
+      expectedEndsAt: MOVED.eventEndsAt,
+    });
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      `Approved the booking of Hall 1 for Event 1 at the event's new times, ${formatVenuePeriod(MOVED.eventStartsAt, MOVED.eventEndsAt)}.`,
+    );
+  });
+
+  it("SCRUM593_AC10_a_blank_reason_for_approving_names_approving", async () => {
+    vi.mocked(getFlaggedBookings).mockResolvedValue([item("1", MOVED)]);
+    const { user } = renderList();
+    await screen.findByText("Event 1");
+    const region = await openCard(user, "1");
+
+    await user.click(within(region).getByRole("button", { name: "Approve at new times" }));
+
+    expect(within(region).getByText("Enter a reason for approving this booking.")).toBeInTheDocument();
+    expect(reinstateFlaggedBooking).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM593_AC10_reinstating_a_booking_that_covers_its_event_sends_its_own_period", async () => {
+    vi.mocked(getFlaggedBookings).mockResolvedValue([item("1")]);
+    vi.mocked(reinstateFlaggedBooking).mockResolvedValue({ id: "1", status: "approved" });
+    const { user } = renderList();
+    await screen.findByText("Event 1");
+    const region = await openCard(user, "1");
+
+    await user.type(within(region).getByLabelText(REINSTATE_LABEL), "Block lifted");
+    await user.click(within(region).getByRole("button", { name: "Reinstate" }));
+
+    expect(reinstateFlaggedBooking).toHaveBeenCalledWith("1", "Block lifted", {
+      expectedStartsAt: STARTS,
+      expectedEndsAt: ENDS,
+    });
+  });
+
+  it("SCRUM593_AC12_an_event_moved_since_the_list_loaded_is_reported_above_the_list_and_the_list_refetched", async () => {
+    vi.mocked(getFlaggedBookings)
+      .mockResolvedValueOnce([item("1", MOVED)])
+      .mockResolvedValueOnce([item("1", { eventStartsAt: "2026-12-04T09:00:00+08:00", eventEndsAt: "2026-12-04T17:00:00+08:00" })]);
+    vi.mocked(reinstateFlaggedBooking).mockRejectedValue(conflict("BOOKING_PERIOD_CHANGED"));
+    const { user } = renderList();
+    await screen.findByText("Event 1");
+    const region = await openCard(user, "1");
+
+    await user.type(within(region).getByLabelText(APPROVE_LABEL), "Free on the new date");
+    await user.click(within(region).getByRole("button", { name: "Approve at new times" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The event's date or time changed since this list loaded. The list has been refreshed; check the new times, then try again.",
+    );
+    expect(getFlaggedBookings).toHaveBeenCalledTimes(2);
+    expect(queryRegion("Event 1", "Hall 1")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    [true, "Suitable"],
+    [false, "Not suitable"],
+  ])("SCRUM593_AC10_a_moved_booking_shows_its_suitability_at_the_new_times_(suitable_%s)", async (suitable, verdict) => {
+    vi.mocked(getFlaggedBookings).mockResolvedValue([
+      item("1", { ...MOVED, suitabilityAtNewTimes: { suitable, criteria: [] } }),
+    ]);
+    const { user } = renderList();
+    await screen.findByText("Event 1");
+    const region = await openCard(user, "1");
+
+    expect(within(region).getByText(/Suitability at the event's new times/)).toHaveTextContent(
+      `Suitability at the event's new times: ${verdict}`,
+    );
+    expect(within(region).queryByText(/checked for its original times/)).not.toBeInTheDocument();
+    const advisory = within(region).queryByText(/doesn't meet the event's needs at the new times/);
+    if (suitable) {
+      expect(advisory).not.toBeInTheDocument();
+    } else {
+      expect(advisory).toHaveTextContent("Suitability is advisory, so the booking can still be approved.");
+      // Advisory only: approving stays available.
+      expect(within(region).getByRole("button", { name: "Approve at new times" })).toBeEnabled();
+    }
+  });
+
+  it("SCRUM593_AC10_a_moved_booking_whose_venue_is_taken_at_the_new_times_says_approving_will_be_refused", async () => {
+    vi.mocked(getFlaggedBookings).mockResolvedValue([
+      item("1", {
+        ...MOVED,
+        suitabilityAtNewTimes: {
+          suitable: false,
+          criteria: [
+            { criterion: "Availability", met: false, detail: "Booked by Tech Talk" },
+            { criterion: "Capacity", met: false, detail: "Too small" },
+          ],
+        },
+      }),
+    ]);
+    const { user } = renderList();
+    await screen.findByText("Event 1");
+    const region = await openCard(user, "1");
+
+    expect(within(region).queryByText(/can still be approved/)).not.toBeInTheDocument();
+    expect(
+      within(region).getByText(
+        "This venue isn't free at the event's new times, so approving at the new times will be refused while it is taken.",
+      ),
+    ).toBeInTheDocument();
+    // The server is the authority on clashes; the note warns without withholding the form.
+    expect(within(region).getByRole("button", { name: "Approve at new times" })).toBeEnabled();
+  });
+
+  it("SCRUM593_AC10_a_moved_booking_without_a_recheck_says_suitability_was_for_its_original_times", async () => {
+    vi.mocked(getFlaggedBookings).mockResolvedValue([item("1", { ...MOVED, suitabilityAtNewTimes: null })]);
+    const { user } = renderList();
+    await screen.findByText("Event 1");
+    const region = await openCard(user, "1");
+
+    expect(
+      within(region).getByText(
+        "This booking's suitability was checked for its original times, not the event's new times.",
+      ),
+    ).toBeInTheDocument();
+    expect(within(region).queryByText(/Suitability at the event's new times/)).not.toBeInTheDocument();
   });
 });

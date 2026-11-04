@@ -273,11 +273,18 @@ describe("decisionErrorMessage (SCRUM-258)", () => {
   it.each([
     ["BOOKING_NOT_PENDING", /already been decided or withdrawn\. The list has been refreshed\./],
     ["BOOKING_CHANGED", /changed while you were deciding/],
-    ["BOOKING_PERIOD_STALE", /dates have changed .* request the venue again for the new dates/],
     ["EVENT_NOT_BOOKABLE", /no longer approved, in the safety check, or confirmed \(it may have been cancelled\), so its venue request can't be approved/],
     ["VENUE_RETIRED", /retired, so the request can't be approved/],
   ])("SCRUM258_AC2_explains_the_409_%s_to_venue_staff", (code, pattern) => {
     expect(decisionErrorMessage(conflict(code))).toMatch(pattern);
+  });
+
+  // Approval now books a moved event's new period, so stale only means the
+  // event has no period; the old "request the venue again" advice is wrong.
+  it("SCRUM593_AC12_a_stale_period_says_the_event_has_no_date_and_time", () => {
+    const message = decisionErrorMessage(conflict("BOOKING_PERIOD_STALE"));
+    expect(message).toBe("The event has no date and time set, so this request can't be approved.");
+    expect(message).not.toMatch(/new dates/);
   });
 
   it("SCRUM258_AC2_a_period_conflict_names_each_kind_of_occupant_once", () => {

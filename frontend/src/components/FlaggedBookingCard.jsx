@@ -8,6 +8,7 @@
 // resolution is in flight and what went wrong belong to FlaggedBookings, which
 // owns the list and refetches it after every resolution.
 
+import BookingSuitabilitySummary from "./BookingSuitabilitySummary";
 import FlaggedBookingFlagDetail from "./FlaggedBookingFlagDetail";
 import FlaggedBookingReasonForm from "./FlaggedBookingReasonForm";
 import ErrorNotice from "./ui/ErrorNotice";
@@ -18,6 +19,8 @@ import {
   bookingStatusText,
   capitalise,
   flagReasons,
+  movesToEventPeriod,
+  newTimesSuitabilityConcern,
   replacementRequests,
   venueText,
 } from "../services/flaggedBookingDisplay";
@@ -40,6 +43,11 @@ export default function FlaggedBookingCard({
   const eventName = item.eventName || "Unnamed event";
   const venueName = item.venueName || "Unknown venue";
   const regionId = `flagged-booking-${item.id}`;
+  // A safety flag is never reinstated, so only a reinstatable booking moves.
+  const moves = item.reinstatable && movesToEventPeriod(item);
+  // Re-run by the server at the event's new times; null when it could not run.
+  const newTimesSuitability = moves ? item.suitabilityAtNewTimes ?? null : null;
+  const newTimesConcern = newTimesSuitabilityConcern(newTimesSuitability);
 
   return (
     <li className="pending-bookings__card">
@@ -69,7 +77,14 @@ export default function FlaggedBookingCard({
             <dt>Venue</dt>
             <dd>{venueText(item)}</dd>
             <dt>Booking period</dt>
-            <dd>{formatVenuePeriod(item.startsAt, item.endsAt)}</dd>
+            <dd>
+              {formatVenuePeriod(item.startsAt, item.endsAt)}
+              {moves && (
+                <span className="pending-bookings__breakdown">
+                  Moves to {formatVenuePeriod(item.eventStartsAt, item.eventEndsAt)}
+                </span>
+              )}
+            </dd>
             <dt>Event&apos;s current period</dt>
             <dd>{formatVenuePeriod(item.eventStartsAt, item.eventEndsAt)}</dd>
             <dt>Flagged</dt>
@@ -77,6 +92,20 @@ export default function FlaggedBookingCard({
           </dl>
 
           <FlaggedBookingFlagDetail item={item} headingLevel={3} />
+
+          {newTimesSuitability && (
+            <BookingSuitabilitySummary
+              suitability={newTimesSuitability}
+              suitabilityOverridden={false}
+              overriddenCriteria={[]}
+              label="Suitability at the event's new times"
+            />
+          )}
+          {moves && !newTimesSuitability && (
+            <p className="pending-bookings__event-status">
+              This booking&apos;s suitability was checked for its original times, not the event&apos;s new times.
+            </p>
+          )}
 
           {/* Both resolutions are reason forms, so submitting again is the retry. */}
           {error && <ErrorNotice message={error} />}
@@ -100,14 +129,28 @@ export default function FlaggedBookingCard({
               booking requests.
             </p>
           )}
+          {/* Suitability is advisory, so this warns but never withholds approval. */}
+          {newTimesConcern === "advisory" && (
+            <p className="pending-bookings__event-status">
+              This venue doesn&apos;t meet the event&apos;s needs at the new times. Suitability is advisory, so the
+              booking can still be approved.
+            </p>
+          )}
+          {/* A clash is a refusal, not advice: the server answers BOOKING_PERIOD_CONFLICT. */}
+          {newTimesConcern === "unavailable" && (
+            <p className="pending-bookings__event-status">
+              This venue isn&apos;t free at the event&apos;s new times, so approving at the new times will be refused
+              while it is taken.
+            </p>
+          )}
           {item.reinstatable ? (
             <FlaggedBookingReasonForm
               id={`${regionId}-reinstate`}
-              label="Reason for reinstating (required)"
-              verb="reinstating"
+              label={moves ? "Reason for approving (required)" : "Reason for reinstating (required)"}
+              verb={moves ? "approving" : "reinstating"}
               busy={busy}
-              buttonLabel="Reinstate"
-              sendingLabel={resolving === "reinstate" ? "Reinstating..." : null}
+              buttonLabel={moves ? "Approve at new times" : "Reinstate"}
+              sendingLabel={resolving === "reinstate" ? (moves ? "Approving..." : "Reinstating...") : null}
               onSubmit={(reason) => onReinstate(item, reason)}
             />
           ) : (

@@ -131,7 +131,7 @@ const rejected = (results) => results.filter((r) => r.status === 'rejected');
 // Preflight
 // ---------------------------------------------------------------------------
 
-/** Confirms 027-031, 051, 065 and 066 are applied before anything is written. */
+/** Confirms 027-031, 051, 057, 065 and 066 are applied before anything is written. */
 async function preflight() {
   const missing = [];
 
@@ -176,16 +176,19 @@ async function preflight() {
   if (convertedError) missing.push(`venue hold status 'converted' (065): ${convertedError.message}`);
 
   // 066: both functions refuse a caller with no profile as 42501 before they
-  // read anything else; PGRST202 means the function is missing.
+  // read anything else; PGRST202 means the function is missing. The period
+  // shown is passed so a database without 057's approval answers PGRST202.
   const { error: decideError } = await supabase.rpc('decide_booking_request', {
     p_booking_id: randomUUID(),
     p_caller: randomUUID(),
     p_decision: 'approve',
     p_reason: null,
     p_suggested_alternative: null,
+    p_expected_starts_at: at(0),
+    p_expected_ends_at: at(1),
   });
   if (decideError?.code !== '42501') {
-    missing.push(`decide_booking_request (066): expected 42501, got ${decideError?.code ?? 'no error'} ${decideError?.message ?? ''}`.trim());
+    missing.push(`decide_booking_request (057): expected 42501, got ${decideError?.code ?? 'no error'} ${decideError?.message ?? ''}`.trim());
   }
 
   const { error: queueError } = await supabase.rpc('list_pending_booking_requests', { p_caller: randomUUID() });
@@ -253,6 +256,12 @@ async function request(eventId, venueId, userId) {
   bookingIds.add(booking.id);
   return booking;
 }
+
+/**
+ * The period Venue Staff are shown when approving (SCRUM-593). No event here
+ * moves after its request, so the request's own period is the event's.
+ */
+const shown = (booking) => ({ expectedStartsAt: booking.startsAt, expectedEndsAt: booking.endsAt });
 
 /** Track bookings a race may have created, whichever call won. */
 async function trackBookingsOf(eventId) {
@@ -690,8 +699,8 @@ async function main() {
     const y = await request(eventY, venueId, coordB);
 
     const results = await startTogether([
-      () => approveBookingRequest(x.id, users.staff1),
-      () => approveBookingRequest(y.id, users.staff2),
+      () => approveBookingRequest(x.id, users.staff1, shown(x)),
+      () => approveBookingRequest(y.id, users.staff2, shown(y)),
     ]);
 
     const wins = fulfilled(results);
@@ -750,9 +759,9 @@ async function main() {
       label: 'an approval and a rejection',
       tag: 'race5a',
       offset: 1800,
-      decisions: (id) => [
+      decisions: (id, period) => [
         { by: users.staff1, status: 'approved', reason: null, alternative: null,
-          run: () => approveBookingRequest(id, users.staff1) },
+          run: () => approveBookingRequest(id, users.staff1, period) },
         { by: users.staff2, status: 'rejected', reason: REASON, alternative: ALTERNATIVE,
           run: () => rejectBookingRequest(id, users.staff2, { reason: REASON, suggestedAlternative: ALTERNATIVE }) },
       ],
@@ -761,11 +770,11 @@ async function main() {
       label: 'two approvals',
       tag: 'race5b',
       offset: 2000,
-      decisions: (id) => [
+      decisions: (id, period) => [
         { by: users.staff1, status: 'approved', reason: null, alternative: null,
-          run: () => approveBookingRequest(id, users.staff1) },
+          run: () => approveBookingRequest(id, users.staff1, period) },
         { by: users.staff2, status: 'approved', reason: null, alternative: null,
-          run: () => approveBookingRequest(id, users.staff2) },
+          run: () => approveBookingRequest(id, users.staff2, period) },
       ],
     },
   ];
@@ -778,7 +787,7 @@ async function main() {
       const eventId = await makeEvent(`${race.tag}_${round}`, coordA, at(base + 9), at(base + 17));
       const booking = await request(eventId, await makeVenue(`${race.tag}_${round}`), coordA);
 
-      const decisions = race.decisions(booking.id);
+      const decisions = race.decisions(booking.id, shown(booking));
       const results = await startTogether(decisions.map((d) => d.run));
       const winIndex = results.findIndex((r) => r.status === 'fulfilled');
       const losses = rejected(results);
@@ -816,7 +825,7 @@ async function main() {
     const booking = await request(eventId, await makeVenue(`race6_${round}`), coordA);
 
     const [approveResult, withdrawResult] = await startTogether([
-      () => approveBookingRequest(booking.id, users.staff1),
+      () => approveBookingRequest(booking.id, users.staff1, shown(booking)),
       () => withdrawBookingRequest(booking.id, coordA),
     ]);
 
@@ -867,7 +876,7 @@ async function main() {
       }
 
       const [approveResult, blockResult] = await startTogether([
-        () => approveBookingRequest(booking.id, users.staff1),
+        () => approveBookingRequest(booking.id, users.staff1, shown(booking)),
         () => createVenueBlock(venueId, blockInput, users.staff2),
       ]);
 

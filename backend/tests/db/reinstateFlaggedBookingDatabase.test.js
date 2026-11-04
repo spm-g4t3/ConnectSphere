@@ -3,8 +3,8 @@
  * in a real Postgres.
  *
  * SCRUM-266 AC2 and AC5 at the SQL level: a flagged booking goes back to
- * approved only while it still covers the event's period and nothing else
- * occupies its padded period, a safety flag is never reinstated, and every
+ * approved only while nothing else occupies its padded period (SCRUM-593: at
+ * the event's current period once the event has moved off it), a safety flag is never reinstated, and every
  * reinstatement leaves a booking_resolutions row with a snapshot of the flag
  * it cleared. Week 7: each booking of an event is resolved on its own.
  *
@@ -19,7 +19,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createSchemaDb, returnToLeadQueue, seedBooking, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
 import { queriesFor, refusal } from './helpers/queries.js';
-import { approveBooking, decideBooking } from './helpers/bookingFlow.js';
+import { approveBooking, decideBooking, reinstateBooking } from './helpers/bookingFlow.js';
 import { blockFlagging, flagForReason, flaggedByBlock } from './helpers/flaggedBookings.js';
 import { clientsCanExecute } from './helpers/grants.js';
 import { at } from '../fixtures/time.js';
@@ -48,6 +48,7 @@ describe('SCRUM-266 AC2 and AC5: reinstating a flagged booking', () => {
       organiser_id: organiser,
       assigned_coordinator_id: coordinator,
       event_name: `Event ${counter}`,
+      purpose: 'Workshop',
       proposed_start: start,
       proposed_end: end,
       expected_attendance: 150,
@@ -69,10 +70,8 @@ describe('SCRUM-266 AC2 and AC5: reinstating a flagged booking', () => {
   const flagged = async ({ venueId, eventId } = {}) =>
     flaggedByBlock(db, { venueId: venueId ?? (await makeVenue()), eventId: eventId ?? (await makeEvent()), caller: staff });
 
-  const reinstate = async (bookingId, { caller = staff, reason = 'Block moved' } = {}) =>
-    (
-      await one('select reinstate_flagged_booking($1, $2, $3) as result', [bookingId, caller, reason])
-    ).result;
+  const reinstate = (bookingId, { caller = staff, reason = 'Block moved', expected, suitability } = {}) =>
+    reinstateBooking(db, bookingId, { caller, reason, expected, suitability });
 
   const bookingRow = (id) => one('select * from bookings where id = $1', [id]);
   const resolutionsFor = (id) => rows('select * from booking_resolutions where booking_id = $1', [id]);
@@ -177,32 +176,11 @@ describe('SCRUM-266 AC2 and AC5: reinstating a flagged booking', () => {
       expect((await reinstate(id)).outcome).toBe('reinstated');
     });
 
-    it('SCRUM266_AC2_a_booking_no_longer_covering_the_moved_event_period_is_stale', async () => {
-      const { id, eventId } = await flagged();
-      await db.query(
-        'update event_requests set proposed_start = $2, proposed_end = $3 where id = $1',
-        [eventId, at('18:00'), at('20:00')],
-      );
-
-      await expectRefused(id, 'BOOKING_PERIOD_STALE');
-    });
-
     it('SCRUM266_AC2_an_event_with_no_period_is_covered_by_nothing', async () => {
       const { id, eventId } = await flagged();
       await db.query('update event_requests set proposed_start = null, proposed_end = null where id = $1', [eventId]);
 
       await expectRefused(id, 'BOOKING_PERIOD_STALE');
-    });
-
-    it('SCRUM266_AC2_a_booking_that_covers_a_shortened_event_period_can_be_reinstated', async () => {
-      const { id, eventId, blockId } = await flagged();
-      await db.query('update venue_blocks set removed_at = now() where id = $1', [blockId]);
-      await db.query(
-        'update event_requests set proposed_start = $2, proposed_end = $3 where id = $1',
-        [eventId, at('14:30'), at('15:30')],
-      );
-
-      expect((await reinstate(id)).outcome).toBe('reinstated');
     });
 
     it('SCRUM266_AC2_a_safety_review_flag_cannot_be_reinstated', async () => {
@@ -335,7 +313,7 @@ describe('SCRUM-266 AC2 and AC5: reinstating a flagged booking', () => {
     });
 
     it('SCRUM266_AC2_the_function_is_not_granted_to_anon_or_authenticated', async () => {
-      expect(await clientsCanExecute(db, 'reinstate_flagged_booking(uuid, uuid, text)')).toEqual([]);
+      expect(await clientsCanExecute(db, 'reinstate_flagged_booking(uuid, uuid, text, timestamptz, timestamptz, jsonb)')).toEqual([]);
     });
   });
 
@@ -550,6 +528,8 @@ describe('SCRUM-266 AC2 and AC5: reinstating a flagged booking', () => {
             venueName: venue.name,
             startsAt: expect.any(String),
             endsAt: expect.any(String),
+            previousStartsAt: null,
+            previousEndsAt: null,
             reason: 'The block was moved',
             resolvedAt: expect.any(String),
             resolvedByRole: 'venue_staff',
@@ -667,15 +647,22 @@ describe('SCRUM-266 AC2 and AC5: reinstating a flagged booking', () => {
       expect(await resolutionsFor(id)).toEqual([]);
     });
 
-    it('SCRUM266_AC2_a_block_shortened_after_the_event_moved_off_the_booking_is_stale', async () => {
+    it('SCRUM593_AC2_a_block_shortened_off_the_booking_but_over_the_events_new_period_is_a_conflict', async () => {
       const { id, venueId, eventId, blockId } = await flaggedBy('15:00', '18:00');
       await amendBlock(venueId, blockId, { start: at('17:00') });
+      // The new period is occupied 17:30-20:45, which the 17:00-18:00 block meets.
       await db.query(
         'update event_requests set proposed_start = $2, proposed_end = $3 where id = $1',
         [eventId, at('18:00'), at('20:00')],
       );
+      const before = await bookingRow(id);
 
-      await expectRefused(id, 'BOOKING_PERIOD_STALE');
+      const result = await reinstate(id);
+
+      expect(result.outcome).toBe('conflict');
+      expect(result.conflicts.map((c) => [c.kind, c.block_id])).toEqual([['block', blockId]]);
+      expect(await bookingRow(id)).toEqual(before);
+      expect(await resolutionsFor(id)).toEqual([]);
     });
   });
 
@@ -815,6 +802,277 @@ describe('SCRUM-266 AC2 and AC5: reinstating a flagged booking', () => {
       expect((await reinstate(a.id)).outcome).toBe('conflict');
       expect((await reinstate(b.id)).outcome).toBe('reinstated');
       expect((await bookingRow(a.id)).status).toBe('flagged_for_review');
+    });
+  });
+
+  describe('SCRUM-593: reinstating a booking whose event has moved', () => {
+    /** Moves the event as its coordinator does, to 18:00-20:00 on D. */
+    const moveEvent = (eventId) =>
+      db.query('select apply_significant_event_change($1, $2::jsonb, $3, $4)', [
+        eventId,
+        JSON.stringify({ proposedStart: at('18:00'), proposedEnd: at('20:00') }),
+        'Rescheduled',
+        coordinator,
+      ]);
+
+    /** A 14:00-16:00 approved booking, flagged by its event's move to 18:00-20:00. */
+    async function flaggedByMove(venueId) {
+      const eventId = await makeEvent();
+      const id = await approved(venueId, eventId);
+      await moveEvent(eventId);
+      expect(await bookingRow(id)).toMatchObject({ status: 'flagged_for_review', review_reason: 'event_changed' });
+      return { id, eventId };
+    }
+
+    it('SCRUM593_AC1_a_booking_whose_event_moved_is_approved_at_the_new_period', async () => {
+      const venue = await makeVenue();
+      const { id } = await flaggedByMove(venue);
+
+      const result = await reinstate(id, { reason: 'Free at the new time' });
+
+      expect(result.outcome).toBe('reinstated');
+      const row = await bookingRow(id);
+      expect(row).toMatchObject({
+        status: 'approved',
+        starts_at: new Date(at('18:00')),
+        ends_at: new Date(at('20:00')),
+        flagged_at: null,
+        flagged_by: null,
+        review_reason: null,
+        flag_reason: null,
+      });
+      expect(await resolutionsFor(id)).toEqual([
+        expect.objectContaining({
+          outcome: 'reinstated',
+          review_reason: 'event_changed',
+          previous_starts_at: new Date(at('14:00')),
+          previous_ends_at: new Date(at('16:00')),
+        }),
+      ]);
+      expect(new Date(result.booking.starts_at)).toEqual(new Date(at('18:00')));
+      expect(new Date(result.resolution.previous_starts_at)).toEqual(new Date(at('14:00')));
+    });
+
+    it('SCRUM593_AC1_a_period_other_than_the_one_reinstating_would_book_is_refused_and_nothing_is_written', async () => {
+      const { id } = await flaggedByMove(await makeVenue());
+      const before = await bookingRow(id);
+
+      // Venue Staff were shown the booking's own period, before the event moved.
+      const err = await refusal(reinstate(id, { expected: [at('14:00'), at('16:00')] }));
+
+      expect(err?.code).toBe('PT409');
+      expect(err?.hint).toBe('BOOKING_PERIOD_CHANGED');
+      expect(await bookingRow(id)).toEqual(before);
+      expect(await resolutionsFor(id)).toEqual([]);
+    });
+
+    it('SCRUM593_AC1_reinstating_without_the_period_shown_is_refused', async () => {
+      const { id } = await flaggedByMove(await makeVenue());
+      const before = await bookingRow(id);
+
+      expect((await refusal(reinstate(id, { expected: null })))?.code).toBe('22023');
+      expect(await bookingRow(id)).toEqual(before);
+      expect(await resolutionsFor(id)).toEqual([]);
+    });
+
+    const CLOSED = {
+      suitable: false,
+      criteria: [{ criterion: 'Operating hours', met: false, detail: 'Closes 18:00' }],
+      checked: { startsAt: at('18:00'), endsAt: at('20:00') },
+    };
+
+    it('SCRUM593_AC1_a_move_records_the_suitability_at_the_new_period_beside_the_request_time_record', async () => {
+      const { id } = await flaggedByMove(await makeVenue());
+      // The coordinator confirmed an unsuitable venue at the old period.
+      const stored = { suitable: false, criteria: [{ criterion: 'Capacity', met: false }] };
+      await db.query(
+        `update bookings set suitability_result = $2::jsonb, suitability_overridden = true where id = $1`,
+        [id, JSON.stringify(stored)],
+      );
+
+      const result = await reinstate(id, { suitability: CLOSED });
+
+      expect(result.outcome).toBe('reinstated');
+      const recorded = { suitability_result: stored, suitability_overridden: true, approval_suitability_result: CLOSED };
+      expect(await bookingRow(id)).toMatchObject({ status: 'approved', ...recorded });
+      expect(result.booking).toMatchObject(recorded);
+    });
+
+    it('SCRUM593_AC2_another_events_booking_over_the_padded_new_period_is_a_conflict', async () => {
+      const venue = await makeVenue();
+      const { id } = await flaggedByMove(venue);
+      // Raw 20:30-21:30 misses 18:00-20:00; occupied 20:00-22:15 meets 17:30-20:45.
+      const otherId = await approved(venue, await makeEvent({ start: at('20:30'), end: at('21:30') }));
+      const before = await bookingRow(id);
+
+      const result = await reinstate(id);
+
+      expect(result.outcome).toBe('conflict');
+      expect(result.conflicts.map((c) => [c.kind, c.booking_id])).toEqual([['booking', otherId]]);
+      expect(await bookingRow(id)).toEqual(before);
+      expect(await resolutionsFor(id)).toEqual([]);
+    });
+
+    it('SCRUM593_AC3_a_booking_that_still_covers_its_event_keeps_its_own_period', async () => {
+      const { id, eventId, blockId } = await flagged();
+      await db.query('update venue_blocks set removed_at = now() where id = $1', [blockId]);
+      await db.query(
+        'update event_requests set proposed_start = $2, proposed_end = $3 where id = $1',
+        [eventId, at('14:30'), at('15:30')],
+      );
+
+      expect((await reinstate(id)).outcome).toBe('reinstated');
+
+      expect(await bookingRow(id)).toMatchObject({
+        status: 'approved',
+        starts_at: new Date(at('14:00')),
+        ends_at: new Date(at('16:00')),
+      });
+      expect(await resolutionsFor(id)).toEqual([
+        expect.objectContaining({ previous_starts_at: null, previous_ends_at: null }),
+      ]);
+    });
+
+    it('SCRUM593_AC3_a_booking_that_keeps_its_own_period_keeps_its_stored_suitability', async () => {
+      const { id, eventId, blockId } = await flagged();
+      await db.query('update venue_blocks set removed_at = now() where id = $1', [blockId]);
+      await db.query(
+        'update event_requests set proposed_start = $2, proposed_end = $3 where id = $1',
+        [eventId, at('14:30'), at('15:30')],
+      );
+      const stored = { suitable: false, criteria: [{ criterion: 'Capacity', met: false }] };
+      await db.query(
+        `update bookings set suitability_result = $2::jsonb, suitability_overridden = true where id = $1`,
+        [id, JSON.stringify(stored)],
+      );
+
+      await reinstate(id, { suitability: { suitable: true, criteria: [] } });
+
+      expect(await bookingRow(id)).toMatchObject({
+        status: 'approved',
+        suitability_result: stored,
+        suitability_overridden: true,
+        approval_suitability_result: null,
+      });
+    });
+
+    it('SCRUM593_AC4_a_block_flagged_booking_whose_event_moved_off_the_block_is_approved_at_the_new_period', async () => {
+      // The 15:00-17:00 block stays; the new period is occupied from 17:30.
+      const { id, eventId, blockId } = await flagged();
+      await moveEvent(eventId);
+
+      expect((await reinstate(id)).outcome).toBe('reinstated');
+
+      expect(await bookingRow(id)).toMatchObject({
+        status: 'approved',
+        starts_at: new Date(at('18:00')),
+        ends_at: new Date(at('20:00')),
+        review_block_id: null,
+      });
+      expect(await resolutionsFor(id)).toEqual([
+        expect.objectContaining({ review_block_id: blockId, previous_starts_at: new Date(at('14:00')) }),
+      ]);
+    });
+
+    it('SCRUM593_AC5_a_safety_flag_is_refused_even_after_the_event_moved', async () => {
+      const venue = await makeVenue();
+      const eventId = await makeEvent();
+      const id = await approved(venue, eventId);
+      await flagForReason(db, id, { reason: 'safety_review', flaggedBy: staff });
+      await db.query(
+        'update event_requests set proposed_start = $2, proposed_end = $3 where id = $1',
+        [eventId, at('18:00'), at('20:00')],
+      );
+
+      await expectRefused(id, 'SAFETY_FLAG_NOT_REINSTATABLE');
+    });
+
+    it('SCRUM593_AC8_the_resolution_notice_carries_the_new_period', async () => {
+      const { id } = await flaggedByMove(await makeVenue());
+
+      await reinstate(id);
+
+      const [notice] = await rows(
+        `select payload from notifications where booking_id = $1 and type = 'flagged_booking_resolved'`,
+        [id],
+      );
+      expect(new Date(notice.payload.startsAt)).toEqual(new Date(at('18:00')));
+      expect(new Date(notice.payload.endsAt)).toEqual(new Date(at('20:00')));
+    });
+
+    it('SCRUM593_AC8_the_resolution_notice_names_the_period_it_moved_from_only_when_it_moved', async () => {
+      const { id: moved } = await flaggedByMove(await makeVenue());
+      const { id: kept, blockId } = await flagged();
+      await db.query('update venue_blocks set removed_at = now() where id = $1', [blockId]);
+
+      await reinstate(moved);
+      await reinstate(kept);
+
+      const payloadOf = async (bookingId) =>
+        (
+          await one(
+            `select payload from notifications where booking_id = $1 and type = 'flagged_booking_resolved'`,
+            [bookingId],
+          )
+        ).payload;
+      const movedPayload = await payloadOf(moved);
+      expect(new Date(movedPayload.previousStartsAt)).toEqual(new Date(at('14:00')));
+      expect(new Date(movedPayload.previousEndsAt)).toEqual(new Date(at('16:00')));
+      expect(await payloadOf(kept)).toMatchObject({ previousStartsAt: null, previousEndsAt: null });
+    });
+
+    /** The notices of one type about one booking. */
+    const noticesOfType = (bookingId, type) =>
+      rows('select recipient_id, payload from notifications where booking_id = $1 and type = $2', [bookingId, type]);
+
+    it('SCRUM593_AC1_a_request_that_clashed_only_with_the_old_period_returns_to_pending', async () => {
+      const venue = await makeVenue();
+      // B asked for 14:00-16:00 first; approving A there marked it conflicting.
+      const waiting = await insertBooking(await makeEvent(), venue);
+      const { id } = await flaggedByMove(venue);
+      expect((await bookingRow(waiting)).status).toBe('conflicting');
+
+      const result = await reinstate(id);
+
+      expect(result.returned_to_pending).toEqual([waiting]);
+      expect((await bookingRow(waiting)).status).toBe('pending');
+      const notices = await noticesOfType(waiting, 'booking_request_conflict_cleared');
+      expect(notices).toEqual([
+        { recipient_id: coordinator, payload: expect.objectContaining({ releasedBookingId: id }) },
+      ]);
+    });
+
+    it('SCRUM593_AC1_a_freed_request_is_rechecked_at_its_own_events_period', async () => {
+      const venue = await makeVenue();
+      // C stores 22:00-23:00, where another booking sits, but its event moved to
+      // 14:00-16:00, which only A's old period blocks.
+      await approved(venue, await makeEvent({ start: at('22:00'), end: at('23:00') }));
+      const waiting = await seedBooking(db, {
+        venueId: venue,
+        eventId: await makeEvent(),
+        status: 'conflicting',
+        start: at('22:00'),
+        end: at('23:00'),
+      });
+      const { id } = await flaggedByMove(venue);
+
+      expect((await reinstate(id)).returned_to_pending).toEqual([waiting]);
+      expect((await bookingRow(waiting)).status).toBe('pending');
+    });
+
+    it('SCRUM593_AC1_a_pending_request_over_the_new_period_is_marked_conflicting', async () => {
+      const venue = await makeVenue();
+      const waiting = await insertBooking(await makeEvent({ start: at('18:00'), end: at('20:00') }), venue);
+      const { id, eventId } = await flaggedByMove(venue);
+
+      const result = await reinstate(id);
+
+      expect(result.marked_conflicting).toEqual([waiting]);
+      expect((await bookingRow(waiting)).status).toBe('conflicting');
+      const [notice] = await noticesOfType(waiting, 'booking_request_conflicting');
+      expect(notice.recipient_id).toBe(coordinator);
+      expect(notice.payload).toMatchObject({ approvedBookingId: id, approvedEventRequestId: eventId });
+      expect(new Date(notice.payload.approvedStartsAt)).toEqual(new Date(at('18:00')));
     });
   });
 

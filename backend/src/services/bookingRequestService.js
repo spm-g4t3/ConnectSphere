@@ -46,7 +46,7 @@
  * config/resolveClient.js, so it can be tested without credentials.
  */
 
-import { ValidationError, ConflictError, ForbiddenError } from '../errors.js';
+import { AppError, ValidationError, ConflictError, ForbiddenError } from '../errors.js';
 import { resolveClient } from '../config/resolveClient.js';
 import {
   createPgTranslator,
@@ -59,13 +59,14 @@ import {
   hintConflict,
 } from '../http/pgErrors.js';
 import {
+  validateApproveBookingRequest,
   validateCreateBookingRequest,
   validateBookingRequestId,
   validateRejectBookingRequest,
   validateReleaseBooking,
 } from '../validation/bookingRequestValidation.js';
 import { getEventRequestForCoordinator } from './eventRequestService.js';
-import { checkVenueSuitability } from './venueSuitabilityService.js';
+import { checkVenueSuitability, storedCodes } from './venueSuitabilityService.js';
 import { STATUS } from '../domain/eventRequestStatus.js';
 import { BOOKING_STATUS, getBookingStatusDisplay } from '../domain/bookingStatus.js';
 import { toSuitabilityRecord } from '../domain/suitabilityRecord.js';
@@ -293,6 +294,107 @@ function checkedSuitability(result) {
     suitability.checked = result.checked;
   }
   return suitability;
+}
+
+/** Both ends equal as instants, whatever offset each is written in. */
+function samePeriod(startsAt, endsAt, period) {
+  return (
+    startsAt != null &&
+    endsAt != null &&
+    new Date(startsAt).getTime() === new Date(period.startsAt).getTime() &&
+    new Date(endsAt).getTime() === new Date(period.endsAt).getTime()
+  );
+}
+
+/**
+ * SCRUM-593: the suitability of a booking at its event's current period, the
+ * one an approval moves it to, in the shape create_booking_request stores.
+ * Judged by the same checker, with the booking's layout, its own attendance
+ * (else the event's) and the codes stored with its result. The checker leaves
+ * out the event's own bookings and holds, as the approvals' re-checks do, so
+ * the booking being approved never makes its venue look taken. Advisory: an
+ * unsuitable answer is recorded, never refused.
+ *
+ * @param {object} row  a bookings row, snake_case: event_request_id, venue_id,
+ *                      room_layout_code, expected_attendance, suitability_result
+ * @param {object} options
+ * @param {Function} [options.checkSuitability]
+ * @param {object} options.client  a resolved client
+ * @throws whatever the checker throws
+ */
+async function suitabilityAtEventPeriod(row, { checkSuitability = checkVenueSuitability, client }) {
+  const { accessibility, facilities } = storedCodes(row.suitability_result);
+  return checkedSuitability(
+    await checkSuitability({
+      eventRequestId: row.event_request_id,
+      venueId: row.venue_id,
+      roomLayoutCode: row.room_layout_code ?? null,
+      accessibility,
+      facilities,
+      expectedAttendance: row.expected_attendance ?? null,
+      client,
+    }),
+  );
+}
+
+/**
+ * SCRUM-593, for the Venue Staff lists: suitabilityAtEventPeriod for an item
+ * an approval would move, else null. A check that fails gives that item null
+ * and the list still loads; an unanticipated failure is logged.
+ *
+ * @param {object} row       see suitabilityAtEventPeriod
+ * @param {boolean} moves    whether an approval would move it
+ * @param {object} options   see suitabilityAtEventPeriod
+ * @returns {Promise<object|null>}
+ */
+export async function suitabilityAtNewTimes(row, moves, options) {
+  if (!moves) return null;
+  try {
+    return await suitabilityAtEventPeriod(row, options);
+  } catch (err) {
+    if (!(err instanceof AppError)) {
+      console.error(`Suitability of booking ${row.id} at its event's new times failed:`, err);
+    }
+    return null;
+  }
+}
+
+/** What an approval reads to judge a booking at its event's new period. */
+const APPROVAL_COLUMNS =
+  'id, event_request_id, venue_id, starts_at, ends_at, room_layout_code, expected_attendance, ' +
+  'suitability_result, event_requests(proposed_start, proposed_end)';
+
+/**
+ * SCRUM-593: the suitability result an approval records, or null when it
+ * records none. Judged only when the period shown moves the booking off its
+ * own times onto its event's current ones; anything else (no such booking, a
+ * period that is no longer the event's) the function refuses before using it.
+ * A checker failure propagates, as it does when a request is created.
+ *
+ * @param {object} db      a resolved client
+ * @param {string} bookingId
+ * @param {{startsAt: string, endsAt: string}} period  the period shown
+ * @param {object} options
+ * @param {Function} [options.checkSuitability]
+ * @returns {Promise<object|null>}
+ */
+export async function suitabilityForApproval(db, bookingId, period, { checkSuitability } = {}) {
+  const { data: row, error } = await db
+    .from('bookings')
+    .select(APPROVAL_COLUMNS)
+    .eq('id', bookingId)
+    .maybeSingle();
+  if (error) throw translateError(error);
+
+  const event = one(row?.event_requests);
+  if (
+    !row ||
+    samePeriod(row.starts_at, row.ends_at, period) ||
+    !samePeriod(event?.proposed_start, event?.proposed_end, period)
+  ) {
+    return null;
+  }
+  return suitabilityAtEventPeriod(row, { checkSuitability, client: db });
 }
 
 /**
@@ -567,7 +669,7 @@ function toOverlappingRequest(entry) {
 }
 
 /**
- * One booking a conflicting request clashes with now, in camelCase.
+ * One booking a request would clash with if approved now, in camelCase.
  *
  * @param {object} entry  from list_pending_booking_requests' `conflicting_with`
  */
@@ -584,8 +686,9 @@ function toConflictingBooking(entry) {
 }
 
 /**
- * The flagged booking a request would replace, or null when it replaces none
- * or that booking is no longer flagged (078).
+ * The booking a request would replace, or null when it replaces none or that
+ * booking was cancelled. `status` is flagged_for_review, or approved once it
+ * was reinstated (approving the request then leaves it alone).
  *
  * @param {object|null} [entry]  list_pending_booking_requests' `replaces`
  */
@@ -593,6 +696,7 @@ function toReplacedBooking(entry) {
   if (!entry) return null;
   return {
     bookingId: entry.booking_id,
+    status: entry.status ?? null,
     venueName: entry.venue_name ?? null,
     startsAt: entry.starts_at,
     endsAt: entry.ends_at,
@@ -621,6 +725,10 @@ function toPendingBookingRequest(row) {
     statusDisplay: getBookingStatusDisplay(status),
     startsAt: row.starts_at,
     endsAt: row.ends_at,
+    // The period an approval books; it differs from startsAt/endsAt once the
+    // event has moved, and the occupied period and clashes are judged on it.
+    eventStartsAt: row.event_starts_at ?? null,
+    eventEndsAt: row.event_ends_at ?? null,
     occupiedStartsAt: row.occupied_starts_at ?? null,
     occupiedEndsAt: row.occupied_ends_at ?? null,
     expectedAttendance: row.expected_attendance ?? null,
@@ -638,6 +746,15 @@ function toPendingBookingRequest(row) {
   };
 }
 
+/** Whether approving the request moves it: its event's period is not its own. */
+function movesOnApproval(row) {
+  return (
+    row.event_starts_at != null &&
+    row.event_ends_at != null &&
+    !samePeriod(row.starts_at, row.ends_at, { startsAt: row.event_starts_at, endsAt: row.event_ends_at })
+  );
+}
+
 /**
  * The pending booking requests Venue Staff decide on (SCRUM-259, SCRUM-258 AC1).
  *
@@ -649,14 +766,19 @@ function toPendingBookingRequest(row) {
  * (42501, a ForbiddenError) and pads periods with venue_occupied_period(), so
  * the formula is not repeated here.
  *
+ * SCRUM-593: each item also carries suitabilityAtNewTimes, the suitability at
+ * the event's current period when an approval would move the request there
+ * (see suitabilityAtNewTimes), else null.
+ *
  * @param {string} callerId  from the JWT -- never the client
  * @param {object} [options]
  * @param {object} [options.client]
+ * @param {Function} [options.checkSuitability]  the N10 check
  * @returns {Promise<object[]>} possibly empty, in camelCase
  * @throws {ValidationError} when no caller was supplied, before any round trip
  * @throws {ForbiddenError}  the caller is not Venue Staff
  */
-export async function listPendingBookingRequests(callerId, { client } = {}) {
+export async function listPendingBookingRequests(callerId, { client, checkSuitability } = {}) {
   checkCaller(callerId);
 
   const db = await resolveClient(client);
@@ -665,7 +787,15 @@ export async function listPendingBookingRequests(callerId, { client } = {}) {
 
   if (error) throw translateError(error);
 
-  return (Array.isArray(data) ? data : []).map(toPendingBookingRequest);
+  return Promise.all(
+    (Array.isArray(data) ? data : []).map(async (row) => ({
+      ...toPendingBookingRequest(row),
+      suitabilityAtNewTimes: await suitabilityAtNewTimes(row, movesOnApproval(row), {
+        checkSuitability,
+        client: db,
+      }),
+    })),
+  );
 }
 
 /**
@@ -748,9 +878,12 @@ async function decideBookingRequest(
   bookingId,
   callerId,
   decision,
-  { reason = null, suggestedAlternative = null, client } = {},
+  { reason = null, suggestedAlternative = null, period = null, checkSuitability, client } = {},
 ) {
   const db = await resolveClient(client);
+
+  const suitability =
+    decision === 'approve' ? await suitabilityForApproval(db, bookingId, period, { checkSuitability }) : null;
 
   const { data, error } = await db.rpc('decide_booking_request', {
     p_booking_id: bookingId,
@@ -758,6 +891,9 @@ async function decideBookingRequest(
     p_decision: decision,
     p_reason: reason,
     p_suggested_alternative: suggestedAlternative,
+    p_expected_starts_at: period?.startsAt ?? null,
+    p_expected_ends_at: period?.endsAt ?? null,
+    p_suitability: suitability,
   });
 
   if (error) throw translateError(error);
@@ -804,9 +940,9 @@ function checkCaller(callerId) {
  * Approve a pending booking request (SCRUM-260, SCRUM-258 AC2, AC3, AC5).
  *
  * Under its locks, decide_booking_request re-checks that the event is still
- * approved, in the safety check or confirmed, that the request is for the
- * event's current period, and that its occupied period meets no occupying
- * booking, block or other event's active hold. Two approvals at one venue take
+ * approved, in the safety check or confirmed, and that the event's current
+ * period, occupied, meets no occupying booking, block or other event's active
+ * hold. A request raised before the event moved is approved at that period. Two approvals at one venue take
  * turns on the venue lock, so only one of two overlapping requests can pass.
  * Only this request changes; the event's other bookings are untouched.
  *
@@ -819,28 +955,40 @@ function checkCaller(callerId) {
  * becomes converted (066), and its id comes back as `convertedHoldId`, or null
  * when there was none.
  *
+ * SCRUM-593: input names the period Venue Staff were shown (expectedStartsAt,
+ * expectedEndsAt); if the event has moved since, nothing is written and this
+ * throws BOOKING_PERIOD_CHANGED. An approval that moves the request records
+ * the suitability at the new period (suitabilityForApproval), unsuitable or
+ * not, as approval_suitability_result; the request-time result and override
+ * stay.
+ *
  * @param {string} bookingId  the request's id
  * @param {string} callerId   from the JWT -- never the body
+ * @param {object} input      see validateApproveBookingRequest
  * @param {object} [options]
  * @param {object} [options.client]
+ * @param {Function} [options.checkSuitability]  the N10 check
  * @returns {Promise<object>} the request, now approved, shaped by
  *                            toDecidedBookingRequest, plus markedConflicting
  *                            (ids, possibly empty) and convertedHoldId (an id
  *                            or null)
- * @throws {ValidationError} no caller, or a malformed id, before any round trip
+ * @throws {ValidationError} no caller, a malformed id, or a missing or
+ *                           malformed expected period, before any round trip
  * @throws {NotFoundError}   no such booking request
  * @throws {ForbiddenError}  the caller is not Venue Staff
  * @throws {ConflictError}   by code: BOOKING_NOT_PENDING, EVENT_NOT_BOOKABLE,
- *                           BOOKING_PERIOD_STALE (the event has moved since the
- *                           request), VENUE_RETIRED, BOOKING_PERIOD_CONFLICT
+ *                           BOOKING_PERIOD_STALE (the event has no period),
+ *                           BOOKING_PERIOD_CHANGED (not the period shown),
+ *                           VENUE_RETIRED, BOOKING_PERIOD_CONFLICT
  *                           (conflicts shaped by toPeriodConflict),
  *                           BOOKING_CHANGED
  */
-export async function approveBookingRequest(bookingId, callerId, { client } = {}) {
+export async function approveBookingRequest(bookingId, callerId, input, { client, checkSuitability } = {}) {
   checkCaller(callerId);
   const id = validateBookingRequestId(bookingId);
+  const period = validateApproveBookingRequest(input);
 
-  return decideBookingRequest(id, callerId, 'approve', { client });
+  return decideBookingRequest(id, callerId, 'approve', { period, checkSuitability, client });
 }
 
 /**

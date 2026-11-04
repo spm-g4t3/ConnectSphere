@@ -18,6 +18,8 @@
 //   suitability           {suitable, criteria, checked} | null
 //   suitabilityOverridden boolean
 //   overriddenCriteria    string[]
+//   label                 the verdict's label; a re-check at an event's new
+//                         times (SCRUM-593) names those times instead
 
 import VenueSuitabilityResult from "./VenueSuitabilityResult";
 
@@ -25,6 +27,7 @@ export default function BookingSuitabilitySummary({
   suitability,
   suitabilityOverridden,
   overriddenCriteria,
+  label = "Suitability when requested",
 }) {
   if (!suitability) {
     return (
@@ -43,7 +46,7 @@ export default function BookingSuitabilitySummary({
   return (
     <div className="booking-suitability">
       <p className="booking-suitability__verdict">
-        Suitability when requested:{" "}
+        {label}:{" "}
         <strong
           className={`booking-suitability__verdict-value booking-suitability__verdict-value--${suitable ? "met" : "unmet"}`}
         >

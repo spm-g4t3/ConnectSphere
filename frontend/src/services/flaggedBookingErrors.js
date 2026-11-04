@@ -16,7 +16,9 @@ const CODE_MESSAGES = {
   EVENT_NOT_BOOKABLE:
     "This event is no longer approved, in the safety check, or confirmed (it may have been cancelled), so its booking can't be reinstated. It can be cancelled.",
   BOOKING_PERIOD_STALE:
-    "The event's dates have changed, so this booking no longer covers the whole event and can't be reinstated. It can be cancelled, so the coordinator can request the venue for the new dates.",
+    "The event has no date and time set, so this booking can't be reinstated. It can be cancelled.",
+  BOOKING_PERIOD_CHANGED:
+    "The event's date or time changed since this list loaded. The list has been refreshed; check the new times, then try again.",
   VENUE_RETIRED: "This venue has been retired, so the booking can't be reinstated. It can be cancelled.",
   BOOKING_CHANGED:
     "This booking changed while you were resolving it. The list has been refreshed; please try again.",
@@ -56,7 +58,7 @@ export function resolutionErrorMessage(err) {
   const code = codeOf(err);
   if (code === CONFLICT_CODE) {
     const inTheWay = inTheWayText(resolutionConflicts(err), conflictText);
-    return `The venue is no longer free for this booking's period, setup and turnaround included, so it can't be reinstated.${inTheWay}`;
+    return `The venue is no longer free for this booking's period, or for the event's new times if it has moved, setup and turnaround included, so it can't be reinstated.${inTheWay}`;
   }
   if (code && Object.hasOwn(CODE_MESSAGES, code)) return CODE_MESSAGES[code];
 
@@ -68,15 +70,20 @@ export function resolutionErrorMessage(err) {
 
 /**
  * Whether a failed resolution means the list on screen is out of date, so the
- * caller should refetch: the booking is gone (404), no longer flagged, or
- * changed under the call.
+ * caller should refetch: the booking is gone (404), no longer flagged, or it
+ * or its event's times changed under the call.
  *
  * @param {unknown} err
  * @returns {boolean}
  */
 export function isStaleResolutionError(err) {
   const code = codeOf(err);
-  return err?.response?.status === 404 || code === "BOOKING_NOT_FLAGGED" || code === "BOOKING_CHANGED";
+  return (
+    err?.response?.status === 404 ||
+    code === "BOOKING_NOT_FLAGGED" ||
+    code === "BOOKING_CHANGED" ||
+    code === "BOOKING_PERIOD_CHANGED"
+  );
 }
 
 // The coordinator's 403 names the coordinator, not Venue Staff; every other

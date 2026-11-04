@@ -76,13 +76,14 @@ describe("Venue Staff decisions (SCRUM-258)", () => {
     expect(apiClient.get).toHaveBeenCalledWith("/booking-requests/pending");
   });
 
-  it("SCRUM258_AC3_posts_to_the_approve_route_with_no_body_and_returns_the_result", async () => {
+  it("SCRUM593_AC11_posts_the_expected_period_to_the_approve_route_and_returns_the_result", async () => {
     const approved = { id: "b1", status: "approved", markedConflicting: ["b2"], convertedHoldId: null };
     vi.mocked(apiClient.post).mockResolvedValue({ data: approved });
+    const expected = { expectedStartsAt: "2026-12-03T10:00:00+08:00", expectedEndsAt: "2026-12-03T16:00:00+08:00" };
 
-    await expect(approveBookingRequest("b1")).resolves.toBe(approved);
+    await expect(approveBookingRequest("b1", expected)).resolves.toBe(approved);
 
-    expect(apiClient.post).toHaveBeenCalledWith("/booking-requests/b1/approve");
+    expect(apiClient.post).toHaveBeenCalledWith("/booking-requests/b1/approve", expected);
   });
 
   it("SCRUM258_AC4_posts_the_reason_and_alternative_to_the_reject_route", async () => {
@@ -111,6 +112,6 @@ describe("Venue Staff decisions (SCRUM-258)", () => {
     const failure = Object.assign(new Error("409"), { response: { status: 409, data: { code: "BOOKING_NOT_PENDING" } } });
     vi.mocked(apiClient.post).mockRejectedValue(failure);
 
-    await expect(approveBookingRequest("b1")).rejects.toBe(failure);
+    await expect(approveBookingRequest("b1", {})).rejects.toBe(failure);
   });
 });

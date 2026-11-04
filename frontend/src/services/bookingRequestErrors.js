@@ -240,7 +240,9 @@ const DECISION_CODE_MESSAGES = {
   BOOKING_CHANGED:
     "This request changed while you were deciding. The list has been refreshed; please try again.",
   BOOKING_PERIOD_STALE:
-    "The event's dates have changed since this request was made, so it can't be approved. The coordinator needs to request the venue again for the new dates.",
+    "The event has no date and time set, so this request can't be approved.",
+  BOOKING_PERIOD_CHANGED:
+    "The event's date or time changed since this list loaded. The list has been refreshed; check the new times, then approve again.",
   EVENT_NOT_BOOKABLE:
     "This event is no longer approved, in the safety check, or confirmed (it may have been cancelled), so its venue request can't be approved.",
   VENUE_RETIRED: "This venue has been retired, so the request can't be approved.",
@@ -294,7 +296,7 @@ export function decisionErrorMessage(err) {
   const code = codeOf(err);
   if (code === "BOOKING_PERIOD_CONFLICT") {
     const inTheWay = inTheWayText(periodConflicts(err), occupantText);
-    return `The venue is no longer free for this request's period, setup and turnaround included, so it can't be approved.${inTheWay}`;
+    return `The venue is no longer free at the event's current times, setup and turnaround included, so it can't be approved.${inTheWay}`;
   }
   if (code && Object.hasOwn(DECISION_CODE_MESSAGES, code)) return DECISION_CODE_MESSAGES[code];
 
@@ -307,12 +309,17 @@ export function decisionErrorMessage(err) {
 /**
  * Whether a failed decision means the queue on screen is out of date, so the
  * caller should refetch: the request is gone (404), already decided or
- * withdrawn, or changed under the call.
+ * withdrawn, or it or its event's times changed under the call.
  *
  * @param {unknown} err
  * @returns {boolean}
  */
 export function isStaleDecisionError(err) {
   const code = codeOf(err);
-  return err?.response?.status === 404 || code === "BOOKING_NOT_PENDING" || code === "BOOKING_CHANGED";
+  return (
+    err?.response?.status === 404 ||
+    code === "BOOKING_NOT_PENDING" ||
+    code === "BOOKING_CHANGED" ||
+    code === "BOOKING_PERIOD_CHANGED"
+  );
 }

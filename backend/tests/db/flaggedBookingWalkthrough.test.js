@@ -13,8 +13,8 @@
  * The adapter is the shared pgliteSupabaseClient (a jsonb-returning
  * function's value unwrapped, as supabase-js does, and Postgres's hint and
  * detail passed on), extended only as this path needs: the bookings(status)
- * embed needsAttention reads is answered with a subquery. Any other embed
- * still throws by name. The suitability check is stubbed suitable, as the route
+ * embed needsAttention reads, and the event's period an approval reads
+ * (SCRUM-593), are answered with subqueries. Any other embed still throws by name. The suitability check is stubbed suitable, as the route
  * tests stub it; it is N10's, not this story's.
  */
 
@@ -49,17 +49,27 @@ const RESERVATION_EMBED = (table) =>
 
 const RESERVATION_EMBED_TEXT = /\bequipment_reservations\(flagged, released_at, flag_reason, flag_code\)/;
 
+/** The event's period an approval reads with the booking (SCRUM-593). */
+const EVENT_PERIOD_EMBED_TEXT = /\bevent_requests\(proposed_start, proposed_end\)/;
+const EVENT_PERIOD_EMBED = (table) =>
+  `(select json_build_object('proposed_start', er.proposed_start, 'proposed_end', er.proposed_end)
+      from event_requests er where er.id = ${table}.event_request_id) as event_requests`;
+
 /** The shared adapter, answering the two embeds this path reads. */
 function pgliteClient(db) {
   return pgliteSupabaseClient(db, {
     columns(cols, table) {
-      const rest = cols.replace(/\bbookings\(status\)/, '').replace(RESERVATION_EMBED_TEXT, '');
+      const rest = cols
+        .replace(/\bbookings\(status\)/, '')
+        .replace(RESERVATION_EMBED_TEXT, '')
+        .replace(EVENT_PERIOD_EMBED_TEXT, '');
       if (/\w+\(/.test(rest)) {
         throw new Error(`pgliteClient: an embed in "${cols}" is not on this path`);
       }
       return cols
         .replace(/\bbookings\(status\)/, BOOKING_STATUS_EMBED(table))
-        .replace(RESERVATION_EMBED_TEXT, RESERVATION_EMBED(table));
+        .replace(RESERVATION_EMBED_TEXT, RESERVATION_EMBED(table))
+        .replace(EVENT_PERIOD_EMBED_TEXT, EVENT_PERIOD_EMBED(table));
     },
   });
 }
@@ -164,7 +174,7 @@ describe('SCRUM-266: resolving a flagged booking, over HTTP, on a real database'
     // AC2: the block still covers the occupied period (13:30-16:45).
     const refused = await request(asStaff())
       .post(`/api/flagged-bookings/${bookingId}/reinstate`)
-      .send({ reason: 'Block moved' });
+      .send({ reason: 'Block moved', expectedStartsAt: at('14:00'), expectedEndsAt: at('16:00') });
     expect(refused.status).toBe(409);
     expect(refused.body.code).toBe('BOOKING_PERIOD_CONFLICT');
     expect(refused.body.conflicts.map((c) => c.kind)).toEqual(['block']);
@@ -179,7 +189,7 @@ describe('SCRUM-266: resolving a flagged booking, over HTTP, on a real database'
 
     const reinstated = await request(asStaff())
       .post(`/api/flagged-bookings/${bookingId}/reinstate`)
-      .send({ reason: 'Maintenance now starts after the event' });
+      .send({ reason: 'Maintenance now starts after the event', expectedStartsAt: at('14:00'), expectedEndsAt: at('16:00') });
     expect(reinstated.status).toBe(200);
     expect(reinstated.body).toMatchObject({ id: bookingId, status: 'approved' });
     expect(reinstated.body.resolution).toMatchObject({
@@ -243,7 +253,9 @@ describe('SCRUM-266: resolving a flagged booking, over HTTP, on a real database'
     // Requesting alone resolves nothing; the flag stands until Venue Staff approve.
     expect((await one('select status from bookings where id = $1', [bookingId])).status).toBe('flagged_for_review');
 
-    const approved = await request(asStaff()).post(`/api/booking-requests/${requested.body.id}/approve`).send({});
+    const approved = await request(asStaff())
+      .post(`/api/booking-requests/${requested.body.id}/approve`)
+      .send({ expectedStartsAt: at('14:00'), expectedEndsAt: at('16:00') });
     expect(approved.status).toBe(200);
     expect(approved.body.status).toBe('approved');
 

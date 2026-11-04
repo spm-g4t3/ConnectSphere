@@ -4,8 +4,9 @@
  *
  * SCRUM-258 AC2-AC6 at the SQL level: the approval re-check of the padded
  * period under lock, the event-status gate (safety statuses allowed), the
- * stale-period check after a handover or reschedule, the recorded decision and
- * its check constraints, and the coordinator's notice. Week 7: each request is
+ * recorded decision and its check constraints, and the coordinator's notice.
+ * SCRUM-593: a request whose event has moved is approved, and checked, at the
+ * event's current period; a rejection never moves it. Week 7: each request is
  * decided on its own, and the event's own hold never blocks its approval.
  *
  * PGlite is one connection, so two approvals can never meet on a lock here.
@@ -51,6 +52,7 @@ describe('SCRUM-258 AC2-AC6: deciding a booking request', () => {
       organiser_id: organiser,
       assigned_coordinator_id: assignedTo,
       event_name: `Event ${counter}`,
+      purpose: 'Workshop',
       proposed_start: start,
       proposed_end: end,
       expected_attendance: 150,
@@ -67,8 +69,8 @@ describe('SCRUM-258 AC2-AC6: deciding a booking request', () => {
     return { id: await insertBooking(eventId, venueId), eventId };
   }
 
-  const decide = (bookingId, decision, { caller = staff, reason = null, alternative = null } = {}) =>
-    decideBooking(db, bookingId, { caller, decision, reason, alternative });
+  const decide = (bookingId, decision, { caller = staff, reason = null, alternative = null, expected, suitability } = {}) =>
+    decideBooking(db, bookingId, { caller, decision, reason, alternative, expected, suitability });
 
   const bookingRow = (id) => one('select * from bookings where id = $1', [id]);
   const noticesFor = (bookingId) => rows('select * from notifications where booking_id = $1', [bookingId]);
@@ -311,12 +313,9 @@ describe('SCRUM-258 AC2-AC6: deciding a booking request', () => {
       expect((await refusal(decide(id, 'approve')))?.hint).toBe('VENUE_RETIRED');
     });
 
-    it('SCRUM258_AC5_a_request_for_a_period_the_event_has_moved_from_is_stale', async () => {
+    it('SCRUM258_AC5_a_request_for_an_event_with_no_period_is_stale', async () => {
       const { id, eventId } = await pending(await makeVenue());
-      await db.query(
-        'update event_requests set proposed_start = $2, proposed_end = $3 where id = $1',
-        [eventId, at('18:00'), at('20:00')],
-      );
+      await db.query('update event_requests set proposed_start = null, proposed_end = null where id = $1', [eventId]);
 
       const err = await refusal(decide(id, 'approve'));
 
@@ -508,6 +507,205 @@ describe('SCRUM-258 AC2-AC6: deciding a booking request', () => {
 
       expect(err?.code).toBe('PT409');
       expect(err?.hint).toBe('EVENT_NOT_BOOKABLE');
+    });
+  });
+
+  describe('SCRUM-593: approving a request whose event has moved', () => {
+    /** Moves the event as its coordinator does, to 18:00-20:00 on D. */
+    const moveEvent = (eventId) =>
+      db.query('select apply_significant_event_change($1, $2::jsonb, $3, $4)', [
+        eventId,
+        JSON.stringify({ proposedStart: at('18:00'), proposedEnd: at('20:00') }),
+        'Rescheduled',
+        coordinator,
+      ]);
+
+    /** A 14:00-16:00 pending request whose event then moved to 18:00-20:00. */
+    async function movedRequest(venueId) {
+      const { id, eventId } = await pending(venueId);
+      await moveEvent(eventId);
+      expect(await bookingRow(id)).toMatchObject({ status: 'pending', starts_at: new Date(at('14:00')) });
+      return { id, eventId };
+    }
+
+    // The move itself tells Venue Staff about the request; only the decision's notice is wanted here.
+    const decisionNotices = (bookingId) =>
+      rows(
+        `select * from notifications
+          where booking_id = $1 and type in ('booking_request_approved', 'booking_request_rejected')`,
+        [bookingId],
+      );
+
+    it('SCRUM593_AC6_a_request_whose_event_moved_is_approved_at_the_new_period', async () => {
+      const venue = await makeVenue();
+      const { id } = await movedRequest(venue);
+      // Another event holds the old period, which no longer matters.
+      await insertBooking(await makeEvent(), venue, { status: 'approved' });
+
+      const result = await decide(id, 'approve');
+
+      expect(result.outcome).toBe('approved');
+      expect(await bookingRow(id)).toMatchObject({
+        status: 'approved',
+        starts_at: new Date(at('18:00')),
+        ends_at: new Date(at('20:00')),
+        decided_by: staff,
+      });
+      expect(new Date(result.booking.starts_at)).toEqual(new Date(at('18:00')));
+    });
+
+    it('SCRUM593_AC6_a_clash_at_the_new_period_is_a_conflict_and_the_request_is_unchanged', async () => {
+      const venue = await makeVenue();
+      const { id } = await movedRequest(venue);
+      // Raw 20:30-21:30 misses 18:00-20:00; occupied 20:00-22:15 meets 17:30-20:45.
+      const otherId = await insertBooking(await makeEvent({ start: at('20:30'), end: at('21:30') }), venue, {
+        status: 'approved',
+      });
+      const before = await bookingRow(id);
+
+      const result = await decide(id, 'approve');
+
+      expect(result.outcome).toBe('conflict');
+      expect(result.conflicts.map((c) => [c.kind, c.booking_id])).toEqual([['booking', otherId]]);
+      expect(await bookingRow(id)).toEqual(before);
+      expect(await decisionNotices(id)).toEqual([]);
+    });
+
+    it('SCRUM593_AC6_other_requests_are_marked_conflicting_against_the_new_period', async () => {
+      const venue = await makeVenue();
+      const { id } = await movedRequest(venue);
+      const atNew = await pending(venue, at('18:00'), at('20:00'));
+      const atOld = await pending(venue, at('14:00'), at('16:00'));
+
+      const result = await decide(id, 'approve');
+
+      expect(result.marked_conflicting).toEqual([atNew.id]);
+      expect((await bookingRow(atNew.id)).status).toBe('conflicting');
+      expect((await bookingRow(atOld.id)).status).toBe('pending');
+    });
+
+    it('SCRUM593_AC6_other_requests_are_judged_at_their_own_events_new_period', async () => {
+      const venue = await makeVenue();
+      const { id } = await pending(venue, at('18:00'), at('20:00'));
+      // Stored 14:00-16:00 with the event moved onto 18:00-20:00, and stored
+      // 18:00-20:00 with the event moved off to 10:00-12:00.
+      const movedOn = await movedRequest(venue);
+      const movedOff = await insertBooking(await makeEvent({ start: at('10:00'), end: at('12:00') }), venue, {
+        start: at('18:00'),
+        end: at('20:00'),
+      });
+
+      const result = await decide(id, 'approve');
+
+      expect(result.marked_conflicting).toEqual([movedOn.id]);
+      expect((await bookingRow(movedOn.id)).status).toBe('conflicting');
+      expect((await bookingRow(movedOff)).status).toBe('pending');
+      const [notice] = await rows(
+        `select payload from notifications where booking_id = $1 and type = 'booking_request_conflicting'`,
+        [movedOn.id],
+      );
+      expect(notice.payload.approvedBookingId).toBe(id);
+    });
+
+    it('SCRUM593_AC7_rejecting_a_request_whose_event_moved_keeps_its_period', async () => {
+      const { id } = await movedRequest(await makeVenue());
+
+      expect((await decide(id, 'reject', { reason: 'No longer suitable' })).outcome).toBe('rejected');
+
+      expect(await bookingRow(id)).toMatchObject({
+        status: 'rejected',
+        starts_at: new Date(at('14:00')),
+        ends_at: new Date(at('16:00')),
+      });
+      const [notice] = await decisionNotices(id);
+      expect(notice.payload).toMatchObject({ previousStartsAt: null, previousEndsAt: null });
+    });
+
+    it('SCRUM593_AC8_the_approval_notice_carries_the_new_period_and_the_one_it_moved_from', async () => {
+      const { id } = await movedRequest(await makeVenue());
+
+      await decide(id, 'approve');
+
+      const notices = await decisionNotices(id);
+      expect(notices).toHaveLength(1);
+      const { payload } = notices[0];
+      expect(new Date(payload.startsAt)).toEqual(new Date(at('18:00')));
+      expect(new Date(payload.endsAt)).toEqual(new Date(at('20:00')));
+      expect(new Date(payload.previousStartsAt)).toEqual(new Date(at('14:00')));
+      expect(new Date(payload.previousEndsAt)).toEqual(new Date(at('16:00')));
+    });
+
+    it('SCRUM593_AC8_an_approval_that_did_not_move_names_no_previous_period', async () => {
+      const { id } = await pending(await makeVenue());
+
+      await decide(id, 'approve');
+
+      const [notice] = await noticesFor(id);
+      expect(notice.payload).toMatchObject({ previousStartsAt: null, previousEndsAt: null });
+    });
+
+    it('SCRUM593_AC6_approving_a_period_that_is_no_longer_the_events_is_refused_and_nothing_is_written', async () => {
+      const { id } = await movedRequest(await makeVenue());
+      const before = await bookingRow(id);
+
+      // Venue Staff were shown the request's own period, before the event moved.
+      const err = await refusal(decide(id, 'approve', { expected: [at('14:00'), at('16:00')] }));
+
+      expect(err?.code).toBe('PT409');
+      expect(err?.hint).toBe('BOOKING_PERIOD_CHANGED');
+      expect(await bookingRow(id)).toEqual(before);
+      expect(await decisionNotices(id)).toEqual([]);
+    });
+
+    it('SCRUM593_AC6_approving_without_the_period_shown_is_refused', async () => {
+      const { id } = await movedRequest(await makeVenue());
+      const before = await bookingRow(id);
+
+      const err = await refusal(decide(id, 'approve', { expected: null }));
+
+      expect(err?.code).toBe('22023');
+      expect(await bookingRow(id)).toEqual(before);
+    });
+
+    const CLOSED = {
+      suitable: false,
+      criteria: [{ criterion: 'Operating hours', met: false, detail: 'Closes 18:00' }],
+      checked: { startsAt: at('18:00'), endsAt: at('20:00') },
+    };
+
+    it('SCRUM593_AC6_a_move_records_the_suitability_at_the_new_period_beside_the_request_time_record', async () => {
+      const { id } = await movedRequest(await makeVenue());
+      // The coordinator confirmed an unsuitable venue at the old period.
+      const stored = { suitable: false, criteria: [{ criterion: 'Capacity', met: false }] };
+      await db.query(
+        `update bookings set suitability_result = $2::jsonb, suitability_overridden = true where id = $1`,
+        [id, JSON.stringify(stored)],
+      );
+
+      const result = await decide(id, 'approve', { suitability: CLOSED });
+
+      expect(result.outcome).toBe('approved');
+      const recorded = { suitability_result: stored, suitability_overridden: true, approval_suitability_result: CLOSED };
+      expect(await bookingRow(id)).toMatchObject(recorded);
+      expect(result.booking).toMatchObject(recorded);
+    });
+
+    it('SCRUM593_AC6_an_approval_that_does_not_move_keeps_the_stored_suitability', async () => {
+      const { id } = await pending(await makeVenue());
+      const stored = { suitable: false, criteria: [{ criterion: 'Capacity', met: false }] };
+      await db.query(
+        `update bookings set suitability_result = $2::jsonb, suitability_overridden = true where id = $1`,
+        [id, JSON.stringify(stored)],
+      );
+
+      await decide(id, 'approve', { suitability: CLOSED });
+
+      expect(await bookingRow(id)).toMatchObject({
+        status: 'approved',
+        suitability_result: stored,
+        suitability_overridden: true,
+        approval_suitability_result: null,
+      });
     });
   });
 });

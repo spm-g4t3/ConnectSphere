@@ -1,7 +1,8 @@
 // flaggedBookingDisplay.js
 //
-// Shared wording for the review reasons stored on flagged bookings, and for
-// the replacement requests linked to them.
+// Shared wording for the review reasons stored on flagged bookings, for the
+// replacement requests linked to them, and for a booking or request that an
+// approval moves to its event's new period.
 //
 // A services module, not part of a component, because the react-refresh lint
 // rule lets component files export components only.
@@ -160,14 +161,91 @@ export function replacementRequests(item) {
 }
 
 /**
- * The note on a pending request that would replace a still-flagged booking,
- * since approving it also cancels that booking.
+ * The note on a pending request raised to replace a flagged booking. While
+ * that booking is flagged, approving cancels it; once it was reinstated
+ * (approved), approving leaves it alone and books a second venue.
  *
- * @param {{venueName?: string|null, startsAt?: string, endsAt?: string}} replaces
+ * @param {{venueName?: string|null, startsAt?: string, endsAt?: string, status?: string}} replaces
  * @returns {string}
  */
 export function replacesFlaggedBookingText(replaces) {
   const venue = replaces.venueName || "Unknown venue";
   const period = formatVenuePeriod(replaces.startsAt, replaces.endsAt);
+  if (replaces.status === "approved") {
+    return (
+      `The booking this request was meant to replace, at ${venue}, ${period}, was reinstated. ` +
+      "Approving this request books a second venue for the event and does not cancel that booking."
+    );
+  }
   return `Replaces the flagged booking at ${venue}, ${period}. Approving this request cancels that booking.`;
+}
+
+/** The event's current period as instants, or null unless both times parse. */
+function eventPeriod(item) {
+  const start = Date.parse(item.eventStartsAt);
+  const end = Date.parse(item.eventEndsAt);
+  if (Number.isNaN(start) || Number.isNaN(end)) return null;
+  return { start, end };
+}
+
+/**
+ * Whether reinstating a flagged booking moves it to its event's current
+ * period: the event has both times and the booking no longer covers them, the
+ * test reinstate_flagged_booking (057) applies. Instants are compared, not
+ * strings, since one instant can be written with different offsets.
+ *
+ * @param {{startsAt?: string, endsAt?: string, eventStartsAt?: string|null, eventEndsAt?: string|null}} item
+ * @returns {boolean}
+ */
+export function movesToEventPeriod(item) {
+  const event = eventPeriod(item);
+  if (!event) return false;
+  return !(Date.parse(item.startsAt) <= event.start && Date.parse(item.endsAt) >= event.end);
+}
+
+/**
+ * Whether an open request's event has moved since it was raised, so approving
+ * it books the event's new period instead of the request's own (057).
+ *
+ * @param {{startsAt?: string, endsAt?: string, eventStartsAt?: string|null, eventEndsAt?: string|null}} item
+ * @returns {boolean}
+ */
+export function eventMovedFromRequest(item) {
+  const event = eventPeriod(item);
+  if (!event) return false;
+  return Date.parse(item.startsAt) !== event.start || Date.parse(item.endsAt) !== event.end;
+}
+
+/**
+ * The period an approval or reinstatement books, as the request body's
+ * expected times, so the server refuses it if the event moved after the list
+ * loaded. `moves` is eventMovedFromRequest or movesToEventPeriod of the item.
+ *
+ * @param {{startsAt: string, endsAt: string, eventStartsAt?: string|null, eventEndsAt?: string|null}} item
+ * @param {boolean} moves
+ * @returns {{expectedStartsAt: string, expectedEndsAt: string}}
+ */
+export function expectedPeriod(item, moves) {
+  return moves
+    ? { expectedStartsAt: item.eventStartsAt, expectedEndsAt: item.eventEndsAt }
+    : { expectedStartsAt: item.startsAt, expectedEndsAt: item.endsAt };
+}
+
+// The criterion name the server's suitability check uses for a clash
+// (AVAILABILITY_CRITERION in the backend's venueMatching.js).
+const AVAILABILITY_CRITERION = "Availability";
+
+/**
+ * What a suitability re-check at the event's new times means for approving:
+ * "unavailable" when Availability is unmet, since the server refuses a clash
+ * (BOOKING_PERIOD_CONFLICT) rather than advising on it; "advisory" when only
+ * other criteria are unmet; null when it is suitable or was not re-checked.
+ *
+ * @param {{suitable?: boolean, criteria?: Array<{criterion: string, met: boolean}>}|null|undefined} suitability
+ * @returns {"unavailable"|"advisory"|null}
+ */
+export function newTimesSuitabilityConcern(suitability) {
+  if (suitability?.suitable !== false) return null;
+  const unavailable = suitability.criteria.some((c) => c.criterion === AVAILABILITY_CRITERION && !c.met);
+  return unavailable ? "unavailable" : "advisory";
 }
