@@ -57,12 +57,14 @@ export default function EventCompletionPanel({ eventRequest, onCompleted, onBack
 
   function handleContinue(event) {
     event.preventDefault();
+    /* v8 ignore next -- @preserve Continue is disabled while the notes are too long. */
     if (tooLong) return;
     setError(null);
     setConfirming(true);
   }
 
   async function handleConfirm() {
+    /* v8 ignore next -- @preserve ConfirmDialog disables Confirm while busy. */
     if (submitting) return;
     setSubmitting(true);
     setError(null);

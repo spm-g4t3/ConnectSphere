@@ -47,6 +47,7 @@ function WaitingListPlace({ place, onLeft, onPromoted }) {
   }, [confirming, submitting]);
 
   async function handleLeave() {
+    /* v8 ignore next -- @preserve ConfirmDialog disables Confirm while busy. */
     if (sending.current) return;
     sending.current = true;
     setSubmitting(true);

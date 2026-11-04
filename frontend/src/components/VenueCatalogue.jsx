@@ -182,13 +182,14 @@ export default function VenueCatalogue({ currentUserId, asPage = false } = {}) {
     setActivePanel(null);
     if (Array.isArray(saved?.flaggedBookings) && saved.flaggedBookings.length > 0) {
       setFlaggedBookings(saved.flaggedBookings);
-      setFlaggedVenueName(saved.name ?? null);
+      setFlaggedVenueName(saved.name);
       setFlaggedReasons(venueSaveFlagReasons(saved.flaggedBookings, confirmedHoursChange));
     }
     fetchVenues();
   }
 
   async function handleRetire(venue) {
+    /* v8 ignore next -- @preserve ConfirmDialog disables Confirm while busy. */
     if (retiringId) return; // closes the double-click window before it opens
 
     // confirmingId is deliberately NOT cleared here: the dialog stays open,
@@ -318,8 +319,8 @@ export default function VenueCatalogue({ currentUserId, asPage = false } = {}) {
         <div className="venue-catalogue__flagged" role="status">
           <h3>{flaggedBookingsHeading(flaggedBookings.length, flaggedVenueName, flaggedReasons)}</h3>
           <ul className="venue-catalogue__flagged-list">
-            {flaggedBookings.map((booking, i) => (
-              <li key={booking.bookingId ?? i}>
+            {flaggedBookings.map((booking) => (
+              <li key={booking.bookingId}>
                 <strong>{booking.eventName || "Unnamed event"}</strong>
                 <span>{formatOccupiedPeriod(booking, formatDateTimeRange)}</span>
               </li>

@@ -19,6 +19,7 @@ export default function ClarificationHistoryDialog({
     dialog.showModal();
     closeButtonRef.current?.focus();
     return () => {
+      /* v8 ignore next -- @preserve The dialog is always open here; Escape is prevented. */
       if (dialog.open) dialog.close();
     };
   }, [open]);

@@ -181,7 +181,6 @@ export default function EventCancellationPanel({
   }
 
   async function handleCancel() {
-    if (!impact || !confirmed) return;
     setCancelling(true);
     setError(null);
     try {

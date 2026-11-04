@@ -6,10 +6,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import { apiClient } from "../../src/services/apiClient";
-import { reopenEventRequest, getEventDecisionHistory } from "../../src/services/eventRequestService.js";
+import { reopenEventRequest, getEventDecisionHistory, updateEventRequest } from "../../src/services/eventRequestService.js";
 
 vi.mock("../../src/services/apiClient", () => ({
-  apiClient: { get: vi.fn(), post: vi.fn() },
+  apiClient: { get: vi.fn(), post: vi.fn(), patch: vi.fn() },
 }));
 
 const EVENT_ID = "22222222-2222-4222-8222-222222222222";
@@ -17,6 +17,7 @@ const EVENT_ID = "22222222-2222-4222-8222-222222222222";
 beforeEach(() => {
   vi.mocked(apiClient.get).mockReset();
   vi.mocked(apiClient.post).mockReset();
+  vi.mocked(apiClient.patch).mockReset();
 });
 
 describe("SCRUM355 event request service", () => {
@@ -34,5 +35,14 @@ describe("SCRUM355 event request service", () => {
 
     await expect(getEventDecisionHistory(EVENT_ID)).resolves.toBe(history);
     expect(apiClient.get).toHaveBeenCalledExactlyOnceWith(`/event-requests/${EVENT_ID}/decision-history`);
+  });
+
+  it("SCRUM355_AC3_a_draft_edit_patches_the_request_with_the_fields_given", async () => {
+    const saved = { id: EVENT_ID, status: "draft", purpose: null };
+    vi.mocked(apiClient.patch).mockResolvedValue({ data: saved });
+    const input = { eventName: "Revised", purpose: null };
+
+    await expect(updateEventRequest(EVENT_ID, input)).resolves.toBe(saved);
+    expect(apiClient.patch).toHaveBeenCalledExactlyOnceWith(`/event-requests/${EVENT_ID}`, input);
   });
 });

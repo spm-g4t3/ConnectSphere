@@ -74,6 +74,21 @@ describe("findVenuesForEvent", () => {
     expect(params).not.toHaveProperty("accessibility");
   });
 
+  it("SCRUM20_AC1_location_is_sent_unchanged_when_given", async () => {
+    await findVenuesForEvent({ ...REQUIRED, location: "Level 2" });
+
+    expect(paramsSent()).toStrictEqual({ ...REQUIRED, location: "Level 2" });
+  });
+
+  it.each([
+    ["blank", "   "],
+    ["not text", 2],
+  ])("SCRUM20_AC1_a_%s_location_is_not_sent", async (_, location) => {
+    await findVenuesForEvent({ ...REQUIRED, location });
+
+    expect(paramsSent()).toStrictEqual({ ...REQUIRED });
+  });
+
   it("SCRUM20_AC7_returns_the_response_body", async () => {
     await expect(findVenuesForEvent({ ...REQUIRED })).resolves.toEqual([HALL]);
   });

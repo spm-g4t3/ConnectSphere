@@ -47,14 +47,17 @@ import { formatVenuePeriod } from "../../src/services/datetimeFormat.js";
 import CoordinatorRequestDetail from "../../src/components/CoordinatorRequestDetail.jsx";
 import { useAuth } from "../../src/auth/AuthContext";
 import {
+  closeEventClarification,
   decideEventRequest,
   getAssignmentHistoryForReview,
   getCoordinatorChangeRequests,
   getEventCancellationImpact,
   getEventClarificationHistory,
   getEventDecisionHistory,
+  getEventReadiness,
   listCoordinatorWorkload,
   reassignEventRequest,
+  rejectApprovedEvent,
   requestEventClarification,
   startEventReview,
 } from "../../src/services/eventRequestService";
@@ -81,6 +84,9 @@ vi.mock("../../src/services/eventRequestService", () => ({
   getCoordinatorChangeRequests: vi.fn(),
   getEventCancellationImpact: vi.fn(),
   getEventClarificationHistory: vi.fn(),
+  // SCRUM-347: the rejection page reads readiness and sends the rejection.
+  getEventReadiness: vi.fn(),
+  rejectApprovedEvent: vi.fn(),
   // SCRUM-521: the handover panel reads this one when the caller is a Lead.
   listCoordinatorWorkload: vi.fn(),
   processCoordinatorChangeRequest: vi.fn(),
@@ -1706,5 +1712,153 @@ describe("SCRUM-444 D11: the Lead's view of an event", () => {
     expect(getEventFlaggedBookings).not.toHaveBeenCalled();
     expect(getMyBookingRequests).not.toHaveBeenCalled();
     expect(getEventVenueSuitability).not.toHaveBeenCalled();
+  });
+});
+
+describe("SCRUM162 returning for amendment and closing a clarification", () => {
+  const underReview = () => eventRequest({ status: "under_review", reviewingCoordinatorId: ASSIGNED });
+
+  beforeEach(() => {
+    vi.mocked(closeEventClarification).mockReset();
+  });
+
+  it("SCRUM162_AC1_returning_without_instructions_is_refused_before_anything_is_sent", async () => {
+    const user = userEvent.setup();
+    renderAs(ASSIGNED, underReview());
+
+    await user.type(await screen.findByLabelText("Note for the Organiser"), "   ");
+    await decide(user, "Return for amendment");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Add instructions before returning this request.");
+    expect(requestEventClarification).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM162_AC1_a_field_ticked_then_unticked_is_not_offered_to_the_organiser", async () => {
+    vi.mocked(requestEventClarification).mockResolvedValue(eventRequest({ status: "pending_clarification" }));
+    const user = userEvent.setup();
+    renderAs(ASSIGNED, underReview());
+
+    await chooseDecision(user, "Return for amendment");
+    await user.click(screen.getByRole("checkbox", { name: "Purpose" }));
+    await user.click(screen.getByRole("checkbox", { name: "Expected attendance" }));
+    await user.click(screen.getByRole("checkbox", { name: "Purpose" }));
+    expect(screen.getByRole("checkbox", { name: "Purpose" })).not.toBeChecked();
+    await user.type(screen.getByLabelText("Note for the Organiser"), "Please confirm numbers.");
+    await user.click(screen.getByRole("button", { name: "Return for amendment" }));
+
+    await waitFor(() => expect(requestEventClarification).toHaveBeenCalledWith(
+      REQUEST_ID, "Please confirm numbers.", null, ["expectedAttendance"],
+    ));
+  });
+
+  it("SCRUM162_AC6_closing_without_a_note_is_refused_before_anything_is_sent", async () => {
+    renderAs(ASSIGNED, eventRequest({ status: "pending_clarification", clarificationNote: "Is it public?" }));
+
+    const close = await screen.findByRole("button", { name: "Close clarification" });
+    expect(close).toBeDisabled();
+    // The button stays disabled for a blank note; submitting the form anyway still sends nothing.
+    fireEvent.submit(close.closest("form"));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("A note is required to close the clarification request.");
+    expect(closeEventClarification).not.toHaveBeenCalled();
+  });
+});
+
+describe("SCRUM19_AC6 an approval refused for a missing start date", () => {
+  it("SCRUM19_AC6_a_409_on_an_approval_with_no_start_date_says_to_agree_a_new_date", async () => {
+    vi.mocked(decideEventRequest).mockRejectedValue(httpError(409));
+    const user = userEvent.setup();
+    renderAs(ASSIGNED, eventRequest({ status: "under_review", reviewingCoordinatorId: ASSIGNED, proposedStart: null }));
+
+    await decide(user, "Approve request");
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/start date has passed/i);
+    expect(alert).not.toHaveTextContent(/changed since you opened it/i);
+  });
+});
+
+describe("SCRUM347_AC1 a confirmed event is cancelled instead of rejected", () => {
+  it("SCRUM347_AC1_cancel_event_instead_on_the_rejection_page_opens_the_cancellation_page", async () => {
+    vi.mocked(getEventReadiness).mockResolvedValue({ eventRequestId: REQUEST_ID, ready: false, items: [] });
+    vi.mocked(rejectApprovedEvent).mockRejectedValue(httpError(409, {
+      error: "This event is Confirmed, and only an Approved event can be rejected. Cancel it instead.",
+      code: "CANCEL_INSTEAD",
+    }));
+    const user = userEvent.setup();
+    renderAs(ASSIGNED, eventRequest({ status: "approved", decision: "approved" }));
+
+    await user.click(screen.getByRole("button", { name: "Reject event" }));
+    await user.type(await screen.findByLabelText("Reason for rejection"), "No hall");
+    await user.click(screen.getByRole("button", { name: "Reject event" }));
+    await user.click(await screen.findByRole("button", { name: "Cancel event instead" }));
+
+    expect(screen.getByRole("heading", { name: "Cancel IS212 Industry Night" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Reject IS212 Industry Night" })).not.toBeInTheDocument();
+  });
+});
+
+describe("SCRUM444_AC4 the handover notice without a name on record", () => {
+  it("SCRUM444_AC4_a_handover_to_a_coordinator_with_no_name_says_the_coordinator_you_chose", async () => {
+    vi.mocked(listCoordinatorWorkload).mockReset();
+    vi.mocked(listCoordinatorWorkload).mockResolvedValue([{ id: OTHER, activeEvents: 0 }]);
+    vi.mocked(reassignEventRequest).mockReset();
+    // The reply carries no coordinator id, so the one chosen is taken as the new holder.
+    vi.mocked(reassignEventRequest).mockResolvedValue({});
+    vi.mocked(useAuth).mockReturnValue({ user: { id: LEAD_ID, role: "event_coordinator_lead" } });
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <CoordinatorRequestDetail request={eventRequest()} onChangeRequestProcessed={vi.fn()} onReviewDecisionProcessed={vi.fn()} />
+      </MemoryRouter>,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Hand over to another coordinator" }));
+    await user.selectOptions(await screen.findByLabelText("Hand over to"), OTHER);
+    await user.click(screen.getByRole("button", { name: "Confirm handover" }));
+
+    expect((await screen.findByRole("status")).textContent.trim()).toBe("Handed over to the coordinator you chose.");
+    expect(reassignEventRequest).toHaveBeenCalledWith(REQUEST_ID, expect.objectContaining({ newCoordinatorId: OTHER }));
+  });
+});
+
+describe("SCRUM525_AC1 live requests with missing details", () => {
+  const PERIOD = { proposedStart: START_ISO, proposedEnd: END_ISO };
+  const HALL = { id: "v1", name: "Hall A", location: "Level 2", maxCapacity: 200 };
+  const ROOM_B = { id: "v9", name: "Room B", location: "Level 1", maxCapacity: 60 };
+  const ITEM = {
+    bookingId: "b1",
+    venueId: "v9",
+    venueName: "Room B",
+    venueLocation: "Level 1",
+    roomLayoutCode: null,
+    expectedAttendance: 40,
+    attendanceSource: "booking",
+    suitabilityOverridden: false,
+    current: null,
+    atRequest: null,
+    newlyUnmet: [],
+    error: { code: "RECHECK_FAILED", message: "prose" },
+  };
+  const finder = () => screen.getByRole("heading", { name: "Find a venue" }).closest("section");
+
+  it("SCRUM525_AC1_a_live_request_without_a_status_still_locks_its_venue_and_one_without_a_venue_locks_none", async () => {
+    vi.mocked(getEventVenueSuitability).mockResolvedValue([
+      ITEM,
+      { ...ITEM, bookingId: "b2", venueId: null, venueName: "Unknown venue" },
+    ]);
+    vi.mocked(findVenuesForEvent).mockResolvedValue([HALL, ROOM_B]);
+    const user = userEvent.setup();
+    renderAs(ASSIGNED, eventRequest({ ...PERIOD, status: "approved" }));
+
+    await screen.findByRole("heading", { name: "Room B" });
+    await user.click(within(finder()).getByRole("button", { name: "Search venues" }));
+
+    expect(await within(finder()).findByRole("button", { name: "Request this venue: Hall A" })).toBeEnabled();
+    const roomB = within(finder()).getByRole("button", { name: "Request this venue: Room B" });
+    expect(roomB).toBeDisabled();
+    expect(roomB).toHaveAccessibleDescription(
+      "This event already has a request for this venue. See it under Venue suitability above.",
+    );
   });
 });

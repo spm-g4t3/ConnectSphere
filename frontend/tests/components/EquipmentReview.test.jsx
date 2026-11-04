@@ -466,6 +466,15 @@ describe("EquipmentReview: stock back for missing items", () => {
     expect(screen.getByRole("button", { name: "Review again" })).toBeEnabled();
   });
 
+  it("SCRUM574_AC2_a_missing_item_with_no_availability_counts_as_not_back", async () => {
+    await open(cannot([
+      missing({ quantity: 1, available: 1 }),
+      { ...missing({ id: MIC, name: "Microphone", quantity: 2, available: 0 }), availability: null },
+    ]));
+    expect(hint()).toHaveTextContent("1 of 2 missing items can now be reserved: Projector \u00D71.");
+    expect(hint()).not.toHaveTextContent("Microphone");
+  });
+
   it.each(Object.keys(OUTCOMES))("SCRUM574_AC4_%s_wording_never_promises", async (outcome) => {
     await open(cannot(OUTCOMES[outcome]));
     expect(hint()).toHaveTextContent("can now be reserved");
@@ -486,3 +495,66 @@ describe("EquipmentReview: stock back for missing items", () => {
     expect(startEquipmentReview).toHaveBeenCalledWith(EVENT_ID);
   });
 });
+
+describe("EquipmentReview: what is shown when details are missing or unusual", () => {
+  function renderReview(initial) {
+    getEquipmentReview.mockResolvedValue(initial);
+    render(
+      <MemoryRouter initialEntries={[`/equipment-review/${EVENT_ID}`]}>
+        <Routes>
+          <Route path="/equipment-review/:eventId" element={<EquipmentReview />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  it("SCRUM290_AC4_the_servers_availability_message_replaces_the_stock_sentence", async () => {
+    const a = availability("Unavailable", 3, 0);
+    a.message = "Availability cannot be checked until the event has a date.";
+    await open(state({ lines: [line({ availability: a })] }));
+    expect(screen.getByText("Availability cannot be checked until the event has a date.")).toBeInTheDocument();
+    expect(screen.queryByText("None available.")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM290_AC4_an_unrecognised_availability_result_reads_as_none_available", async () => {
+    await open(state({ lines: [line({ availability: availability("Something new", 3, 0) })] }));
+    const sentence = screen.getByText("None available.");
+    expect(sentence.closest(".equipment-review__availability")).toHaveClass("equipment-review__availability--unavailable");
+  });
+
+  it("SCRUM290_AC4_an_overlapping_reservation_without_a_name_reads_another_event_and_one_unit", async () => {
+    const a = availability("Partially available", 3, 2);
+    a.reservations = [{ id: "x", eventName: null, quantity: 1, startAt: "2026-11-01T09:00:00Z", endAt: "2026-11-01T13:00:00Z", flagged: false }];
+    await open(state({ lines: [line({ availability: a })] }));
+    const row = screen.getByText(/^Another event: 1 unit, /);
+    expect(row).not.toHaveTextContent("flagged for review");
+  });
+
+  it("SCRUM290_AC3_someone_elses_review_without_a_name_says_another_staff_member", async () => {
+    const s = state({ status: "under_review", statusLabel: "Under review", reviewerId: OTHER });
+    s.request.reviewerName = null;
+    await open(s);
+    expect(screen.getByRole("heading", { name: "Another staff member is reviewing this" })).toBeInTheDocument();
+    expect(screen.getByText(/^Being reviewed by another staff member since /)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Take over review" })).toBeInTheDocument();
+  });
+
+  it("SCRUM290_AC4_without_event_details_the_page_says_event_and_no_coordinator", async () => {
+    renderReview({ ...state(), event: null });
+    expect(await screen.findByRole("heading", { name: "Event" })).toBeInTheDocument();
+    expect(screen.getByText("No venue booked.")).toBeInTheDocument();
+    expect(screen.getByText("No coordinator assigned.")).toBeInTheDocument();
+  });
+
+  it("SCRUM290_AC4_a_retired_equipment_type_is_said_on_its_line", async () => {
+    await open(state({ lines: [line({ typeRetired: true })] }));
+    expect(screen.getByRole("button", { name: /^Projector/ })).toHaveTextContent("This equipment type has been retired.");
+  });
+
+  it("SCRUM290_AC4_a_line_asking_for_none_shows_an_empty_progress_bar", async () => {
+    await open(state({ lines: [line({ quantity: 0, reserved: 0, shortBy: 0, availability: null })] }));
+    const counts = screen.getByText("0 of 0 reserved");
+    expect(counts.nextElementSibling.firstElementChild).toHaveStyle({ width: "0%" });
+  });
+});
+

@@ -11,6 +11,9 @@ import {
   listUnassignedEventRequests,
   listCoordinatorWorkload,
   assignEventRequest,
+  reassignEventRequest,
+  getAssignmentHistory,
+  getAssignmentHistoryForReview,
 } from "../../src/services/eventRequestService.js";
 
 vi.mock("../../src/services/apiClient", () => ({
@@ -68,5 +71,39 @@ describe("SCRUM486 the Lead's calls", () => {
     vi.mocked(apiClient.post).mockRejectedValue(refusal);
 
     await expect(assignEventRequest(REQUEST_ID, { coordinatorId: COORDINATOR_ID })).rejects.toBe(refusal);
+  });
+
+  it("SCRUM486_AC6_a_handover_posts_the_new_coordinator_and_the_note_and_nothing_else", async () => {
+    const updated = { id: REQUEST_ID, assignedCoordinatorId: COORDINATOR_ID };
+    vi.mocked(apiClient.post).mockResolvedValue({ data: updated });
+
+    await expect(
+      reassignEventRequest(REQUEST_ID, {
+        newCoordinatorId: COORDINATOR_ID,
+        handoverNote: "Venue is booked",
+        assignedBy: "someone-else",
+      }),
+    ).resolves.toBe(updated);
+
+    expect(apiClient.post).toHaveBeenCalledExactlyOnceWith(`/event-requests/${REQUEST_ID}/reassign`, {
+      newCoordinatorId: COORDINATOR_ID,
+      handoverNote: "Venue is booked",
+    });
+  });
+
+  it("SCRUM486_AC9_the_organisers_history_is_read_from_the_assignments_endpoint", async () => {
+    const history = [{ id: "h1", automatic: false }];
+    vi.mocked(apiClient.get).mockResolvedValue({ data: history });
+
+    await expect(getAssignmentHistory(REQUEST_ID)).resolves.toBe(history);
+    expect(apiClient.get).toHaveBeenCalledExactlyOnceWith(`/event-requests/${REQUEST_ID}/assignments`);
+  });
+
+  it("SCRUM486_AC9_the_holders_and_leads_history_is_read_from_the_review_endpoint", async () => {
+    const history = [{ id: "h1", handoverNote: "Venue is booked" }];
+    vi.mocked(apiClient.get).mockResolvedValue({ data: history });
+
+    await expect(getAssignmentHistoryForReview(REQUEST_ID)).resolves.toBe(history);
+    expect(apiClient.get).toHaveBeenCalledExactlyOnceWith(`/event-requests/${REQUEST_ID}/assignments/review`);
   });
 });

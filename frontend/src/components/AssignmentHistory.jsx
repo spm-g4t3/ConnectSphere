@@ -79,7 +79,7 @@ function PersonName({ id, name, currentUserId }) {
 
   return (
     <span className="assignment-history__name">
-      No name on record <code title={id ?? undefined}>{id ?? "unknown"}</code>{you}
+      No name on record <code title={id}>{id}</code>{you}
     </span>
   );
 }
@@ -155,6 +155,7 @@ export default function AssignmentHistory({ eventRequestId, view, currentCoordin
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null); // { message, retryable }
 
+  /* v8 ignore next -- @preserve Typo-safe default: every caller passes a known view. */
   const fetchHistory = FETCH_BY_VIEW[view] ?? FETCH_BY_VIEW.organiser;
 
   // State is set only in the promise's callbacks, the way

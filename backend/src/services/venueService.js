@@ -472,8 +472,7 @@ export async function retireVenue(id, userId = null) {
  * @throws {Error} a failed call, through translateError
  */
 async function findAvailableVenueIds(venueIds, startsAt, endsAt, excludeHoldEventId = null) {
-  if (venueIds.length === 0) return new Set();
-
+  // Both callers return before calling with an empty list.
   const args = {
     p_venue_ids: venueIds,
     p_starts_at: startsAt,

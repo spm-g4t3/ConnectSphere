@@ -121,6 +121,28 @@ export default defineConfig({
         // SCRUM-592: the escaping is a new pure file only this bug owns; the
         // search edits sit in SCRUM-15's shared files and do not gate.
         'src/http/likePattern.js': FULL,
+        // Shared service files brought to 100% by the coverage push; gating
+        // them stops a later change from silently dropping an error path.
+        'src/services/eventRequestService.js': FULL,
+        'src/services/eventRegistrationService.js': FULL,
+        'src/services/equipmentReviewService.js': FULL,
+        'src/services/equipmentLineService.js': FULL,
+        'src/services/eventChangeRequestService.js': FULL,
+        'src/services/bookingRequestService.js': FULL,
+        'src/services/venueService.js': FULL,
+        'src/services/venueSuitabilityService.js': FULL,
+        'src/services/safetyReviewService.js': FULL,
+        'src/middleware/requireAuth.js': FULL,
+        'src/middleware/finalEventGuard.js': FULL,
+        'src/routes/eventRequests.js': FULL,
+        'src/routes/eventRegistration.js': FULL,
+        'src/routes/bookingRequests.js': FULL,
+        'src/routes/venues.js': FULL,
+        'src/validation/venueValidation.js': FULL,
+        'src/validation/eventRequestValidation.js': FULL,
+        'src/validation/venueSuitabilityValidation.js': FULL,
+        'src/validation/equipmentReviewValidation.js': FULL,
+        'src/http/parseCodeList.js': FULL,
       },
     },
   },

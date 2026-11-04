@@ -981,6 +981,30 @@ describe('SCRUM-46: clarification returns between Coordinator and Organiser', ()
     });
   });
 
+  it('SCRUM162_AC6_the_assigned_coordinator_closes_an_open_clarification_with_a_note', async () => {
+    const client = createEventRequestClient([
+      ok(storedRow({ status: STATUS.PENDING_CLARIFICATION, assigned_coordinator_id: OTHER_ORGANISER_ID })),
+      ok(storedRow({ status: STATUS.UNDER_REVIEW, clarification_note: null, assigned_coordinator_id: OTHER_ORGANISER_ID })),
+    ]);
+
+    const res = await request(appWith({ client, requireAuth: coordinatorAuth }))
+      .post(`/api/event-requests/${REQUEST_ID}/clarification/close`)
+      .send({ note: '  Resolved by phone.  ' });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ id: REQUEST_ID, status: STATUS.UNDER_REVIEW, clarificationNote: null });
+    expect(res.body.statusDisplay).toMatchObject({ label: STATUS_DISPLAY[STATUS.UNDER_REVIEW].label });
+    expect(client.calls[1]).toMatchObject({
+      fn: 'close_event_clarification',
+      args: {
+        p_event_request_id: REQUEST_ID,
+        p_coordinator_id: OTHER_ORGANISER_ID,
+        p_expected_coordinator: OTHER_ORGANISER_ID,
+        p_message: 'Resolved by phone.',
+      },
+    });
+  });
+
   it('does not accept request-field payloads outside the amendments object', async () => {
     const client = createEventRequestClient([]);
     const res = await request(appWith({ client }))
@@ -3483,5 +3507,78 @@ describe('SCRUM-370: the cancellation impact preview over HTTP', () => {
       .get(`/api/event-requests/${REQUEST_ID}/cancellation-impact`);
 
     expect(res.status).toBe(403);
+  });
+});
+
+describe('SCRUM-395: a significant change over HTTP', () => {
+  const coordinatorAuth = (req, _res, next) => {
+    req.user = { id: OTHER_ORGANISER_ID, role: 'event_coordinator' };
+    next();
+  };
+  const confirmed = storedRow({
+    status: STATUS.CONFIRMED,
+    assigned_coordinator_id: OTHER_ORGANISER_ID,
+    proposed_start: '2099-04-01T09:00:00+08:00',
+    proposed_end: '2099-04-01T11:00:00+08:00',
+  });
+  const changes = { proposedStart: '2099-04-01T10:00:00+08:00' };
+  const impact = { venueBookings: [], equipmentReservations: [], registeredAttendeesToNotify: 0 };
+
+  it('SCRUM395_AC3_previews_the_change_for_the_signed_in_coordinator', async () => {
+    const client = createEventRequestClient([ok(confirmed), ok(impact)]);
+
+    const res = await request(appWith({ client, requireAuth: coordinatorAuth }))
+      .post(`/api/event-requests/${REQUEST_ID}/significant-change-impact`)
+      .send({ changes, coordinatorId: ORGANISER_ID });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(impact);
+    expect(client.calls[1]).toMatchObject({
+      fn: 'preview_significant_event_change',
+      args: { p_event_request_id: REQUEST_ID, p_changes: changes, p_user_id: OTHER_ORGANISER_ID },
+    });
+  });
+
+  it('SCRUM395_AC3_an_organiser_cannot_preview_and_nothing_is_read', async () => {
+    const client = createEventRequestClient([]);
+
+    const res = await request(appWith({ client }))
+      .post(`/api/event-requests/${REQUEST_ID}/significant-change-impact`)
+      .send({ changes });
+
+    expect(res.status).toBe(403);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM395_AC4_applies_the_change_and_returns_the_event_with_its_flags', async () => {
+    const updated = { ...confirmed, status: STATUS.APPROVED, proposed_start: changes.proposedStart };
+    const client = createEventRequestClient([
+      ok(confirmed),
+      ok({ event: updated, impact, flaggedBookingIds: ['b-1'], flaggedReservationCount: 2 }),
+    ]);
+
+    const res = await request(appWith({ client, requireAuth: coordinatorAuth }))
+      .post(`/api/event-requests/${REQUEST_ID}/significant-change`)
+      .send({ changes, reason: ' New schedule ', expectedImpact: impact });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      id: REQUEST_ID,
+      status: STATUS.APPROVED,
+      statusDisplay: { label: STATUS_DISPLAY[STATUS.APPROVED].label },
+      impact,
+      flaggedBookingIds: ['b-1'],
+      flaggedReservationCount: 2,
+    });
+    expect(client.calls[1]).toMatchObject({
+      fn: 'apply_significant_event_change',
+      args: {
+        p_event_request_id: REQUEST_ID,
+        p_changes: changes,
+        p_reason: 'New schedule',
+        p_user_id: OTHER_ORGANISER_ID,
+        p_expected_impact: impact,
+      },
+    });
   });
 });

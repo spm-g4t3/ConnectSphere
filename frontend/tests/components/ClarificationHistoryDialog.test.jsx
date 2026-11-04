@@ -72,4 +72,58 @@ describe("ClarificationHistoryDialog", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Close clarification history" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
+
+  const QUESTION = {
+    id: "question-1",
+    type: "question",
+    authorName: "Coordinator",
+    message: "Please confirm the expected attendance.",
+    createdAt: "2026-10-10T08:00:00Z",
+    replyByDate: null,
+    requestedFields: [],
+  };
+
+  async function openHistory(props = {}) {
+    vi.mocked(getEventClarificationHistory).mockResolvedValue([QUESTION]);
+    render(<ClarificationHistoryDialog eventRequestId="event-1" eventName="Community showcase" {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: /View (clarification history|previous messages)/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Clarification history" });
+    await within(dialog).findByText(/Please confirm the expected attendance\.|No earlier messages\./);
+    return dialog;
+  }
+
+  it("SCRUM162_AC9_escape_closes_the_history_dialog", async () => {
+    const dialog = await openHistory();
+
+    // Escape on a modal dialog fires a cancelable "cancel" event.
+    const cancel = new Event("cancel", { cancelable: true });
+    fireEvent(dialog, cancel);
+
+    expect(cancel.defaultPrevented).toBe(true);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "View clarification history" })).toBeInTheDocument();
+  });
+
+  it("SCRUM162_AC9_clicking_the_backdrop_closes_the_dialog_but_clicking_inside_does_not", async () => {
+    const dialog = await openHistory();
+
+    fireEvent.click(within(dialog).getByText("Please confirm the expected attendance."));
+    expect(screen.getByRole("dialog", { name: "Clarification history" })).toBeInTheDocument();
+
+    // A click on the backdrop lands on the <dialog> element itself.
+    fireEvent.click(dialog);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM162_AC9_for_an_open_question_the_dialog_shows_only_the_earlier_messages", async () => {
+    const dialog = await openHistory({ isOpenQuestion: true, latestQuestion: QUESTION.message });
+
+    // The open question is already on the page above the button, so it is not repeated.
+    expect(within(dialog).getByText("No earlier messages.")).toBeInTheDocument();
+    expect(within(dialog).queryByText(QUESTION.message)).not.toBeInTheDocument();
+
+    // Close before the jsdom dialog stubs are removed after the test.
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close clarification history" }));
+    expect(screen.getByRole("button", { name: "View previous messages" })).toBeInTheDocument();
+  });
 });

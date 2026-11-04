@@ -182,6 +182,16 @@ describe('attribute sets', () => {
 describe('opening hours', () => {
   const hours = (entries) => ({ ...VALID, hours: entries });
 
+  it.each([
+    ['an object', { day_of_week: 1, opens_at: '09:00', closes_at: '18:00' }],
+    ['text', 'Mon-Fri 09:00-18:00'],
+    ['null', null],
+  ])('SCRUM15_AC1_hours_given_as_%s_rather_than_a_list_is_refused', (_label, value) => {
+    const err = errorFrom(() => validateCreateVenue(hours(value)));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([{ field: 'hours', message: 'must be an array' }]);
+  });
+
   it('accepts a valid set', () => {
     const result = validateCreateVenue(
       hours([
@@ -1648,6 +1658,18 @@ describe('SCRUM575_AC7 confirming the bookings shortened hours leave out', () =>
     const err = errorFrom(() => validateUpdateVenue({ hours: HOURS, confirmHoursChange: value }));
     expect(err).toBeInstanceOf(ValidationError);
     expect(fieldsIn(err)).toEqual(['confirmHoursChange']);
+  });
+
+  it('SCRUM575_AC7_confirmHoursChange_refuses_more_than_500_ids', () => {
+    // Counted before de-duplication: the cap bounds the request, not the venue.
+    expect(validateUpdateVenue({ hours: HOURS, confirmHoursChange: Array(500).fill(B) }).confirmHoursChange)
+      .toEqual([B]);
+
+    const err = errorFrom(() => validateUpdateVenue({ hours: HOURS, confirmHoursChange: Array(501).fill(B) }));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([
+      { field: 'confirmHoursChange', message: 'must list 500 bookings or fewer' },
+    ]);
   });
 
   it('SCRUM575_AC7_an_edit_without_it_has_no_confirmHoursChange_key', () => {

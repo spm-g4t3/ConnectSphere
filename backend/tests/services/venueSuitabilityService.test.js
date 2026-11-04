@@ -428,6 +428,16 @@ describe('SCRUM188_WK7 availability on the occupied period', () => {
     expect(err.constructor).toBe(Error);
     expect(err.message).toBe('boom');
   });
+
+  it('SCRUM188_WK7_a_failed_availability_read_without_a_message_still_says_what_failed', async () => {
+    const err = await check(fakeClient({ rpcError: { code: 'XX000' } })).catch((e) => e);
+    expect(err.constructor).toBe(Error);
+    expect(err.message).toBe('The venue availability check failed');
+  });
+
+  it('SCRUM188_WK7_a_null_occupancy_answer_is_no_conflicts', async () => {
+    expect(availabilityOf(await check(fakeClient({ occupancy: null })))).toMatchObject({ met: true, conflicts: [] });
+  });
 });
 
 
@@ -449,6 +459,10 @@ describe('SCRUM188_WK7 describeAvailability', () => {
       'Needs 09:45–12:00 on Wed 11 Nov (setup 09:45–10:00). ' +
         'Booked for Gala Night 10:00–12:45 on Wed 11 Nov (turnaround 12:00–12:45)',
     );
+  });
+
+  it('SCRUM188_WK7_a_venue_without_setup_or_turnaround_minutes_is_free_for_just_the_event', () => {
+    expect(describeAvailability([], event, {})).toBe('Free 10:00–12:00 on Wed 11 Nov');
   });
 
   it('SCRUM188_WK7_a_period_crossing_midnight_names_both_days', () => {
@@ -682,6 +696,30 @@ describe('SCRUM188_AC6 which bookings are rechecked', () => {
     const err = await recheck(fakeClient({ bookingsError: { message: 'boom' } })).catch((e) => e);
     expect(err.constructor).toBe(Error);
     expect(err.message).toBe('boom');
+  });
+
+  it('SCRUM188_AC6_a_failed_bookings_read_without_a_message_still_says_what_failed', async () => {
+    const err = await recheck(fakeClient({ bookingsError: {} })).catch((e) => e);
+    expect(err.constructor).toBe(Error);
+    expect(err.message).toBe("The event's bookings could not be read");
+  });
+
+  it('SCRUM188_AC6_a_null_bookings_answer_is_an_empty_list', async () => {
+    expect(await recheck(fakeClient({ bookings: null }))).toEqual([]);
+  });
+
+  it('SCRUM188_AC6_a_booking_without_its_venue_embed_or_override_flag_reads_null_and_false', async () => {
+    // The embed and the flag are always read; this pins the fallbacks.
+    const row = eventBookingRow({ venues: null });
+    delete row.suitability_overridden;
+    const [item] = await recheck(fakeClient({ bookings: [row] }));
+    expect(item).toMatchObject({
+      bookingId: BOOKING,
+      venueName: null,
+      venueLocation: null,
+      suitabilityOverridden: false,
+      error: null,
+    });
   });
 
   it('SCRUM192_each_item_names_the_booking_its_venue_and_status', async () => {
@@ -1103,6 +1141,29 @@ describe('SCRUM188_AC6 one booking cannot fail the others (B3/B7)', () => {
       code: 'STORED_REQUIREMENTS_INVALID',
       message: 'The requirement codes stored with this request cannot be checked (accessibility: unknown code "ramp")',
     });
+  });
+
+  it('SCRUM188_AC6_a_code_lookup_refused_without_details_is_STORED_REQUIREMENTS_INVALID_with_its_message', async () => {
+    // A lookup read is not expected to answer 23514; it stands for any
+    // ValidationError that carries no field details, which is named by its message.
+    const base = twoBookings({});
+    const client = {
+      ...base,
+      from: (table) =>
+        table === 'facilities'
+          ? { select: () => ({ in: () => Promise.resolve({ data: null, error: { code: '23514', message: 'bad code' } }) }) }
+          : base.from(table),
+    };
+    const [first, second] = await recheck(client);
+    for (const item of [first, second]) {
+      expect(item.current).toBeNull();
+      expect(item.error).toEqual({
+        code: 'STORED_REQUIREMENTS_INVALID',
+        message:
+          'The requirement codes stored with this request cannot be checked ' +
+          '(A value was rejected by the database: bad code)',
+      });
+    }
   });
 
   it('SCRUM188_AC6_a_venue_that_cannot_be_found_is_that_items_RECHECK_FAILED', async () => {

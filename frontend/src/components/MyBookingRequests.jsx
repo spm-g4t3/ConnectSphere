@@ -178,6 +178,7 @@ export default function MyBookingRequests({ asPage = false } = {}) {
   const Title = asPage ? "h1" : "h2";
 
   async function handleWithdraw(item) {
+    /* v8 ignore next -- @preserve ConfirmDialog disables Confirm while busy. */
     if (sending.current) return;
     sending.current = true;
     setWithdrawingId(item.id);

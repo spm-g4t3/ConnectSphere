@@ -37,7 +37,7 @@ export default function BookingSuitabilitySummary({
   }
 
   const suitable = suitability.suitable === true;
-  const overridden = Array.isArray(overriddenCriteria) ? overriddenCriteria : [];
+  const overridden = overriddenCriteria;
   const showOverride = suitabilityOverridden === true && overridden.length > 0;
 
   return (

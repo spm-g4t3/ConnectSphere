@@ -173,6 +173,31 @@ describe('SCRUM-487 AC2: every Event Coordinator, counted in total and per statu
     expect(row).toEqual({ id: COORDINATOR_A, fullName: null, activeEvents: 1, byStatus: { ...zeros(), [STATUS.CONFIRMED]: 1 } });
   });
 
+  it('SCRUM487_AC2_an_events_read_with_no_data_lists_every_coordinator_with_zeros', async () => {
+    // PostgREST answers a list with [], not null; this pins the fallback anyway.
+    const client = createReadQueueClient([ok(COORDINATORS), ok(null)]);
+
+    const { coordinators: overview } = await listCoordinatorOverview({ client });
+
+    expect(overview).toEqual([
+      { id: COORDINATOR_A, fullName: 'Omar Okafor', activeEvents: 0, byStatus: zeros() },
+      { id: COORDINATOR_B, fullName: 'Priya Nair', activeEvents: 0, byStatus: zeros() },
+    ]);
+  });
+
+  it('SCRUM487_AC2_a_row_outside_the_coordinators_or_the_active_statuses_is_not_counted', async () => {
+    // The read is narrowed so this cannot arrive; if it did, activeEvents must stay the sum of byStatus.
+    const STRANGER = '99999999-9999-4999-8999-999999999999';
+    const client = createReadQueueClient([
+      ok([profileRow(COORDINATOR_A, 'Omar Okafor')]),
+      ok([held(COORDINATOR_A, STATUS.COMPLETED), held(STRANGER, STATUS.APPROVED), held(COORDINATOR_A, STATUS.APPROVED)]),
+    ]);
+
+    const { coordinators: [row] } = await listCoordinatorOverview({ client });
+
+    expect(row).toEqual({ id: COORDINATOR_A, fullName: 'Omar Okafor', activeEvents: 1, byStatus: { ...zeros(), [STATUS.APPROVED]: 1 } });
+  });
+
   it('SCRUM487_AC2_a_safety_event_is_counted_under_its_own_status_and_in_the_pickers_count', async () => {
     // AC2-12, open until SCRUM-488 added the statuses. One event in Safety
     // review is one under safety_review, in the total, and in the picker.
@@ -343,6 +368,14 @@ describe('SCRUM-487 AC3: the Lead filters the list and can include finished even
 
     await expect(listAssignedEventsForLead({ client, status })).resolves.toEqual([]);
     expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM487_AC3_a_read_with_no_data_is_an_empty_list_and_no_name_read', async () => {
+    // PostgREST answers a list with [], not null; this pins the fallback anyway.
+    const client = createReadQueueClient([ok(null)]);
+
+    await expect(listAssignedEventsForLead({ client })).resolves.toEqual([]);
+    expect(trail(client)).toEqual(['event_requests']);
   });
 
   it('SCRUM487_AC3_a_finished_status_with_include_finished_is_read', async () => {
