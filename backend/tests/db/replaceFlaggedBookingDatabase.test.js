@@ -15,7 +15,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createSchemaDb, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
 import { queriesFor, refusal } from './helpers/queries.js';
-import { decideBooking } from './helpers/bookingFlow.js';
+import { decideBooking, reinstateBooking } from './helpers/bookingFlow.js';
 import { flagForReason } from './helpers/flaggedBookings.js';
 import { clientsCanExecute } from './helpers/grants.js';
 import { at } from '../fixtures/time.js';
@@ -242,7 +242,7 @@ describe('SCRUM-266: a coordinator lists and replaces flagged bookings', () => {
       const event = await makeEvent();
       const isFlagged = await flagged(event);
       const replacement = (await request(event, await makeVenue(), isFlagged)).booking.id;
-      await one('select reinstate_flagged_booking($1, $2, $3)', [isFlagged, staff, 'Block moved']);
+      await reinstateBooking(db, isFlagged, { caller: staff });
 
       const row = await queued(replacement);
 
@@ -402,7 +402,7 @@ describe('SCRUM-266: a coordinator lists and replaces flagged bookings', () => {
       const event = await makeEvent();
       const isFlagged = await flagged(event);
       const replacement = (await request(event, await makeVenue(), isFlagged)).booking.id;
-      await one('select reinstate_flagged_booking($1, $2, $3)', [isFlagged, staff, 'Block moved']);
+      await reinstateBooking(db, isFlagged, { caller: staff });
 
       const result = await decide(replacement);
 

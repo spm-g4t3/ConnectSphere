@@ -27,6 +27,7 @@ import {
 import { statusMessageOf } from "../services/apiErrors";
 import { asList } from "../services/displayFormat";
 import { formatVenuePeriod } from "../services/datetimeFormat";
+import { expectedPeriod, movesToEventPeriod } from "../services/flaggedBookingDisplay";
 
 const LIST_ERROR_MESSAGES = {
   403: "Only Venue Staff can see flagged bookings.",
@@ -213,7 +214,9 @@ export default function FlaggedBookings({ asPage = false }) {
                 error={ownError?.message ?? null}
                 conflicts={ownError?.conflicts ?? []}
                 onReinstate={(target, reason) =>
-                  resolve(target, "reinstate", () => reinstateFlaggedBooking(target.id, reason))
+                  resolve(target, "reinstate", () =>
+                    reinstateFlaggedBooking(target.id, reason, expectedPeriod(target, movesToEventPeriod(target))),
+                  )
                 }
                 onCancel={(target, reason) =>
                   resolve(target, "cancel", () => cancelFlaggedBooking(target.id, reason))

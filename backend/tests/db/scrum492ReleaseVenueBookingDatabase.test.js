@@ -365,6 +365,25 @@ describe('SCRUM-492: releasing one venue booking', () => {
       }]);
     });
 
+    it('SCRUM593_AC1_a_request_whose_event_moved_off_the_released_period_still_returns_to_pending', async () => {
+      // R was marked conflicting at its own 13:00-17:00; its event then moved
+      // to 19:00-20:00, where nothing stands. Releasing B frees R's own period.
+      const { other, request, booking } = await conflictingBehind();
+      await db.query('update event_requests set proposed_start = $2, proposed_end = $3 where id = $1', [
+        other,
+        at('19:00'),
+        at('20:00'),
+      ]);
+
+      const result = await release(booking);
+
+      expect(result.returned_to_pending).toEqual([request]);
+      expect(await statusOf(request)).toBe('pending');
+      expect(await noticesAbout(request, 'booking_request_conflict_cleared')).toEqual([
+        { recipient_id: otherCoordinator, payload: expect.objectContaining({ releasedBookingId: booking }) },
+      ]);
+    });
+
     it('SCRUM492_AC4_a_request_still_blocked_by_another_approved_booking_stays_conflicting', async () => {
       // AC4-02: a third event's booking 15:30-17:00 still occupies R's period.
       const { venue, request, booking } = await conflictingBehind();

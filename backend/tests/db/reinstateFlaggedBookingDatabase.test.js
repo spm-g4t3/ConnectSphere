@@ -19,7 +19,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createSchemaDb, returnToLeadQueue, seedBooking, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
 import { queriesFor, refusal } from './helpers/queries.js';
-import { approveBooking, decideBooking } from './helpers/bookingFlow.js';
+import { approveBooking, decideBooking, reinstateBooking } from './helpers/bookingFlow.js';
 import { blockFlagging, flagForReason, flaggedByBlock } from './helpers/flaggedBookings.js';
 import { clientsCanExecute } from './helpers/grants.js';
 import { at } from '../fixtures/time.js';
@@ -70,10 +70,8 @@ describe('SCRUM-266 AC2 and AC5: reinstating a flagged booking', () => {
   const flagged = async ({ venueId, eventId } = {}) =>
     flaggedByBlock(db, { venueId: venueId ?? (await makeVenue()), eventId: eventId ?? (await makeEvent()), caller: staff });
 
-  const reinstate = async (bookingId, { caller = staff, reason = 'Block moved' } = {}) =>
-    (
-      await one('select reinstate_flagged_booking($1, $2, $3) as result', [bookingId, caller, reason])
-    ).result;
+  const reinstate = (bookingId, { caller = staff, reason = 'Block moved', expected, suitability } = {}) =>
+    reinstateBooking(db, bookingId, { caller, reason, expected, suitability });
 
   const bookingRow = (id) => one('select * from bookings where id = $1', [id]);
   const resolutionsFor = (id) => rows('select * from booking_resolutions where booking_id = $1', [id]);
@@ -315,7 +313,7 @@ describe('SCRUM-266 AC2 and AC5: reinstating a flagged booking', () => {
     });
 
     it('SCRUM266_AC2_the_function_is_not_granted_to_anon_or_authenticated', async () => {
-      expect(await clientsCanExecute(db, 'reinstate_flagged_booking(uuid, uuid, text)')).toEqual([]);
+      expect(await clientsCanExecute(db, 'reinstate_flagged_booking(uuid, uuid, text, timestamptz, timestamptz, jsonb)')).toEqual([]);
     });
   });
 
@@ -855,6 +853,49 @@ describe('SCRUM-266 AC2 and AC5: reinstating a flagged booking', () => {
       expect(new Date(result.resolution.previous_starts_at)).toEqual(new Date(at('14:00')));
     });
 
+    it('SCRUM593_AC1_a_period_other_than_the_one_reinstating_would_book_is_refused_and_nothing_is_written', async () => {
+      const { id } = await flaggedByMove(await makeVenue());
+      const before = await bookingRow(id);
+
+      // Venue Staff were shown the booking's own period, before the event moved.
+      const err = await refusal(reinstate(id, { expected: [at('14:00'), at('16:00')] }));
+
+      expect(err?.code).toBe('PT409');
+      expect(err?.hint).toBe('BOOKING_PERIOD_CHANGED');
+      expect(await bookingRow(id)).toEqual(before);
+      expect(await resolutionsFor(id)).toEqual([]);
+    });
+
+    it('SCRUM593_AC1_reinstating_without_the_period_shown_is_refused', async () => {
+      const { id } = await flaggedByMove(await makeVenue());
+      const before = await bookingRow(id);
+
+      expect((await refusal(reinstate(id, { expected: null })))?.code).toBe('22023');
+      expect(await bookingRow(id)).toEqual(before);
+      expect(await resolutionsFor(id)).toEqual([]);
+    });
+
+    const CLOSED = {
+      suitable: false,
+      criteria: [{ criterion: 'Operating hours', met: false, detail: 'Closes 18:00' }],
+      checked: { startsAt: at('18:00'), endsAt: at('20:00') },
+    };
+
+    it('SCRUM593_AC1_a_move_records_the_suitability_at_the_new_period_as_not_overridden', async () => {
+      const { id } = await flaggedByMove(await makeVenue());
+      // The coordinator confirmed an unsuitable venue at the old period.
+      await db.query(
+        `update bookings set suitability_result = $2::jsonb, suitability_overridden = true where id = $1`,
+        [id, JSON.stringify({ suitable: false, criteria: [{ criterion: 'Capacity', met: false }] })],
+      );
+
+      const result = await reinstate(id, { suitability: CLOSED });
+
+      expect(result.outcome).toBe('reinstated');
+      expect(await bookingRow(id)).toMatchObject({ status: 'approved', suitability_result: CLOSED, suitability_overridden: false });
+      expect(result.booking).toMatchObject({ suitability_result: CLOSED, suitability_overridden: false });
+    });
+
     it('SCRUM593_AC2_another_events_booking_over_the_padded_new_period_is_a_conflict', async () => {
       const venue = await makeVenue();
       const { id } = await flaggedByMove(venue);
@@ -888,6 +929,24 @@ describe('SCRUM-266 AC2 and AC5: reinstating a flagged booking', () => {
       expect(await resolutionsFor(id)).toEqual([
         expect.objectContaining({ previous_starts_at: null, previous_ends_at: null }),
       ]);
+    });
+
+    it('SCRUM593_AC3_a_booking_that_keeps_its_own_period_keeps_its_stored_suitability', async () => {
+      const { id, eventId, blockId } = await flagged();
+      await db.query('update venue_blocks set removed_at = now() where id = $1', [blockId]);
+      await db.query(
+        'update event_requests set proposed_start = $2, proposed_end = $3 where id = $1',
+        [eventId, at('14:30'), at('15:30')],
+      );
+      const stored = { suitable: false, criteria: [{ criterion: 'Capacity', met: false }] };
+      await db.query(
+        `update bookings set suitability_result = $2::jsonb, suitability_overridden = true where id = $1`,
+        [id, JSON.stringify(stored)],
+      );
+
+      await reinstate(id, { suitability: { suitable: true, criteria: [] } });
+
+      expect(await bookingRow(id)).toMatchObject({ status: 'approved', suitability_result: stored, suitability_overridden: true });
     });
 
     it('SCRUM593_AC4_a_block_flagged_booking_whose_event_moved_off_the_block_is_approved_at_the_new_period', async () => {

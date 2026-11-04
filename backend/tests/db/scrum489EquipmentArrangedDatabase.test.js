@@ -15,6 +15,7 @@ import { getAttendeeEvent } from '../../src/services/attendeeEventService.js';
 import { createSchemaDb, seedBooking, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
 import { queriesFor, refusal } from './helpers/queries.js';
 import { clientsCanExecute } from './helpers/grants.js';
+import { reinstateBooking } from './helpers/bookingFlow.js';
 
 const DAY = 86_400_000;
 const at = (days) => new Date(Date.now() + days * DAY).toISOString();
@@ -264,7 +265,7 @@ describe('SCRUM-489 (SCRUM-559): readiness reads SCRUM-300\'s Arranged', () => {
       await approveChange(id, 'proposed_start', moved.toISOString());
       expect(await read()).toEqual(unavailable);
 
-      await db.query('select reinstate_flagged_booking($1, $2, $3)', [booking.id, venueStaff, 'Hall still free']);
+      await reinstateBooking(db, booking.id, { caller: venueStaff, reason: 'Hall still free' });
       await db.query('select start_equipment_review($1, $2)', [id, technician]);
       await db.query('select move_equipment_reservation($1, $2, $3, $4)',
         [id, technician, reservation.id, 'Moved to the new start']);
@@ -297,9 +298,8 @@ describe('SCRUM-489 (SCRUM-559): readiness reads SCRUM-300\'s Arranged', () => {
       await expect(db.query('select submit_event_for_safety_review($1, $2)', [id, coordinator]))
         .rejects.toMatchObject({ code: 'PT409' });
 
-      const resolved = await one('select reinstate_flagged_booking($1, $2, $3) as result',
-        [booking.id, venueStaff, 'Hall remains suitable']);
-      expect(resolved.result.outcome).toBe('reinstated');
+      const resolved = await reinstateBooking(db, booking.id, { caller: venueStaff, reason: 'Hall remains suitable' });
+      expect(resolved.outcome).toBe('reinstated');
       expect((await readiness(id)).ready).toBe(false);
       await db.query('select start_equipment_review($1, $2)', [id, technician]);
       await db.query('select keep_equipment_reservation($1, $2, $3, $4)',

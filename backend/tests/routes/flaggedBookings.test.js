@@ -68,16 +68,31 @@ const reinstated = () =>
 const signedInWithRole = signedInFor(STAFF_ID, 'user@example.com');
 const asStaff = signedInWithRole(ROLE.VENUE_STAFF);
 
-const appWith = ({ client, requireAuth = asStaff }) =>
+const appWith = ({ client, requireAuth = asStaff, checkSuitability }) =>
   express()
     .use(express.json())
-    .use('/api/flagged-bookings', createFlaggedBookingRouter({ client, requireAuth }));
+    .use('/api/flagged-bookings', createFlaggedBookingRouter({ client, requireAuth, checkSuitability }));
 
-/** Sends { reason: 'Block moved' } unless a body is given; `body: undefined` sends none. */
+/** SCRUM-593: the period Venue Staff were shown, the booking's own here. */
+const SHOWN = { expectedStartsAt: START, expectedEndsAt: END };
+
+/**
+ * The client, also answering the reinstatement's read of the booking with
+ * `read`: by default one still covering its event, so nothing is re-judged.
+ */
+const UNMOVED = { id: BOOKING_ID, event_request_id: EVENT_ID, venue_id: VENUE_ID, starts_at: START, ends_at: END };
+const withRead = (client, read = ok({ ...UNMOVED, event_requests: { proposed_start: START, proposed_end: END } })) => {
+  const chain = { select: () => chain, eq: () => chain, maybeSingle: async () => read };
+  return Object.assign(client, { from: () => chain });
+};
+
+/** Sends { reason: 'Block moved', ...SHOWN } unless a body is given; `body: undefined` sends none. */
 const reinstate = (client, options = {}) => {
-  const { requireAuth, id = BOOKING_ID } = options;
-  const body = 'body' in options ? options.body : { reason: 'Block moved' };
-  const req = request(appWith({ client, requireAuth })).post(`/api/flagged-bookings/${id}/reinstate`);
+  const { requireAuth, id = BOOKING_ID, checkSuitability } = options;
+  const body = 'body' in options ? options.body : { reason: 'Block moved', ...SHOWN };
+  const req = request(appWith({ client: client.from ? client : withRead(client), requireAuth, checkSuitability })).post(
+    `/api/flagged-bookings/${id}/reinstate`,
+  );
   return body === undefined ? req : req.send(body);
 };
 
@@ -85,7 +100,7 @@ describe('SCRUM-266: Venue Staff reinstate a flagged booking', () => {
   it('SCRUM266_AC5_reinstate_is_200_with_the_booking_and_its_resolution_and_the_caller_from_the_token', async () => {
     const client = createRpcQueueClient([reinstated()]);
 
-    const res = await reinstate(client, { body: { reason: '  Block moved ', callerId: COORDINATOR_ID, status: 'pending' } });
+    const res = await reinstate(client, { body: { reason: '  Block moved ', callerId: COORDINATOR_ID, status: 'pending', ...SHOWN } });
 
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({
@@ -107,7 +122,14 @@ describe('SCRUM-266: Venue Staff reinstate a flagged booking', () => {
     expect(client.calls).toEqual([
       {
         fn: 'reinstate_flagged_booking',
-        args: { p_booking_id: BOOKING_ID, p_caller: STAFF_ID, p_reason: 'Block moved' },
+        args: {
+          p_booking_id: BOOKING_ID,
+          p_caller: STAFF_ID,
+          p_reason: 'Block moved',
+          p_expected_starts_at: START,
+          p_expected_ends_at: END,
+          p_suitability: null,
+        },
       },
     ]);
   });
@@ -142,9 +164,9 @@ describe('SCRUM-266: Venue Staff reinstate a flagged booking', () => {
 
   it.each([
     ['no body', undefined],
-    ['no reason', {}],
-    ['a blank reason', { reason: '   ' }],
-    ['a reason over 1000 characters', { reason: 'x'.repeat(1001) }],
+    ['no reason', { ...SHOWN }],
+    ['a blank reason', { reason: '   ', ...SHOWN }],
+    ['a reason over 1000 characters', { reason: 'x'.repeat(1001), ...SHOWN }],
   ])('SCRUM266_AC5_%s_is_400_and_never_queries', async (_label, body) => {
     const client = createRpcQueueClient([reinstated()]);
     const res = await reinstate(client, { body });
@@ -177,6 +199,23 @@ describe('SCRUM-266: Venue Staff reinstate a flagged booking', () => {
     const res = await reinstate(createRpcQueueClient([dbError('PT409', 'refused', { hint })]));
     expect(res.status).toBe(409);
     expect(res.body).toEqual({ error: 'refused', code: hint, conflicts: [] });
+  });
+
+  it.each([
+    ['no period', { reason: 'Block moved' }, ['expectedStartsAt', 'expectedEndsAt']],
+    ['a date with no time', { reason: 'Block moved', ...SHOWN, expectedEndsAt: '2026-12-01' }, ['expectedEndsAt']],
+  ])('SCRUM593_AC1_reinstating_with_%s_is_400_and_never_queries', async (_label, body, fields) => {
+    const client = createRpcQueueClient([reinstated()]);
+    const res = await reinstate(client, { body });
+    expect(res.status).toBe(400);
+    expect(res.body.details.map((d) => d.field)).toEqual(fields);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM593_AC1_a_period_that_has_changed_since_it_was_shown_is_409_BOOKING_PERIOD_CHANGED', async () => {
+    const res = await reinstate(createRpcQueueClient([dbError('PT409', 'not the period shown', { hint: 'BOOKING_PERIOD_CHANGED' })]));
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ error: 'not the period shown', code: 'BOOKING_PERIOD_CHANGED', conflicts: [] });
   });
 
   it('SCRUM266_AC2_a_booking_changed_under_the_call_is_409_BOOKING_CHANGED', async () => {
@@ -487,6 +526,23 @@ describe('SCRUM-266: Venue Staff list the flagged bookings', () => {
       ],
       [],
     ]);
+  });
+
+  it('SCRUM593_AC1_a_booking_reinstating_would_move_carries_its_suitability_at_the_new_times', async () => {
+    const CLOSED = { suitable: false, criteria: [{ criterion: 'Operating hours', met: false }] };
+    const checkSuitability = vi.fn(async () => CLOSED);
+    const client = createRpcQueueClient([
+      ok([
+        flaggedRow({ event_starts_at: '2026-12-02T09:00:00+00:00', event_ends_at: '2026-12-02T17:00:00+00:00' }),
+        flaggedRow({ id: OTHER_BOOKING_ID }),
+      ]),
+    ]);
+
+    const res = await request(appWith({ client, checkSuitability })).get('/api/flagged-bookings');
+
+    expect(res.status).toBe(200);
+    expect(res.body.map((item) => item.suitabilityAtNewTimes)).toEqual([CLOSED, null]);
+    expect(checkSuitability).toHaveBeenCalledTimes(1);
   });
 
   it('SCRUM266_AC1_list_is_200_with_an_empty_array_when_nothing_is_flagged', async () => {

@@ -40,18 +40,48 @@ const BLOCK = '99999999-9999-4999-8999-999999999999';
 const RESOLUTION = '77777777-7777-4777-8777-777777777777';
 const OTHER_BOOKING = '66666666-6666-4666-8666-666666666666';
 
-/** A client that answers each rpc from the queue, recording the calls. */
-function clientAnswering(...results) {
+/** SCRUM-593: the period Venue Staff were shown, the booking's own here. */
+const SHOWN = { expectedStartsAt: '2026-12-01T06:00:00+00:00', expectedEndsAt: '2026-12-01T08:00:00+00:00' };
+
+/** A reinstatement's read of the booking: still covering its event, so nothing is re-judged. */
+const unmovedRead = () => ({
+  data: {
+    id: BOOKING,
+    event_request_id: EVENT,
+    venue_id: VENUE,
+    starts_at: SHOWN.expectedStartsAt,
+    ends_at: SHOWN.expectedEndsAt,
+    event_requests: { proposed_start: SHOWN.expectedStartsAt, proposed_end: SHOWN.expectedEndsAt },
+  },
+  error: null,
+});
+
+/** A from() chain answering the reinstatement's read of the booking. */
+const reading = (read) => ({ select: () => reading(read), eq: () => reading(read), maybeSingle: async () => read });
+
+/**
+ * A client that answers each rpc from the queue, recording the calls; the
+ * reinstatement's read of the booking is answered by `read` and recorded in reads.
+ */
+function clientReading(read, ...results) {
   const queue = [...results];
   const calls = [];
+  const reads = [];
   return {
     calls,
+    reads,
+    from(table) {
+      reads.push(table);
+      return reading(read);
+    },
     rpc(fn, args) {
       calls.push({ fn, args });
       return Promise.resolve(queue.shift());
     },
   };
 }
+
+const clientAnswering = (...results) => clientReading(unmovedRead(), ...results);
 
 const failure = (code, message = 'db message', extra = {}) => ({ data: null, error: { code, message, ...extra } });
 
@@ -99,7 +129,7 @@ const reinstated = () => ({
   error: null,
 });
 
-const reinstate = (client, input = { reason: 'Block moved' }, id = BOOKING, caller = STAFF) =>
+const reinstate = (client, input = { reason: 'Block moved', ...SHOWN }, id = BOOKING, caller = STAFF) =>
   reinstateFlaggedBooking(id, caller, input, { client });
 
 describe('SCRUM266 refusals before any call', () => {
@@ -133,12 +163,19 @@ describe('SCRUM266 the call and its result', () => {
   it('SCRUM266_AC2_sends_the_normalised_id_the_caller_and_the_trimmed_reason', async () => {
     const client = clientAnswering(reinstated());
 
-    await reinstate(client, { reason: '  Block moved  ', callerId: 'someone-else' }, BOOKING.toUpperCase());
+    await reinstate(client, { reason: '  Block moved  ', callerId: 'someone-else', ...SHOWN }, BOOKING.toUpperCase());
 
     expect(client.calls).toEqual([
       {
         fn: 'reinstate_flagged_booking',
-        args: { p_booking_id: BOOKING, p_caller: STAFF, p_reason: 'Block moved' },
+        args: {
+          p_booking_id: BOOKING,
+          p_caller: STAFF,
+          p_reason: 'Block moved',
+          p_expected_starts_at: SHOWN.expectedStartsAt,
+          p_expected_ends_at: SHOWN.expectedEndsAt,
+          p_suitability: null,
+        },
       },
     ]);
   });
@@ -179,12 +216,13 @@ describe('SCRUM266 the call and its result', () => {
 
   it('SCRUM266_AC2_uses_the_default_client_when_none_is_given', async () => {
     const calls = [];
+    defaultClient.from = () => reading(unmovedRead());
     defaultClient.rpc = (fn, args) => {
       calls.push({ fn, args });
       return Promise.resolve(reinstated());
     };
 
-    const result = await reinstateFlaggedBooking(BOOKING, STAFF, { reason: 'Block moved' });
+    const result = await reinstateFlaggedBooking(BOOKING, STAFF, { reason: 'Block moved', ...SHOWN });
 
     expect(result.status).toBe('approved');
     expect(calls.map((c) => c.fn)).toEqual(['reinstate_flagged_booking']);
@@ -213,6 +251,50 @@ describe('SCRUM266 the call and its result', () => {
         previousStartsAt: '2026-12-01T06:00:00+00:00',
         previousEndsAt: '2026-12-01T08:00:00+00:00',
       },
+    });
+  });
+});
+
+describe('SCRUM593 reinstating at the event\'s new period', () => {
+  /** The event moved from 06:00-08:00 to 10:00-12:00; Venue Staff were shown the new period. */
+  const SHOWN_NEW = { expectedStartsAt: '2026-12-01T10:00:00+00:00', expectedEndsAt: '2026-12-01T12:00:00+00:00' };
+  const movedRead = () => ({
+    data: {
+      ...unmovedRead().data,
+      room_layout_code: 'theatre',
+      expected_attendance: 150,
+      suitability_result: null,
+      event_requests: { proposed_start: SHOWN_NEW.expectedStartsAt, proposed_end: SHOWN_NEW.expectedEndsAt },
+    },
+    error: null,
+  });
+  const CLOSED = { suitable: false, criteria: [{ criterion: 'Operating hours', met: false }] };
+
+  it.each([
+    ['no period', { reason: 'Free then' }, ['expectedStartsAt', 'expectedEndsAt']],
+    ['a period with no offset', { reason: 'Free then', ...SHOWN, expectedStartsAt: '2026-12-01T06:00' }, ['expectedStartsAt']],
+  ])('SCRUM593_AC1_reinstating_with_%s_is_refused_before_any_call', async (_label, input, fields) => {
+    const client = clientAnswering();
+    const err = await reinstateFlaggedBooking(BOOKING, STAFF, input, { client }).catch((e) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details.map((d) => d.field)).toEqual(fields);
+    expect(client.reads).toHaveLength(0);
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM593_AC1_a_reinstatement_that_moves_the_booking_records_its_suitability_at_the_new_period', async () => {
+    const checkSuitability = vi.fn(async () => CLOSED);
+    const client = clientReading(movedRead(), reinstated());
+
+    await reinstateFlaggedBooking(BOOKING, STAFF, { reason: 'Free then', ...SHOWN_NEW }, { client, checkSuitability });
+
+    expect(checkSuitability).toHaveBeenCalledWith(
+      expect.objectContaining({ eventRequestId: EVENT, venueId: VENUE, roomLayoutCode: 'theatre', expectedAttendance: 150 }),
+    );
+    expect(client.calls[0].args).toMatchObject({
+      p_expected_starts_at: SHOWN_NEW.expectedStartsAt,
+      p_expected_ends_at: SHOWN_NEW.expectedEndsAt,
+      p_suitability: CLOSED,
     });
   });
 });
@@ -324,6 +406,12 @@ describe('SCRUM266 how database errors become typed errors', () => {
     expect(err.code).toBe(hint);
     expect(err.message).toBe('refused');
     expect(err.conflicts).toEqual([]);
+  });
+
+  it('SCRUM593_AC1_PT409_BOOKING_PERIOD_CHANGED_is_a_conflict_with_that_code', async () => {
+    const err = await reinstate(clientAnswering(failure('PT409', 'not the period shown', { hint: 'BOOKING_PERIOD_CHANGED' }))).catch((e) => e);
+    expect(err).toBeInstanceOf(ConflictError);
+    expect(err.code).toBe('BOOKING_PERIOD_CHANGED');
   });
 
   it('SCRUM266_AC2_PT409_with_no_hint_is_a_conflict_with_a_null_code', async () => {
@@ -635,6 +723,7 @@ describe('SCRUM266 listing flagged bookings', () => {
         },
         reinstatable: false,
         replacementRequests: [],
+        suitabilityAtNewTimes: null,
       });
     });
 
@@ -715,6 +804,7 @@ describe('SCRUM266 listing flagged bookings', () => {
         block: { id: BLOCK, reason: null, notes: null, startsAt: null, endsAt: null, removedAt: null },
         reinstatable: false,
         replacementRequests: [],
+        suitabilityAtNewTimes: null,
       });
     });
 
@@ -728,6 +818,37 @@ describe('SCRUM266 listing flagged bookings', () => {
       const [item] = await list(clientAnswering(listed(flaggedRow({ reinstatable: value }))));
 
       expect(item.reinstatable).toBe(expected);
+    });
+
+    it('SCRUM593_AC1_a_booking_reinstating_would_move_carries_its_suitability_at_the_new_times', async () => {
+      const CLOSED = { suitable: false, criteria: [{ criterion: 'Operating hours', met: false }] };
+      const checkSuitability = vi.fn(async () => CLOSED);
+      const movedOff = { reinstatable: true, review_reason: 'event_changed', event_starts_at: '2026-12-01T10:00:00+00:00', event_ends_at: '2026-12-01T12:00:00+00:00' };
+      const client = clientAnswering(
+        listed(
+          flaggedRow({ ...movedOff, room_layout_code: 'theatre', expected_attendance: 90, suitability_result: null }),
+          // Still covers its event's period, so it keeps its own.
+          flaggedRow({ id: OTHER_BOOKING, reinstatable: true, event_starts_at: '2026-12-01T06:00:00+00:00', event_ends_at: '2026-12-01T08:00:00+00:00' }),
+          // A safety flag is never reinstated, so it is never re-judged.
+          flaggedRow({ id: BLOCK, ...movedOff, reinstatable: false }),
+          // No period on the event: nothing to reinstate at.
+          flaggedRow({ id: RESOLUTION, reinstatable: true, event_starts_at: null, event_ends_at: null }),
+        ),
+      );
+
+      const items = await listFlaggedBookings(STAFF, { client, checkSuitability });
+
+      expect(items.map((item) => item.suitabilityAtNewTimes)).toEqual([CLOSED, null, null, null]);
+      expect(checkSuitability).toHaveBeenCalledTimes(1);
+      expect(checkSuitability).toHaveBeenCalledWith({
+        eventRequestId: EVENT,
+        venueId: VENUE,
+        roomLayoutCode: 'theatre',
+        accessibility: [],
+        facilities: [],
+        expectedAttendance: 90,
+        client,
+      });
     });
 
     it('SCRUM266_AC1_list_uses_the_default_client_when_none_is_given', async () => {
@@ -831,7 +952,11 @@ describe('SCRUM266 the coordinator lists one event\'s flagged bookings', () => {
   });
 
   it('SCRUM266_W7_each_item_is_the_list_shape_plus_its_replacement_requests_in_camel_case', async () => {
-    const [venueStaffItem] = await listFlaggedBookings(STAFF, { client: clientAnswering(listed(eventRow())) });
+    // SCRUM-593: suitabilityAtNewTimes is for Venue Staff, who reinstate; the coordinator cannot.
+    const [{ suitabilityAtNewTimes, ...venueStaffItem }] = await listFlaggedBookings(STAFF, {
+      client: clientAnswering(listed(eventRow())),
+    });
+    expect(suitabilityAtNewTimes).toBeNull();
 
     const [item] = await listForEvent(clientAnswering(listed(eventRow())));
 

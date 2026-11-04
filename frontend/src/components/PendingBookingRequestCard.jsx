@@ -112,6 +112,10 @@ export default function PendingBookingRequestCard({
   // The period an approval books: the event's current times once it moved.
   // Setup and turnaround are read against these, not the request's old times.
   const approvalPeriod = moved ? { ...item, startsAt: item.eventStartsAt, endsAt: item.eventEndsAt } : item;
+  // Re-run by the server at the approval period; null when nothing moves.
+  const newTimesSuitability = moved ? item.suitabilityAtNewTimes ?? null : null;
+  const unsuitableAtNewTimes = newTimesSuitability?.suitable === false;
+  const advisoryNoteId = `${regionId}-advisory`;
 
   // Hints only, so Venue Staff are not offered a refusal the server is certain
   // to give (EVENT_NOT_BOOKABLE, BOOKING_PERIOD_CONFLICT); it re-checks both
@@ -221,8 +225,16 @@ export default function PendingBookingRequestCard({
             suitabilityOverridden={item.suitabilityOverridden}
             overriddenCriteria={item.overriddenCriteria}
           />
-          {/* Suitability is advisory and not re-run when the event moves. */}
-          {moved && item.suitability && (
+          {newTimesSuitability && (
+            <BookingSuitabilitySummary
+              suitability={newTimesSuitability}
+              suitabilityOverridden={false}
+              overriddenCriteria={[]}
+              label="Suitability at the event's new times"
+            />
+          )}
+          {/* Without a re-check, the only result on screen is for the old times. */}
+          {moved && !newTimesSuitability && item.suitability && (
             <p className="pending-bookings__event-status">
               Suitability was checked for the request&apos;s original times.
             </p>
@@ -255,10 +267,17 @@ export default function PendingBookingRequestCard({
                 Conflicting.
               </p>
             )}
+            {/* Suitability is advisory, so this warns but never disables Approve. */}
+            {unsuitableAtNewTimes && (
+              <p id={advisoryNoteId} className="pending-bookings__event-status">
+                This venue doesn&apos;t meet the event&apos;s needs at the new times. Suitability is advisory, so
+                the request can still be approved.
+              </p>
+            )}
             <Button
               onClick={() => onApprove(item)}
               disabled={busy || Boolean(approveBlockedBy)}
-              aria-describedby={approveBlockedBy}
+              aria-describedby={approveBlockedBy ?? (unsuitableAtNewTimes ? advisoryNoteId : undefined)}
             >
               {deciding === "approve" ? "Approving..." : "Approve"}
             </Button>

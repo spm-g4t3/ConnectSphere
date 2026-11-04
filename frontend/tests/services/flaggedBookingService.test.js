@@ -64,21 +64,25 @@ describe("getEventFlaggedBookings", () => {
 });
 
 describe("reinstateFlaggedBooking", () => {
-  it("SCRUM266_AC2_posts_the_reason_to_the_reinstate_route_and_returns_the_booking", async () => {
+  it("SCRUM593_AC10_posts_the_reason_and_expected_period_to_the_reinstate_route_and_returns_the_booking", async () => {
     const booking = { id: "b1", status: "approved", resolution: { action: "reinstated" } };
     vi.mocked(apiClient.post).mockResolvedValue({ data: booking });
+    const expected = { expectedStartsAt: "2026-12-03T09:00:00+08:00", expectedEndsAt: "2026-12-03T17:00:00+08:00" };
 
-    await expect(reinstateFlaggedBooking("b1", "Block lifted")).resolves.toBe(booking);
+    await expect(reinstateFlaggedBooking("b1", "Block lifted", expected)).resolves.toBe(booking);
 
     expect(apiClient.post).toHaveBeenCalledTimes(1);
-    expect(apiClient.post).toHaveBeenCalledWith("/flagged-bookings/b1/reinstate", { reason: "Block lifted" });
+    expect(apiClient.post).toHaveBeenCalledWith("/flagged-bookings/b1/reinstate", {
+      reason: "Block lifted",
+      ...expected,
+    });
   });
 
   it("SCRUM266_AC2_lets_a_reinstate_failure_through_for_the_caller_to_read", async () => {
     const err = failure(409);
     vi.mocked(apiClient.post).mockRejectedValue(err);
 
-    await expect(reinstateFlaggedBooking("b1", "x")).rejects.toBe(err);
+    await expect(reinstateFlaggedBooking("b1", "x", {})).rejects.toBe(err);
   });
 });
 

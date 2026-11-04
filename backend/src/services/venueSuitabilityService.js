@@ -682,9 +682,10 @@ class StoredRequirementsError extends Error {}
  * list that is absent or null: none asked for, as before. Anything else that
  * is not a list of non-empty strings cannot be judged, and is refused rather
  * than dropped, since judging fewer codes than were asked for could report a
- * venue as suitable when it is not.
+ * venue as suitable when it is not. Exported for SCRUM-593, which re-judges a
+ * booking at its event's new period with the same codes.
  */
-function storedCodes(stored) {
+export function storedCodes(stored) {
   const checked = typeof stored === 'object' && stored !== null ? stored.checked : undefined;
   if (checked === undefined || checked === null) return { accessibility: [], facilities: [] };
   if (typeof checked !== 'object' || Array.isArray(checked)) {

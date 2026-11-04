@@ -410,7 +410,10 @@ describe("approving (AC2, AC3, AC5)", () => {
 
     await user.click(within(region).getByRole("button", { name: "Approve" }));
 
-    expect(approveBookingRequest).toHaveBeenCalledWith("1");
+    expect(approveBookingRequest).toHaveBeenCalledWith("1", {
+      expectedStartsAt: "2026-12-01T09:00:00+08:00",
+      expectedEndsAt: "2026-12-01T17:00:00+08:00",
+    });
     const notice = await screen.findByRole("status");
     expect(notice).toHaveTextContent("Approved Hall 1 for Event 1.");
     expect(notice).toHaveTextContent("2 overlapping requests were marked Conflicting.");
@@ -878,7 +881,7 @@ describe("a request whose event has moved (SCRUM-593)", () => {
 
   it("SCRUM593_AC11_a_moved_requests_suitability_says_it_was_checked_for_the_original_times", async () => {
     vi.mocked(getPendingBookingRequests).mockResolvedValue([
-      item("1", { eventStartsAt: NEW_STARTS, eventEndsAt: NEW_ENDS, suitability: UNSUITABLE }),
+      item("1", { eventStartsAt: NEW_STARTS, eventEndsAt: NEW_ENDS, suitability: UNSUITABLE, suitabilityAtNewTimes: null }),
     ]);
     const { user } = renderQueue();
     await screen.findByText("Event 1");
@@ -898,4 +901,73 @@ describe("a request whose event has moved (SCRUM-593)", () => {
 
     expect(within(region).queryByText(/Event moved to/)).not.toBeInTheDocument();
   });
+
+  const SUITABLE = { suitable: true, criteria: [{ criterion: "Capacity", met: true, detail: "Fits 120" }] };
+
+  it.each([
+    ["moved", { eventStartsAt: NEW_STARTS, eventEndsAt: NEW_ENDS }, NEW_STARTS, NEW_ENDS],
+    ["not moved", {}, "2026-12-01T09:00:00+08:00", "2026-12-01T17:00:00+08:00"],
+  ])("SCRUM593_AC11_approving_a_%s_request_sends_the_period_the_card_showed", async (_label, event, starts, ends) => {
+    vi.mocked(getPendingBookingRequests).mockResolvedValue([item("1", event)]);
+    vi.mocked(approveBookingRequest).mockResolvedValue({ id: "1", markedConflicting: [] });
+    const { user } = renderQueue();
+    await screen.findByText("Event 1");
+    const region = await openCard(user, "1");
+
+    await user.click(within(region).getByRole("button", { name: "Approve" }));
+
+    expect(approveBookingRequest).toHaveBeenCalledWith("1", { expectedStartsAt: starts, expectedEndsAt: ends });
+  });
+
+  it("SCRUM593_AC12_an_event_moved_since_the_queue_loaded_is_reported_above_the_queue_and_the_queue_refetched", async () => {
+    vi.mocked(getPendingBookingRequests)
+      .mockResolvedValueOnce([item("1", { eventStartsAt: NEW_STARTS, eventEndsAt: NEW_ENDS })])
+      .mockResolvedValueOnce([item("1", { eventStartsAt: "2026-12-04T10:00:00+08:00", eventEndsAt: "2026-12-04T16:00:00+08:00" })]);
+    vi.mocked(approveBookingRequest).mockRejectedValue(conflict("BOOKING_PERIOD_CHANGED"));
+    const { user } = renderQueue();
+    await screen.findByText("Event 1");
+    const region = await openCard(user, "1");
+
+    await user.click(within(region).getByRole("button", { name: "Approve" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The event's date or time changed since this list loaded. The list has been refreshed; check the new times, then approve again.",
+    );
+    expect(getPendingBookingRequests).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("region", { name: "Event 1 at Hall 1" })).not.toBeInTheDocument();
+  });
+
+  it("SCRUM593_AC11_a_moved_request_shows_its_suitability_at_the_new_times_instead_of_the_original_times_note", async () => {
+    vi.mocked(getPendingBookingRequests).mockResolvedValue([
+      item("1", { eventStartsAt: NEW_STARTS, eventEndsAt: NEW_ENDS, suitability: UNSUITABLE, suitabilityAtNewTimes: SUITABLE }),
+    ]);
+    const { user } = renderQueue();
+    await screen.findByText("Event 1");
+    const region = await openCard(user, "1");
+
+    expect(within(region).getByText(/Suitability at the event's new times/)).toHaveTextContent(
+      "Suitability at the event's new times: Suitable",
+    );
+    expect(within(region).queryByText(/checked for the request's original times/)).not.toBeInTheDocument();
+    expect(within(region).queryByText(/doesn't meet the event's needs/)).not.toBeInTheDocument();
+  });
+
+  it("SCRUM593_AC11_a_request_unsuitable_at_the_new_times_says_so_before_approve_and_stays_approvable", async () => {
+    vi.mocked(getPendingBookingRequests).mockResolvedValue([
+      item("1", { eventStartsAt: NEW_STARTS, eventEndsAt: NEW_ENDS, suitabilityAtNewTimes: UNSUITABLE }),
+    ]);
+    const { user } = renderQueue();
+    await screen.findByText("Event 1");
+    const region = await openCard(user, "1");
+
+    expect(within(region).getByText(/Suitability at the event's new times/)).toHaveTextContent(
+      "Suitability at the event's new times: Not suitable",
+    );
+    const approve = within(region).getByRole("button", { name: "Approve" });
+    expect(approve).toBeEnabled();
+    expect(approve).toHaveAccessibleDescription(
+      "This venue doesn't meet the event's needs at the new times. Suitability is advisory, so the request can still be approved.",
+    );
+  });
 });
+

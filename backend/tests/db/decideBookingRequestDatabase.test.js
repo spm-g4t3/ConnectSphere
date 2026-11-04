@@ -69,8 +69,8 @@ describe('SCRUM-258 AC2-AC6: deciding a booking request', () => {
     return { id: await insertBooking(eventId, venueId), eventId };
   }
 
-  const decide = (bookingId, decision, { caller = staff, reason = null, alternative = null } = {}) =>
-    decideBooking(db, bookingId, { caller, decision, reason, alternative });
+  const decide = (bookingId, decision, { caller = staff, reason = null, alternative = null, expected, suitability } = {}) =>
+    decideBooking(db, bookingId, { caller, decision, reason, alternative, expected, suitability });
 
   const bookingRow = (id) => one('select * from bookings where id = $1', [id]);
   const noticesFor = (bookingId) => rows('select * from notifications where booking_id = $1', [bookingId]);
@@ -642,6 +642,63 @@ describe('SCRUM-258 AC2-AC6: deciding a booking request', () => {
 
       const [notice] = await noticesFor(id);
       expect(notice.payload).toMatchObject({ previousStartsAt: null, previousEndsAt: null });
+    });
+
+    it('SCRUM593_AC6_approving_a_period_that_is_no_longer_the_events_is_refused_and_nothing_is_written', async () => {
+      const { id } = await movedRequest(await makeVenue());
+      const before = await bookingRow(id);
+
+      // Venue Staff were shown the request's own period, before the event moved.
+      const err = await refusal(decide(id, 'approve', { expected: [at('14:00'), at('16:00')] }));
+
+      expect(err?.code).toBe('PT409');
+      expect(err?.hint).toBe('BOOKING_PERIOD_CHANGED');
+      expect(await bookingRow(id)).toEqual(before);
+      expect(await decisionNotices(id)).toEqual([]);
+    });
+
+    it('SCRUM593_AC6_approving_without_the_period_shown_is_refused', async () => {
+      const { id } = await movedRequest(await makeVenue());
+      const before = await bookingRow(id);
+
+      const err = await refusal(decide(id, 'approve', { expected: null }));
+
+      expect(err?.code).toBe('22023');
+      expect(await bookingRow(id)).toEqual(before);
+    });
+
+    const CLOSED = {
+      suitable: false,
+      criteria: [{ criterion: 'Operating hours', met: false, detail: 'Closes 18:00' }],
+      checked: { startsAt: at('18:00'), endsAt: at('20:00') },
+    };
+
+    it('SCRUM593_AC6_a_move_records_the_suitability_at_the_new_period_as_not_overridden', async () => {
+      const { id } = await movedRequest(await makeVenue());
+      // The coordinator confirmed an unsuitable venue at the old period.
+      await db.query(
+        `update bookings set suitability_result = $2::jsonb, suitability_overridden = true where id = $1`,
+        [id, JSON.stringify({ suitable: false, criteria: [{ criterion: 'Capacity', met: false }] })],
+      );
+
+      const result = await decide(id, 'approve', { suitability: CLOSED });
+
+      expect(result.outcome).toBe('approved');
+      expect(await bookingRow(id)).toMatchObject({ suitability_result: CLOSED, suitability_overridden: false });
+      expect(result.booking).toMatchObject({ suitability_result: CLOSED, suitability_overridden: false });
+    });
+
+    it('SCRUM593_AC6_an_approval_that_does_not_move_keeps_the_stored_suitability', async () => {
+      const { id } = await pending(await makeVenue());
+      const stored = { suitable: false, criteria: [{ criterion: 'Capacity', met: false }] };
+      await db.query(
+        `update bookings set suitability_result = $2::jsonb, suitability_overridden = true where id = $1`,
+        [id, JSON.stringify(stored)],
+      );
+
+      await decide(id, 'approve', { suitability: CLOSED });
+
+      expect(await bookingRow(id)).toMatchObject({ status: 'approved', suitability_result: stored, suitability_overridden: true });
     });
   });
 });

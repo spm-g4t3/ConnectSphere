@@ -16,7 +16,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createSchemaDb, returnToLeadQueue, seedBooking, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
 import { queriesFor, refusal } from './helpers/queries.js';
-import { approveBooking, decideBooking } from './helpers/bookingFlow.js';
+import { approveBooking, decideBooking, reinstateBooking } from './helpers/bookingFlow.js';
 import { flagForReason, flaggedByBlock } from './helpers/flaggedBookings.js';
 import { clientsCanExecute } from './helpers/grants.js';
 import { at } from '../fixtures/time.js';
@@ -33,6 +33,8 @@ const KEYS = [
   'event_name', 'event_status', 'event_starts_at', 'event_ends_at', 'assigned_coordinator_id',
   'venue_name', 'venue_location', 'block_id', 'block_reason', 'block_notes',
   'block_starts_at', 'block_ends_at', 'block_removed_at', 'reinstatable', 'replacement_requests',
+  // SCRUM-593: what the suitability check at the event's new period judges.
+  'room_layout_code', 'expected_attendance', 'suitability_result',
 ];
 
 describe('SCRUM-266 AC1: listing flagged bookings', () => {
@@ -184,11 +186,7 @@ describe('SCRUM-266 AC1: listing flagged bookings', () => {
       expect(await listedOnly([id])).toHaveLength(1);
 
       await one('select remove_venue_block($1, $2, $3)', [venueId, blockId, staff]);
-      const { result } = await one('select reinstate_flagged_booking($1, $2, $3) as result', [
-        id,
-        staff,
-        'Block removed',
-      ]);
+      const result = await reinstateBooking(db, id, { caller: staff, reason: 'Block removed' });
       expect(result.outcome).toBe('reinstated');
 
       expect(await listedOnly([id])).toEqual([]);

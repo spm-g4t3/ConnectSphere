@@ -43,7 +43,9 @@ export async function getEventFlaggedBookings(eventRequestId) {
  * id, a missing or blank reason, or one over 1000 characters), 401, 403, 404,
  * and 409 with a `code`: BOOKING_NOT_FLAGGED, SAFETY_FLAG_NOT_REINSTATABLE,
  * EVENT_NOT_BOOKABLE, BOOKING_PERIOD_STALE (the event has no period),
- * VENUE_RETIRED, BOOKING_CHANGED, or BOOKING_PERIOD_CONFLICT with `conflicts`.
+ * BOOKING_PERIOD_CHANGED (the event's times changed after the list loaded, so
+ * the expected period no longer matches), VENUE_RETIRED, BOOKING_CHANGED, or
+ * BOOKING_PERIOD_CONFLICT with `conflicts`.
  *
  * A booking that no longer covers its event is moved to the event's period
  * and approved there; its `resolution.previousStartsAt`/`previousEndsAt` then
@@ -51,10 +53,14 @@ export async function getEventFlaggedBookings(eventRequestId) {
  *
  * @param {string} id      the booking's id
  * @param {string} reason  why it is reinstated
+ * @param {Object} expected  the period the card showed reinstating holds: the
+ *   event's times when the booking moves, else its own (SCRUM-593)
+ * @param {string} expected.expectedStartsAt  ISO 8601
+ * @param {string} expected.expectedEndsAt    ISO 8601
  * @returns {Promise<Object>} the booking, now approved, with `resolution`
  */
-export async function reinstateFlaggedBooking(id, reason) {
-  return postData(`/flagged-bookings/${id}/reinstate`, { reason });
+export async function reinstateFlaggedBooking(id, reason, { expectedStartsAt, expectedEndsAt }) {
+  return postData(`/flagged-bookings/${id}/reinstate`, { reason, expectedStartsAt, expectedEndsAt });
 }
 
 /**

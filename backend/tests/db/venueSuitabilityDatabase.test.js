@@ -17,6 +17,10 @@
  * create_booking_request rpc runs on PGlite too, so a request's own
  * attendance is judged, stored and rechecked end to end.
  *
+ * SCRUM-593 adds Venue Staff's lists and approvals over the same client: the
+ * real check judges a request or flagged booking at its event's new period,
+ * and the approval records that result.
+ *
  * Not proved here: the PostgREST select strings, which the service and route
  * tests pin.
  *
@@ -42,7 +46,12 @@ vi.mock('../../src/config/supabaseClient.js', () => ({ supabase: {}, supabaseAdm
 const { checkVenueSuitability, checkEventVenues } = await import(
   '../../src/services/venueSuitabilityService.js'
 );
-const { createBookingRequest } = await import('../../src/services/bookingRequestService.js');
+const { approveBookingRequest, createBookingRequest, listPendingBookingRequests } = await import(
+  '../../src/services/bookingRequestService.js'
+);
+const { listFlaggedBookings, reinstateFlaggedBooking } = await import('../../src/services/flaggedBookingService.js');
+const { decideBooking } = await import('./helpers/bookingFlow.js');
+const { flagForReason } = await import('./helpers/flaggedBookings.js');
 const { ConflictError } = await import('../../src/errors.js');
 
 const ms = (value) => new Date(value).getTime();
@@ -131,6 +140,16 @@ describe('SCRUM-188: suitability judged on real occupancy (PGlite)', () => {
             error: null,
           }),
           maybeSingle: async () => {
+            // SCRUM-593: an approval's read of the booking, with its event's period.
+            if (table === 'bookings') {
+              const booking = await one(
+                `select b.*, json_build_object('proposed_start', er.proposed_start, 'proposed_end', er.proposed_end)
+                          as event_requests
+                   from bookings b join event_requests er on er.id = b.event_request_id where b.id = $1`,
+                [filters.id],
+              );
+              return { data: booking ?? null, error: null };
+            }
             if (table === 'event_requests') {
               return { data: (await one('select * from event_requests where id = $1', [filters.id])) ?? null, error: null };
             }
@@ -140,6 +159,22 @@ describe('SCRUM-188: suitability judged on real occupancy (PGlite)', () => {
         return chain;
       },
       async rpc(fn, args) {
+        // SCRUM-593: Venue Staff's lists and approvals, called with the service's named arguments.
+        if (['list_pending_booking_requests', 'decide_booking_request', 'list_flagged_bookings', 'reinstate_flagged_booking'].includes(fn)) {
+          const names = Object.keys(args);
+          const values = names.map((name) =>
+            args[name] !== null && typeof args[name] === 'object' ? JSON.stringify(args[name]) : args[name],
+          );
+          try {
+            const { result } = await one(
+              `select ${fn}(${names.map((name, i) => `${name} => $${i + 1}`).join(', ')}) as result`,
+              values,
+            );
+            return { data: result, error: null };
+          } catch (error) {
+            return { data: null, error: { code: error.code, message: error.message, hint: error.hint } };
+          }
+        }
         if (fn === 'create_booking_request') {
           try {
             const { result } = await one(
@@ -552,6 +587,96 @@ describe('SCRUM-188: suitability judged on real occupancy (PGlite)', () => {
         [eventId],
       );
       expect(n).toBe(1);
+    });
+  });
+
+  describe('SCRUM-593: Venue Staff see and record the suitability at the event\'s new times', () => {
+    /** A venue open 09:00-18:00 every day, with 30 minutes' setup and 45 minutes' turnaround. */
+    async function dayVenue() {
+      const id = await seedVenue(db, { name: `Day Room ${++counter}`, capacity: 200, setup: 30, turnaround: 45 });
+      await db.query(
+        `insert into venue_operating_hours (venue_id, day_of_week, opens_at, closes_at)
+         select $1, d, '09:00', '18:00' from generate_series(0, 6) d`,
+        [id],
+      );
+      return id;
+    }
+
+    const moveEvent = (eventId, start, end) =>
+      db.query('update event_requests set proposed_start = $2, proposed_end = $3 where id = $1', [eventId, start, end]);
+    const unmetOf = (result) => result.criteria.filter((c) => c.met === false).map((c) => c.criterion);
+    const storedSuitability = (id) =>
+      one('select status, suitability_result, suitability_overridden from bookings where id = $1', [id]);
+
+    /** An approved booking 14:00-16:00 at the venue, flagged as an event change flags it. */
+    async function flaggedBooking(venueId, eventId) {
+      const id = await requestVenue(eventId, venueId);
+      expect((await decideBooking(db, id, { caller: staff, decision: 'approve' })).outcome).toBe('approved');
+      await flagForReason(db, id, { reason: 'event_changed', flaggedBy: staff });
+      return id;
+    }
+
+    it('SCRUM593_AC6_a_request_moved_to_when_the_venue_is_closed_is_unsuitable_at_the_new_times_and_still_approved', async () => {
+      const venueId = await dayVenue();
+      const eventId = await makeEvent(at('14:00'), at('16:00'));
+      const id = await requestVenue(eventId, venueId);
+      await moveEvent(eventId, at('20:00'), at('21:00'));
+
+      const queue = await listPendingBookingRequests(staff, { client: pgliteClient() });
+      const { suitabilityAtNewTimes } = queue.find((item) => item.id === id);
+      expect(suitabilityAtNewTimes.suitable).toBe(false);
+      expect(unmetOf(suitabilityAtNewTimes)).toEqual(['Operating hours']);
+      expect(ms(suitabilityAtNewTimes.checked.startsAt)).toBe(ms(at('20:00')));
+
+      const approved = await approveBookingRequest(
+        id,
+        staff,
+        { expectedStartsAt: at('20:00'), expectedEndsAt: at('21:00') },
+        { client: pgliteClient() },
+      );
+
+      // Advisory: approved anyway, with the new result recorded and nobody's confirmation claimed.
+      expect(approved.status).toBe('approved');
+      const stored = await storedSuitability(id);
+      expect(stored.suitability_result.suitable).toBe(false);
+      expect(unmetOf(stored.suitability_result)).toEqual(['Operating hours']);
+      expect(stored.suitability_overridden).toBe(false);
+    });
+
+    it('SCRUM593_AC1_a_flagged_booking_moved_to_when_the_venue_is_closed_is_unsuitable_at_the_new_times_and_still_reinstated', async () => {
+      const venueId = await dayVenue();
+      const eventId = await makeEvent(at('14:00'), at('16:00'));
+      const id = await flaggedBooking(venueId, eventId);
+      await moveEvent(eventId, at('20:00'), at('21:00'));
+
+      const flagged = await listFlaggedBookings(staff, { client: pgliteClient() });
+      const { suitabilityAtNewTimes } = flagged.find((item) => item.id === id);
+      expect(unmetOf(suitabilityAtNewTimes)).toEqual(['Operating hours']);
+
+      const reinstated = await reinstateFlaggedBooking(
+        id,
+        staff,
+        { reason: 'Free then', expectedStartsAt: at('20:00'), expectedEndsAt: at('21:00') },
+        { client: pgliteClient() },
+      );
+
+      expect(reinstated.status).toBe('approved');
+      expect(unmetOf(reinstated.suitability)).toEqual(['Operating hours']);
+      expect((await storedSuitability(id)).suitability_overridden).toBe(false);
+    });
+
+    it('SCRUM593_AC1_the_booking_being_reinstated_does_not_make_its_venue_look_taken', async () => {
+      // The booking occupies 13:30-16:45; the event's new 15:00-17:00 needs 14:30-17:45.
+      const venueId = await dayVenue();
+      const eventId = await makeEvent(at('14:00'), at('16:00'));
+      const id = await flaggedBooking(venueId, eventId);
+      await moveEvent(eventId, at('15:00'), at('17:00'));
+
+      const flagged = await listFlaggedBookings(staff, { client: pgliteClient() });
+      const { suitabilityAtNewTimes } = flagged.find((item) => item.id === id);
+
+      expect(availabilityOf(suitabilityAtNewTimes)).toMatchObject({ met: true, conflicts: [] });
+      expect(suitabilityAtNewTimes.suitable).toBe(true);
     });
   });
 });

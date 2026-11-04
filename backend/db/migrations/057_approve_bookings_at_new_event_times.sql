@@ -1,9 +1,11 @@
 -- Migration 057: Venue Staff approve a flagged booking or an open request at
 -- the event's current period, so a rescheduled event keeps its venue when the
 -- venue is free then. The functions are restated whole from their latest
--- definitions with the same signatures (return_freed_conflicting_requests
--- also takes the period that was freed); only the period steps change, and
--- Venue Staff's queue shows and checks the period an approval would book.
+-- definitions; only the period steps change, and Venue Staff's queue shows and
+-- checks the period an approval would book. New parameters:
+-- return_freed_conflicting_requests takes the period that was freed, and both
+-- approvals take the period Venue Staff saw (refused if it has changed since)
+-- and the suitability result at it, recorded when the approval moves the booking.
 
 -- The period a reinstated booking had before it moved to the event's; null
 -- when it kept its own.
@@ -12,12 +14,16 @@ alter table booking_resolutions add column if not exists previous_ends_at timest
 
 -- Each other open request is judged at the period an approval would book
 -- (decide_booking_request, step 8): its event's current one, else its own
--- when the event has none. Those are the times returned.
+-- when the event has none. Those are the times returned. p_own_times judges
+-- each at its own stored period instead, the one it was marked conflicting at.
+drop function if exists pending_request_overlaps(uuid, timestamptz, timestamptz, uuid);
+
 create or replace function pending_request_overlaps(
   p_venue_id          uuid,
   p_starts_at         timestamptz,
   p_ends_at           timestamptz,
-  p_exclude_event_id  uuid
+  p_exclude_event_id  uuid,
+  p_own_times         boolean default false
 )
 returns table (
   id                 uuid,
@@ -46,8 +52,10 @@ as $$
            b.event_request_id,
            er.event_name,
            case when er.proposed_start is not null and er.proposed_end is not null
+                     and not p_own_times
                 then er.proposed_start else b.starts_at end as starts_at,
            case when er.proposed_start is not null and er.proposed_end is not null
+                     and not p_own_times
                 then er.proposed_end else b.ends_at end     as ends_at,
            b.created_at,
            req.setup_minutes,
@@ -79,7 +87,7 @@ as $$
    where p.occupied && p.period
    order by p.created_at, p.id;
 $$;
-revoke execute on function pending_request_overlaps(uuid, timestamp with time zone, timestamp with time zone, uuid) from public, anon, authenticated;
+revoke execute on function pending_request_overlaps(uuid, timestamptz, timestamptz, uuid, boolean) from public, anon, authenticated;
 
 -- Call once p_booking_id no longer occupies the period p_starts_at to p_ends_at
 -- (default: its own times); a reinstatement that moved it frees the period it
@@ -127,6 +135,8 @@ begin
      for no key update;
 
   -- Other events' Conflicting requests that overlap it, locked in id order.
+  -- A request is marked at its own times and its event may have moved since,
+  -- so either its own period or its event's current one counts.
   select coalesce(array_agg(locked.id order by locked.id), '{}')
     into v_candidates
     from (
@@ -134,7 +144,12 @@ begin
         from bookings b
        where b.id in (select o.id
                         from pending_request_overlaps(v_booking.venue_id, v_booking.starts_at,
-                                                      v_booking.ends_at, v_booking.event_request_id) o)
+                                                      v_booking.ends_at, v_booking.event_request_id) o
+                      union
+                      select o.id
+                        from pending_request_overlaps(v_booking.venue_id, v_booking.starts_at,
+                                                      v_booking.ends_at, v_booking.event_request_id,
+                                                      true) o)
          and b.status::text = 'conflicting'
        order by b.id
          for update
@@ -142,7 +157,7 @@ begin
 
   -- Those that nothing occupies now go back to Pending; anything else that
   -- still occupies one keeps it Conflicting. Each is re-checked at the period
-  -- an approval would book, as pending_request_overlaps judged it.
+  -- an approval would book, its event's current one.
   select coalesce(array_agg(c.id order by c.id), '{}')
     into v_freed
     from bookings c
@@ -190,10 +205,18 @@ end;
 $$;
 revoke execute on function return_freed_conflicting_requests(uuid, timestamptz, timestamptz) from public, anon, authenticated;
 
+-- p_expected_starts_at/p_expected_ends_at: the period Venue Staff were shown
+-- (its own, or the event's when it moves); required. p_suitability: the check
+-- at the event's period, recorded only when the booking moves to it.
+drop function if exists reinstate_flagged_booking(uuid, uuid, text);
+
 create or replace function reinstate_flagged_booking(
-  p_booking_id uuid,
-  p_caller     uuid,
-  p_reason     text
+  p_booking_id         uuid,
+  p_caller             uuid,
+  p_reason             text,
+  p_expected_starts_at timestamptz default null,
+  p_expected_ends_at   timestamptz default null,
+  p_suitability        jsonb       default null
 )
 returns jsonb
 language plpgsql
@@ -235,6 +258,16 @@ begin
   if length(btrim(p_reason)) > 1000 then
     raise exception 'the reason must be 1000 characters or fewer'
       using errcode = 'check_violation';
+  end if;
+
+  if p_expected_starts_at is null or p_expected_ends_at is null then
+    raise exception 'the period being approved is required to reinstate a flagged booking'
+      using errcode = 'invalid_parameter_value';
+  end if;
+
+  if p_suitability is not null and jsonb_typeof(p_suitability -> 'suitable') is distinct from 'boolean' then
+    raise exception 'a suitability result needs a boolean "suitable"'
+      using errcode = 'invalid_parameter_value';
   end if;
 
   -- 3. Which event and venue, unlocked as in 066; then event, venue, booking.
@@ -309,6 +342,14 @@ begin
   v_starts_at := case when v_moved then v_event.proposed_start else v_booking.starts_at end;
   v_ends_at   := case when v_moved then v_event.proposed_end   else v_booking.ends_at   end;
 
+  -- Venue Staff approve the period they were shown; if the event or the
+  -- booking has moved since, they look again before anything is written.
+  if p_expected_starts_at <> v_starts_at or p_expected_ends_at <> v_ends_at then
+    raise exception 'booking % would now be reinstated at % to %, not the period shown',
+      p_booking_id, v_starts_at, v_ends_at
+      using errcode = 'PT409', hint = 'BOOKING_PERIOD_CHANGED';
+  end if;
+
   if v_retired_at is not null then
     raise exception 'venue % is retired and cannot be booked', v_venue_id
       using errcode = 'PT409', hint = 'VENUE_RETIRED';
@@ -350,15 +391,21 @@ begin
   returning * into v_resolution;
 
   -- 9. Approved again at the period from step 6, with the whole flag cleared
-  --    (034's pairing), guarded so it only ever moves a flagged booking.
+  --    (034's pairing), guarded so it only ever moves a flagged booking. A
+  --    move records the suitability at the new period; nobody has confirmed
+  --    that result, so it is not marked overridden.
   update bookings
-     set status          = 'approved',
-         starts_at       = v_starts_at,
-         ends_at         = v_ends_at,
-         flagged_at      = null,
-         flagged_by      = null,
-         review_block_id = null,
-         review_reason   = null
+     set status                 = 'approved',
+         starts_at              = v_starts_at,
+         ends_at                = v_ends_at,
+         flagged_at             = null,
+         flagged_by             = null,
+         review_block_id        = null,
+         review_reason          = null,
+         suitability_result     = case when v_moved and p_suitability is not null
+                                       then p_suitability else suitability_result end,
+         suitability_overridden = case when v_moved and p_suitability is not null
+                                       then false else suitability_overridden end
    where id = p_booking_id
      and status = 'flagged_for_review'
   returning * into v_booking;
@@ -437,14 +484,22 @@ begin
                             'returned_to_pending', to_jsonb(v_freed_ids));
 end;
 $$;
-revoke execute on function reinstate_flagged_booking(uuid, uuid, text) from public, anon, authenticated;
+revoke execute on function reinstate_flagged_booking(uuid, uuid, text, timestamptz, timestamptz, jsonb) from public, anon, authenticated;
+
+-- p_expected_starts_at/p_expected_ends_at: the period Venue Staff were shown
+-- (the event's); required to approve. p_suitability: the check at that
+-- period, recorded only when the approval moves the request to it.
+drop function if exists decide_booking_request(uuid, uuid, text, text, text);
 
 create or replace function decide_booking_request(
   p_booking_id            uuid,
   p_caller                uuid,
   p_decision              text,
-  p_reason                text default null,
-  p_suggested_alternative text default null
+  p_reason                text        default null,
+  p_suggested_alternative text        default null,
+  p_expected_starts_at    timestamptz default null,
+  p_expected_ends_at      timestamptz default null,
+  p_suitability           jsonb       default null
 )
 returns jsonb
 language plpgsql
@@ -465,6 +520,7 @@ declare
   v_resolution_id uuid;
   v_previous_starts_at timestamptz;
   v_previous_ends_at   timestamptz;
+  v_moved       boolean := false;
 begin
   -- 1. Only Venue Staff, as place_venue_hold (040) checks it. A null caller is
   --    refused too.
@@ -492,6 +548,16 @@ begin
 
   if p_decision = 'approve' and (p_reason is not null or p_suggested_alternative is not null) then
     raise exception 'a reason or alternative is recorded only with a rejection'
+      using errcode = 'invalid_parameter_value';
+  end if;
+
+  if p_decision = 'approve' and (p_expected_starts_at is null or p_expected_ends_at is null) then
+    raise exception 'the period being approved is required to approve a booking request'
+      using errcode = 'invalid_parameter_value';
+  end if;
+
+  if p_suitability is not null and jsonb_typeof(p_suitability -> 'suitable') is distinct from 'boolean' then
+    raise exception 'a suitability result needs a boolean "suitable"'
       using errcode = 'invalid_parameter_value';
   end if;
 
@@ -565,8 +631,17 @@ begin
         using errcode = 'PT409', hint = 'BOOKING_PERIOD_STALE';
     end if;
 
+    -- Venue Staff approve the period they were shown; if the event has moved
+    -- since, they look again before anything is written.
+    if p_expected_starts_at <> v_event.proposed_start or p_expected_ends_at <> v_event.proposed_end then
+      raise exception 'booking request % would now be approved at % to %, not the period shown',
+        p_booking_id, v_event.proposed_start, v_event.proposed_end
+        using errcode = 'PT409', hint = 'BOOKING_PERIOD_CHANGED';
+    end if;
+
     if v_booking.starts_at is distinct from v_event.proposed_start
        or v_booking.ends_at is distinct from v_event.proposed_end then
+      v_moved := true;
       v_previous_starts_at := v_booking.starts_at;
       v_previous_ends_at   := v_booking.ends_at;
     end if;
@@ -606,15 +681,21 @@ begin
 
   -- 10. The decision, guarded so it can only ever move an open request.
   --     Texts are trimmed; a blank alternative is none. An approval takes the
-  --     event's period from step 8; a rejection keeps the request's own.
+  --     event's period from step 8; a rejection keeps the request's own. A
+  --     move records the suitability at the new period; the coordinator has
+  --     not confirmed that result, so it is not marked overridden.
   update bookings
-     set status                = v_new_status::booking_status,
-         starts_at             = case when v_new_status = 'approved' then v_event.proposed_start else starts_at end,
-         ends_at               = case when v_new_status = 'approved' then v_event.proposed_end else ends_at end,
-         decided_by            = p_caller,
-         decided_at            = now(),
-         decision_reason       = btrim(p_reason),
-         suggested_alternative = nullif(btrim(p_suggested_alternative), '')
+     set status                 = v_new_status::booking_status,
+         starts_at              = case when v_new_status = 'approved' then v_event.proposed_start else starts_at end,
+         ends_at                = case when v_new_status = 'approved' then v_event.proposed_end else ends_at end,
+         decided_by             = p_caller,
+         decided_at             = now(),
+         decision_reason        = btrim(p_reason),
+         suggested_alternative  = nullif(btrim(p_suggested_alternative), ''),
+         suitability_result     = case when v_moved and p_suitability is not null
+                                       then p_suitability else suitability_result end,
+         suitability_overridden = case when v_moved and p_suitability is not null
+                                       then false else suitability_overridden end
    where id = p_booking_id
      and status in ('pending', 'conflicting')
   returning * into v_booking;
@@ -761,7 +842,7 @@ begin
                             'replaced_booking_id', v_replaced.id);
 end;
 $$;
-revoke execute on function decide_booking_request(uuid, uuid, text, text, text) from public, anon, authenticated;
+revoke execute on function decide_booking_request(uuid, uuid, text, text, text, timestamptz, timestamptz, jsonb) from public, anon, authenticated;
 
 create or replace function list_pending_booking_requests(p_caller uuid)
 returns jsonb
@@ -978,3 +1059,91 @@ as $$
    order by reg.attendee_id;
 $$;
 revoke execute on function notify_flagged_booking_resolved(uuid, text) from public, anon, authenticated;
+
+-- Restated with the booking's layout, attendance and stored result, which the
+-- API re-judges at the event's new period for Venue Staff before a reinstatement.
+create or replace function flagged_bookings_json(p_event_request_id uuid)
+returns jsonb
+language sql
+stable
+as $$
+  with flagged as (
+    select b.*,
+           er.event_name,
+           er.status::text                      as event_status,
+           er.proposed_start                    as event_starts_at,
+           er.proposed_end                      as event_ends_at,
+           er.assigned_coordinator_id,
+           v.name                               as venue_name,
+           v.location                           as venue_location,
+           vb.reason::text                      as block_reason,
+           vb.notes                             as block_notes,
+           vb.starts_at                         as block_starts_at,
+           vb.ends_at                           as block_ends_at,
+           vb.removed_at                        as block_removed_at,
+           venue_occupied_period(b.starts_at, b.ends_at,
+                                 v.setup_minutes, v.turnaround_minutes) as occupied
+      from bookings b
+      join event_requests er    on er.id = b.event_request_id
+      join venues v             on v.id  = b.venue_id
+      left join venue_blocks vb on vb.id = b.review_block_id
+     where b.status = 'flagged_for_review'
+       and (p_event_request_id is null or b.event_request_id = p_event_request_id)
+  )
+  select coalesce(
+           jsonb_agg(
+             jsonb_build_object(
+               'id',                      f.id,
+               'event_request_id',        f.event_request_id,
+               'venue_id',                f.venue_id,
+               'starts_at',               f.starts_at,
+               'ends_at',                 f.ends_at,
+               'occupied_starts_at',      lower(f.occupied),
+               'occupied_ends_at',        upper(f.occupied),
+               'flagged_at',              f.flagged_at,
+               'flagged_by',              f.flagged_by,
+               'review_reason',           f.review_reason,
+               'event_name',              f.event_name,
+               'event_status',            f.event_status,
+               'event_starts_at',         f.event_starts_at,
+               'event_ends_at',           f.event_ends_at,
+               'assigned_coordinator_id', f.assigned_coordinator_id,
+               'venue_name',              f.venue_name,
+               'venue_location',          f.venue_location,
+               'block_id',                f.review_block_id,
+               'block_reason',            f.block_reason,
+               'block_notes',             f.block_notes,
+               'block_starts_at',         f.block_starts_at,
+               'block_ends_at',           f.block_ends_at,
+               'block_removed_at',        f.block_removed_at,
+               'reinstatable',            f.review_reason is distinct from 'safety_review',
+               -- What the suitability check at the event's new period judges.
+               'room_layout_code',        f.room_layout_code,
+               'expected_attendance',     f.expected_attendance,
+               'suitability_result',      f.suitability_result,
+               'replacement_requests',    coalesce((
+                 select jsonb_agg(
+                          jsonb_build_object(
+                            'id',         r.id,
+                            'venue_id',   r.venue_id,
+                            'venue_name', rv.name,
+                            'status',     r.status,
+                            'starts_at',  r.starts_at,
+                            'ends_at',    r.ends_at,
+                            'created_at', r.created_at
+                          )
+                          order by r.created_at, r.id
+                        )
+                   from bookings r
+                   join venues rv on rv.id = r.venue_id
+                  where r.replaces_booking_id = f.id
+                    and r.status in ('pending', 'conflicting')
+               ), '[]'::jsonb)
+             )
+             order by f.flagged_at nulls first, f.created_at, f.id
+           ),
+           '[]'::jsonb
+         )
+    from flagged f;
+$$;
+revoke execute on function flagged_bookings_json(uuid) from public, anon, authenticated;

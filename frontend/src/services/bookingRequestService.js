@@ -138,16 +138,21 @@ export async function getPendingBookingRequests() {
  * looked approvable on screen can still be refused. Failures: 400 (malformed
  * id), 401, 403, 404, and 409 with a `code`: BOOKING_NOT_PENDING,
  * EVENT_NOT_BOOKABLE, BOOKING_PERIOD_STALE (the event has no period),
- * VENUE_RETIRED, BOOKING_CHANGED, or BOOKING_PERIOD_CONFLICT with
- * `conflicts` shaped as createBookingRequest's.
+ * BOOKING_PERIOD_CHANGED (the event's times changed after the queue loaded,
+ * so the expected period no longer matches), VENUE_RETIRED, BOOKING_CHANGED,
+ * or BOOKING_PERIOD_CONFLICT with `conflicts` shaped as createBookingRequest's.
  *
  * @param {string} id  the request's id
+ * @param {Object} expected  the period the card showed approving books: the
+ *   event's times when it moved, else the request's own (SCRUM-593)
+ * @param {string} expected.expectedStartsAt  ISO 8601
+ * @param {string} expected.expectedEndsAt    ISO 8601
  * @returns {Promise<Object>} the request, now approved, with decidedBy,
  *   decidedAt, markedConflicting (ids of the other events' requests it made
  *   conflicting) and convertedHoldId (the event's own hold it converted, or null)
  */
-export async function approveBookingRequest(id) {
-  return postData(`/booking-requests/${id}/approve`);
+export async function approveBookingRequest(id, { expectedStartsAt, expectedEndsAt }) {
+  return postData(`/booking-requests/${id}/approve`, { expectedStartsAt, expectedEndsAt });
 }
 
 /**

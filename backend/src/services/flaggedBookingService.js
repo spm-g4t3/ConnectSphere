@@ -22,10 +22,16 @@ import {
   invalid,
 } from '../http/pgErrors.js';
 import { BOOKING_STATUS, getBookingStatusDisplay } from '../domain/bookingStatus.js';
-import { toBookingRequest, toPeriodConflict } from './bookingRequestService.js';
+import {
+  suitabilityAtNewTimes,
+  suitabilityForApproval,
+  toBookingRequest,
+  toPeriodConflict,
+} from './bookingRequestService.js';
 import {
   validateFlaggedBookingEventId,
   validateFlaggedBookingId,
+  validateReinstatement,
   validateResolution,
 } from '../validation/flaggedBookingValidation.js';
 
@@ -130,18 +136,35 @@ function toFlaggedBooking(row) {
 }
 
 /**
+ * Whether reinstating the booking moves it: it can be reinstated and no longer
+ * covers its event's period (reinstate_flagged_booking, step 6).
+ */
+function movesOnReinstate(row) {
+  if (row.reinstatable !== true || row.event_starts_at == null || row.event_ends_at == null) return false;
+  const covers =
+    new Date(row.starts_at) <= new Date(row.event_starts_at) &&
+    new Date(row.ends_at) >= new Date(row.event_ends_at);
+  return !covers;
+}
+
+/**
  * Every booking flagged for review, oldest flag first, each with what flagged
  * it: a block, a review reason, or both when a safety flag sits on a block's,
  * and the live requests replacing it.
  *
+ * SCRUM-593: each also carries suitabilityAtNewTimes, the suitability at the
+ * event's current period when reinstating would move the booking there (see
+ * bookingRequestService's suitabilityAtNewTimes), else null.
+ *
  * @param {string} callerId  from the JWT -- never the client
  * @param {object} [options]
  * @param {object} [options.client]
+ * @param {Function} [options.checkSuitability]  the N10 check
  * @returns {Promise<object[]>} possibly empty, in camelCase
  * @throws {ValidationError} when no caller was supplied, before any round trip
  * @throws {ForbiddenError}  the caller is not Venue Staff
  */
-export async function listFlaggedBookings(callerId, { client } = {}) {
+export async function listFlaggedBookings(callerId, { client, checkSuitability } = {}) {
   checkCaller(callerId);
 
   const db = await resolveClient(client);
@@ -154,7 +177,15 @@ export async function listFlaggedBookings(callerId, { client } = {}) {
     throw new Error('Unexpected result from list_flagged_bookings');
   }
 
-  return data.map(toFlaggedBooking);
+  return Promise.all(
+    data.map(async (row) => ({
+      ...toFlaggedBooking(row),
+      suitabilityAtNewTimes: await suitabilityAtNewTimes(row, movesOnReinstate(row), {
+        checkSuitability,
+        client: db,
+      }),
+    })),
+  );
 }
 
 /**
@@ -196,32 +227,45 @@ export async function listEventFlaggedBookings(eventRequestId, callerId, { clien
  * it keeps its own. Only this booking changes; the event's other bookings are
  * untouched.
  *
+ * SCRUM-593: input also names the period Venue Staff were shown
+ * (expectedStartsAt, expectedEndsAt); if the booking would now be reinstated
+ * at another, nothing is written and this throws BOOKING_PERIOD_CHANGED. A
+ * reinstatement that moves the booking records the suitability at the new
+ * period (suitabilityForApproval), unsuitable or not, marked not overridden.
+ *
  * @param {string} bookingId  the flagged booking's id
  * @param {string} callerId   from the JWT -- never the body
- * @param {object} input      see validateResolution
+ * @param {object} input      see validateReinstatement
  * @param {object} [options]
  * @param {object} [options.client]
+ * @param {Function} [options.checkSuitability]  the N10 check
  * @returns {Promise<object>} the booking, now approved, with `resolution`
- * @throws {ValidationError} no caller, a malformed id or a missing or long
- *                           reason, before any round trip
+ * @throws {ValidationError} no caller, a malformed id, a missing or long
+ *                           reason, or a missing or malformed expected
+ *                           period, before any round trip
  * @throws {NotFoundError}   no such booking
  * @throws {ForbiddenError}  the caller is not Venue Staff
  * @throws {ConflictError}   by code: BOOKING_NOT_FLAGGED,
  *                           SAFETY_FLAG_NOT_REINSTATABLE, EVENT_NOT_BOOKABLE,
  *                           BOOKING_PERIOD_STALE (the event has no period),
+ *                           BOOKING_PERIOD_CHANGED (not the period shown),
  *                           VENUE_RETIRED, BOOKING_PERIOD_CONFLICT (conflicts
  *                           shaped by toPeriodConflict), BOOKING_CHANGED
  */
-export async function reinstateFlaggedBooking(bookingId, callerId, input, { client } = {}) {
+export async function reinstateFlaggedBooking(bookingId, callerId, input, { client, checkSuitability } = {}) {
   checkCaller(callerId);
   const id = validateFlaggedBookingId(bookingId);
-  const { reason } = validateResolution(input);
+  const { reason, ...period } = validateReinstatement(input);
 
   const db = await resolveClient(client);
+  const suitability = await suitabilityForApproval(db, id, period, { checkSuitability });
   const { data, error } = await db.rpc('reinstate_flagged_booking', {
     p_booking_id: id,
     p_caller: callerId,
     p_reason: reason,
+    p_expected_starts_at: period.startsAt,
+    p_expected_ends_at: period.endsAt,
+    p_suitability: suitability,
   });
 
   if (error) throw translateError(error);

@@ -215,3 +215,18 @@ export function eventMovedFromRequest(item) {
   if (!event) return false;
   return Date.parse(item.startsAt) !== event.start || Date.parse(item.endsAt) !== event.end;
 }
+
+/**
+ * The period an approval or reinstatement books, as the request body's
+ * expected times, so the server refuses it if the event moved after the list
+ * loaded. `moves` is eventMovedFromRequest or movesToEventPeriod of the item.
+ *
+ * @param {{startsAt: string, endsAt: string, eventStartsAt?: string|null, eventEndsAt?: string|null}} item
+ * @param {boolean} moves
+ * @returns {{expectedStartsAt: string, expectedEndsAt: string}}
+ */
+export function expectedPeriod(item, moves) {
+  return moves
+    ? { expectedStartsAt: item.eventStartsAt, expectedEndsAt: item.eventEndsAt }
+    : { expectedStartsAt: item.startsAt, expectedEndsAt: item.endsAt };
+}

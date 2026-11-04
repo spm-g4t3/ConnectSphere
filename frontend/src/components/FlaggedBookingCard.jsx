@@ -8,6 +8,7 @@
 // resolution is in flight and what went wrong belong to FlaggedBookings, which
 // owns the list and refetches it after every resolution.
 
+import BookingSuitabilitySummary from "./BookingSuitabilitySummary";
 import FlaggedBookingFlagDetail from "./FlaggedBookingFlagDetail";
 import FlaggedBookingReasonForm from "./FlaggedBookingReasonForm";
 import ErrorNotice from "./ui/ErrorNotice";
@@ -43,6 +44,9 @@ export default function FlaggedBookingCard({
   const regionId = `flagged-booking-${item.id}`;
   // A safety flag is never reinstated, so only a reinstatable booking moves.
   const moves = item.reinstatable && movesToEventPeriod(item);
+  // Re-run by the server at the event's new times; null when it could not run.
+  const newTimesSuitability = moves ? item.suitabilityAtNewTimes ?? null : null;
+  const unsuitableAtNewTimes = newTimesSuitability?.suitable === false;
 
   return (
     <li className="pending-bookings__card">
@@ -88,6 +92,20 @@ export default function FlaggedBookingCard({
 
           <FlaggedBookingFlagDetail item={item} headingLevel={3} />
 
+          {newTimesSuitability && (
+            <BookingSuitabilitySummary
+              suitability={newTimesSuitability}
+              suitabilityOverridden={false}
+              overriddenCriteria={[]}
+              label="Suitability at the event's new times"
+            />
+          )}
+          {moves && !newTimesSuitability && (
+            <p className="pending-bookings__event-status">
+              This booking&apos;s suitability was checked for its original times, not the event&apos;s new times.
+            </p>
+          )}
+
           {/* Both resolutions are reason forms, so submitting again is the retry. */}
           {error && <ErrorNotice message={error} />}
           {clashes.length > 0 && (
@@ -108,6 +126,13 @@ export default function FlaggedBookingCard({
             <p className="pending-bookings__event-status">
               Reinstating keeps the replacement request open; approve or reject it separately under Pending
               booking requests.
+            </p>
+          )}
+          {/* Suitability is advisory, so this warns but never withholds approval. */}
+          {unsuitableAtNewTimes && (
+            <p className="pending-bookings__event-status">
+              This venue doesn&apos;t meet the event&apos;s needs at the new times. Suitability is advisory, so the
+              booking can still be approved.
             </p>
           )}
           {item.reinstatable ? (
