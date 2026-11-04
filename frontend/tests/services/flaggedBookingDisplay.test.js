@@ -16,6 +16,7 @@ import {
   venueSaveFlagReasons,
   movesToEventPeriod,
   eventMovedFromRequest,
+  replacesFlaggedBookingText,
 } from "../../src/services/flaggedBookingDisplay.js";
 import { formatVenuePeriod } from "../../src/services/datetimeFormat.js";
 
@@ -250,5 +251,21 @@ describe("eventMovedFromRequest", () => {
     ["only an event end", { eventEndsAt: "2026-12-02T17:00:00+08:00" }],
   ])("SCRUM593_AC11_a_request_whose_event_has_%s_has_not_moved", (_label, event) => {
     expect(eventMovedFromRequest({ ...BOOKING, ...event })).toBe(false);
+  });
+});
+
+describe("replacesFlaggedBookingText", () => {
+  it("SCRUM593_AC10_a_reinstated_booking_is_left_alone_and_approving_books_a_second_venue", () => {
+    const replaces = {
+      bookingId: "f1",
+      venueName: "Hall Z",
+      startsAt: "2026-11-30T09:00:00+08:00",
+      endsAt: "2026-11-30T17:00:00+08:00",
+      status: "approved",
+    };
+    expect(replacesFlaggedBookingText(replaces)).toBe(
+      `The booking this request was meant to replace, at Hall Z, ${formatVenuePeriod(replaces.startsAt, replaces.endsAt)}, ` +
+        "was reinstated. Approving this request books a second venue for the event and does not cancel that booking.",
+    );
   });
 });

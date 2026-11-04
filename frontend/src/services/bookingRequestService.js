@@ -117,7 +117,10 @@ export async function releaseVenueBooking(id, reason) {
  * occupied period of that booking (setup and turnaround included), the expected attendance, layout, requirements, setup
  * notes, the suitability result with any overrides, a `statusDisplay`, and
  * `overlapping`: other events' open requests at the same venue whose occupied
- * periods overlap it, in submission order. Not re-sorted by callers: the
+ * periods overlap it, in submission order; `conflictingWith`, the approved or
+ * flagged bookings the period an approval books clashes with (pending
+ * requests too); and `replaces`, the flagged or since-reinstated booking the
+ * request was raised to replace, or null. Not re-sorted by callers: the
  * server's order is the queue's.
  *
  * Failures: 401, 403 (not Venue Staff), 500. None open is 200 [].

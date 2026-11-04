@@ -161,16 +161,31 @@ export function replacementRequests(item) {
 }
 
 /**
- * The note on a pending request that would replace a still-flagged booking,
- * since approving it also cancels that booking.
+ * The note on a pending request raised to replace a flagged booking. While
+ * that booking is flagged, approving cancels it; once it was reinstated
+ * (approved), approving leaves it alone and books a second venue.
  *
- * @param {{venueName?: string|null, startsAt?: string, endsAt?: string}} replaces
+ * @param {{venueName?: string|null, startsAt?: string, endsAt?: string, status?: string}} replaces
  * @returns {string}
  */
 export function replacesFlaggedBookingText(replaces) {
   const venue = replaces.venueName || "Unknown venue";
   const period = formatVenuePeriod(replaces.startsAt, replaces.endsAt);
+  if (replaces.status === "approved") {
+    return (
+      `The booking this request was meant to replace, at ${venue}, ${period}, was reinstated. ` +
+      "Approving this request books a second venue for the event and does not cancel that booking."
+    );
+  }
   return `Replaces the flagged booking at ${venue}, ${period}. Approving this request cancels that booking.`;
+}
+
+/** The event's current period as instants, or null unless both times parse. */
+function eventPeriod(item) {
+  const start = Date.parse(item.eventStartsAt);
+  const end = Date.parse(item.eventEndsAt);
+  if (Number.isNaN(start) || Number.isNaN(end)) return null;
+  return { start, end };
 }
 
 /**
@@ -183,10 +198,9 @@ export function replacesFlaggedBookingText(replaces) {
  * @returns {boolean}
  */
 export function movesToEventPeriod(item) {
-  const eventStart = Date.parse(item.eventStartsAt);
-  const eventEnd = Date.parse(item.eventEndsAt);
-  if (Number.isNaN(eventStart) || Number.isNaN(eventEnd)) return false;
-  return !(Date.parse(item.startsAt) <= eventStart && Date.parse(item.endsAt) >= eventEnd);
+  const event = eventPeriod(item);
+  if (!event) return false;
+  return !(Date.parse(item.startsAt) <= event.start && Date.parse(item.endsAt) >= event.end);
 }
 
 /**
@@ -197,8 +211,7 @@ export function movesToEventPeriod(item) {
  * @returns {boolean}
  */
 export function eventMovedFromRequest(item) {
-  const eventStart = Date.parse(item.eventStartsAt);
-  const eventEnd = Date.parse(item.eventEndsAt);
-  if (Number.isNaN(eventStart) || Number.isNaN(eventEnd)) return false;
-  return Date.parse(item.startsAt) !== eventStart || Date.parse(item.endsAt) !== eventEnd;
+  const event = eventPeriod(item);
+  if (!event) return false;
+  return Date.parse(item.startsAt) !== event.start || Date.parse(item.endsAt) !== event.end;
 }

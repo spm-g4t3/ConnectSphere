@@ -567,7 +567,7 @@ function toOverlappingRequest(entry) {
 }
 
 /**
- * One booking a conflicting request clashes with now, in camelCase.
+ * One booking a request would clash with if approved now, in camelCase.
  *
  * @param {object} entry  from list_pending_booking_requests' `conflicting_with`
  */
@@ -584,8 +584,9 @@ function toConflictingBooking(entry) {
 }
 
 /**
- * The flagged booking a request would replace, or null when it replaces none
- * or that booking is no longer flagged (078).
+ * The booking a request would replace, or null when it replaces none or that
+ * booking was cancelled. `status` is flagged_for_review, or approved once it
+ * was reinstated (approving the request then leaves it alone).
  *
  * @param {object|null} [entry]  list_pending_booking_requests' `replaces`
  */
@@ -593,6 +594,7 @@ function toReplacedBooking(entry) {
   if (!entry) return null;
   return {
     bookingId: entry.booking_id,
+    status: entry.status ?? null,
     venueName: entry.venue_name ?? null,
     startsAt: entry.starts_at,
     endsAt: entry.ends_at,

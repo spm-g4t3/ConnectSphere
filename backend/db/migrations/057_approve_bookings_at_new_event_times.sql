@@ -1,13 +1,194 @@
 -- Migration 057: Venue Staff approve a flagged booking or an open request at
 -- the event's current period, so a rescheduled event keeps its venue when the
 -- venue is free then. The functions are restated whole from their latest
--- definitions with the same signatures; only the period steps change, and
+-- definitions with the same signatures (return_freed_conflicting_requests
+-- also takes the period that was freed); only the period steps change, and
 -- Venue Staff's queue shows and checks the period an approval would book.
 
 -- The period a reinstated booking had before it moved to the event's; null
 -- when it kept its own.
 alter table booking_resolutions add column if not exists previous_starts_at timestamptz;
 alter table booking_resolutions add column if not exists previous_ends_at timestamptz;
+
+-- Each other open request is judged at the period an approval would book
+-- (decide_booking_request, step 8): its event's current one, else its own
+-- when the event has none. Those are the times returned.
+create or replace function pending_request_overlaps(
+  p_venue_id          uuid,
+  p_starts_at         timestamptz,
+  p_ends_at           timestamptz,
+  p_exclude_event_id  uuid
+)
+returns table (
+  id                 uuid,
+  event_request_id   uuid,
+  event_name         text,
+  starts_at          timestamptz,
+  ends_at            timestamptz,
+  occupied_starts_at timestamptz,
+  occupied_ends_at   timestamptz,
+  created_at         timestamptz
+)
+language sql
+stable
+as $$
+  with requested as (
+    select v.id,
+           v.setup_minutes::integer      as setup_minutes,
+           v.turnaround_minutes::integer as turnaround_minutes,
+           venue_occupied_period(p_starts_at, p_ends_at,
+                                 v.setup_minutes, v.turnaround_minutes) as period
+      from venues v
+     where v.id = p_venue_id
+  ),
+  periods as (
+    select b.id,
+           b.event_request_id,
+           er.event_name,
+           case when er.proposed_start is not null and er.proposed_end is not null
+                then er.proposed_start else b.starts_at end as starts_at,
+           case when er.proposed_start is not null and er.proposed_end is not null
+                then er.proposed_end else b.ends_at end     as ends_at,
+           b.created_at,
+           req.setup_minutes,
+           req.turnaround_minutes,
+           req.period
+      from requested req
+      join bookings b
+        on b.venue_id = req.id
+      join event_requests er
+        on er.id = b.event_request_id
+     where b.status in ('pending', 'conflicting')
+       and b.event_request_id is distinct from p_exclude_event_id
+  ),
+  pending as (
+    select pr.*,
+           venue_occupied_period(pr.starts_at, pr.ends_at,
+                                 pr.setup_minutes, pr.turnaround_minutes) as occupied
+      from periods pr
+  )
+  select p.id,
+         p.event_request_id,
+         p.event_name,
+         p.starts_at,
+         p.ends_at,
+         lower(p.occupied),
+         upper(p.occupied),
+         p.created_at
+    from pending p
+   where p.occupied && p.period
+   order by p.created_at, p.id;
+$$;
+revoke execute on function pending_request_overlaps(uuid, timestamp with time zone, timestamp with time zone, uuid) from public, anon, authenticated;
+
+-- Call once p_booking_id no longer occupies the period p_starts_at to p_ends_at
+-- (default: its own times); a reinstatement that moved it frees the period it
+-- left. A request still blocked by a booking, venue block or active hold stays
+-- Conflicting. Returns the ids returned to Pending.
+drop function if exists return_freed_conflicting_requests(uuid);
+
+create or replace function return_freed_conflicting_requests(
+  p_booking_id uuid,
+  p_starts_at  timestamptz default null,
+  p_ends_at    timestamptz default null
+)
+returns uuid[]
+language plpgsql
+as $$
+declare
+  v_booking    record;
+  v_candidates uuid[];
+  v_freed      uuid[];
+begin
+  if p_booking_id is null then
+    raise exception 'A booking id is required' using errcode = '22023';
+  end if;
+
+  select b.id, b.venue_id,
+         coalesce(p_starts_at, b.starts_at) as starts_at,
+         coalesce(p_ends_at, b.ends_at)     as ends_at,
+         b.event_request_id,
+         er.event_name, v.name as venue_name
+    into v_booking
+    from bookings b
+    join event_requests er on er.id = b.event_request_id
+    join venues v on v.id = b.venue_id
+   where b.id = p_booking_id;
+
+  if not found then
+    raise exception 'booking % not found', p_booking_id using errcode = 'P0002';
+  end if;
+
+  -- The lock decide_booking_request step 5 takes, so no approval here can
+  -- interleave with the re-check below.
+  perform 1
+    from venues
+   where id = v_booking.venue_id
+     for no key update;
+
+  -- Other events' Conflicting requests that overlap it, locked in id order.
+  select coalesce(array_agg(locked.id order by locked.id), '{}')
+    into v_candidates
+    from (
+      select b.id
+        from bookings b
+       where b.id in (select o.id
+                        from pending_request_overlaps(v_booking.venue_id, v_booking.starts_at,
+                                                      v_booking.ends_at, v_booking.event_request_id) o)
+         and b.status::text = 'conflicting'
+       order by b.id
+         for update
+    ) locked;
+
+  -- Those that nothing occupies now go back to Pending; anything else that
+  -- still occupies one keeps it Conflicting. Each is re-checked at the period
+  -- an approval would book, as pending_request_overlaps judged it.
+  select coalesce(array_agg(c.id order by c.id), '{}')
+    into v_freed
+    from bookings c
+    join event_requests ce on ce.id = c.event_request_id
+   where c.id = any (v_candidates)
+     and not exists (
+       select 1
+         from venue_occupancy_conflicts(
+                c.venue_id,
+                case when ce.proposed_start is not null and ce.proposed_end is not null
+                     then ce.proposed_start else c.starts_at end,
+                case when ce.proposed_start is not null and ce.proposed_end is not null
+                     then ce.proposed_end else c.ends_at end,
+                true, c.event_request_id)
+     );
+
+  update bookings
+     set status = 'pending'
+   where id = any (v_freed)
+     and status::text = 'conflicting';
+
+  -- Each freed request's coordinator, told which booking freed it.
+  insert into notifications (recipient_id, type, booking_id, payload)
+  select er.assigned_coordinator_id,
+         'booking_request_conflict_cleared',
+         b.id,
+         jsonb_build_object(
+           'eventRequestId',    b.event_request_id,
+           'eventName',         er.event_name,
+           'venueId',           b.venue_id,
+           'venueName',         v_booking.venue_name,
+           'startsAt',          b.starts_at,
+           'endsAt',            b.ends_at,
+           'releasedBookingId', v_booking.id,
+           'releasedEventName', v_booking.event_name
+         )
+    from bookings b
+    join event_requests er on er.id = b.event_request_id
+   where b.id = any (v_freed)
+     and er.assigned_coordinator_id is not null
+   order by b.id;
+
+  return v_freed;
+end;
+$$;
+revoke execute on function return_freed_conflicting_requests(uuid, timestamptz, timestamptz) from public, anon, authenticated;
 
 create or replace function reinstate_flagged_booking(
   p_booking_id uuid,
@@ -29,6 +210,9 @@ declare
   v_moved       boolean;
   v_starts_at   timestamptz;
   v_ends_at     timestamptz;
+  v_venue_name  text;
+  v_marked_ids  uuid[] := '{}';
+  v_freed_ids   uuid[] := '{}';
 begin
   -- 1. Only Venue Staff, as decide_booking_request checks it.
   select p.role::text
@@ -188,9 +372,69 @@ begin
   --     booking after step 9, so it carries the period it was reinstated at.
   perform notify_flagged_booking_resolved(v_resolution.id, 'venue_staff');
 
+  if v_moved then
+    -- 11. The new period is now taken: other events' pending requests that
+    --     overlap it are marked conflicting and their coordinators told, as
+    --     decide_booking_request step 12 does. Step 3's venue lock holds.
+    select v.name
+      into v_venue_name
+      from venues v
+     where v.id = v_venue_id;
+
+    select coalesce(array_agg(locked.id order by locked.id), '{}')
+      into v_marked_ids
+      from (
+        select b.id
+          from bookings b
+         where b.id in (select o.id
+                          from pending_request_overlaps(v_venue_id, v_starts_at,
+                                                        v_ends_at, v_event_id) o)
+           and b.status = 'pending'
+         order by b.id
+           for update
+      ) locked;
+
+    update bookings
+       set status = 'conflicting'
+     where id = any (v_marked_ids)
+       and status = 'pending';
+
+    insert into notifications (recipient_id, type, booking_id, payload)
+    select er.assigned_coordinator_id,
+           'booking_request_conflicting',
+           b.id,
+           jsonb_build_object(
+             'eventRequestId',         b.event_request_id,
+             'eventName',              er.event_name,
+             'venueId',                b.venue_id,
+             'venueName',              v_venue_name,
+             'startsAt',               b.starts_at,
+             'endsAt',                 b.ends_at,
+             'approvedBookingId',      v_booking.id,
+             'approvedEventRequestId', v_booking.event_request_id,
+             'approvedEventName',      v_event.event_name,
+             'approvedStartsAt',       v_booking.starts_at,
+             'approvedEndsAt',         v_booking.ends_at
+           )
+      from bookings b
+      join event_requests er on er.id = b.event_request_id
+     where b.id = any (v_marked_ids)
+       and er.assigned_coordinator_id is not null
+     order by b.id;
+
+    -- 12. The old period is free now, so requests that clashed only with it
+    --     go back to Pending (038). Called after the move, so its re-check
+    --     no longer sees this booking there.
+    v_freed_ids := return_freed_conflicting_requests(p_booking_id,
+                                                     v_resolution.previous_starts_at,
+                                                     v_resolution.previous_ends_at);
+  end if;
+
   return jsonb_build_object('outcome', 'reinstated',
                             'booking', to_jsonb(v_booking),
-                            'resolution', to_jsonb(v_resolution));
+                            'resolution', to_jsonb(v_resolution),
+                            'marked_conflicting', to_jsonb(v_marked_ids),
+                            'returned_to_pending', to_jsonb(v_freed_ids));
 end;
 $$;
 revoke execute on function reinstate_flagged_booking(uuid, uuid, text) from public, anon, authenticated;
@@ -616,7 +860,9 @@ begin
                -- Bookings only: a block or hold never marks a request
                -- conflicting. Flagged-for-review bookings are kept, because
                -- they still occupy the venue until the Coordinator decides.
-               'conflicting_with', case when p.status::text = 'conflicting' then coalesce((
+               -- Listed for pending requests too: one whose event moved can
+               -- now land on a booking it was never marked against.
+               'conflicting_with', coalesce((
                  select jsonb_agg(
                           jsonb_build_object(
                             'booking_id',         c.id,
@@ -632,12 +878,14 @@ begin
                    from venue_occupancy_conflicts(p.venue_id, p.approval_starts_at, p.approval_ends_at, true,
                                                   p.event_request_id) c
                   where c.kind = 'booking'
-               ), '[]'::jsonb) else '[]'::jsonb end,
-               -- Null once the booking it names is no longer flagged: then
-               -- approving this request leaves that booking alone (section 6).
+               ), '[]'::jsonb),
+               -- Kept once the booking it names is reinstated, so Venue Staff
+               -- see the event already holds that venue (approving leaves it
+               -- alone, decide_booking_request step 14); null once cancelled.
                'replaces', (
                  select jsonb_build_object(
                           'booking_id', fb.id,
+                          'status',     fb.status,
                           'venue_name', fv.name,
                           'starts_at',  fb.starts_at,
                           'ends_at',    fb.ends_at
@@ -645,7 +893,7 @@ begin
                    from bookings fb
                    join venues fv on fv.id = fb.venue_id
                   where fb.id = p.replaces_booking_id
-                    and fb.status = 'flagged_for_review'
+                    and fb.status in ('flagged_for_review', 'approved')
                )
              )
              order by p.created_at, p.id
@@ -655,3 +903,78 @@ begin
 end;
 $$;
 revoke execute on function list_pending_booking_requests(uuid) from public, anon, authenticated;
+
+-- previousStartsAt/previousEndsAt name the period a reinstatement moved the
+-- booking from, so the event's people see its times changed; null otherwise.
+create or replace function notify_flagged_booking_resolved(
+  p_resolution_id    uuid,
+  p_resolved_by_role text
+)
+returns void
+language sql
+as $$
+  insert into notifications (recipient_id, type, booking_id, payload)
+  select r.recipient_id,
+         'flagged_booking_resolved',
+         b.id,
+         jsonb_build_object(
+           'audience',             r.audience,
+           'outcome',              br.outcome,
+           'eventRequestId',       b.event_request_id,
+           'eventName',            er.event_name,
+           'venueId',              b.venue_id,
+           'venueName',            v.name,
+           'startsAt',             b.starts_at,
+           'endsAt',               b.ends_at,
+           'previousStartsAt',     br.previous_starts_at,
+           'previousEndsAt',       br.previous_ends_at,
+           'reason',               br.reason,
+           'resolvedAt',           br.created_at,
+           'resolvedByRole',       p_resolved_by_role,
+           'replacementBookingId', rb.id,
+           'replacementVenueName', rv.name,
+           'replacementStartsAt',  rb.starts_at,
+           'replacementEndsAt',    rb.ends_at
+         )
+    from booking_resolutions br
+    join bookings b        on b.id = br.booking_id
+    join venues v          on v.id = b.venue_id
+    join event_requests er on er.id = b.event_request_id
+    left join bookings rb  on rb.id = br.replacement_booking_id
+    left join venues rv    on rv.id = rb.venue_id
+   cross join lateral (
+     values ('coordinator', er.assigned_coordinator_id),
+            ('organiser',   case when er.status::text = 'confirmed' then er.organiser_id end)
+   ) as r (audience, recipient_id)
+   where br.id = p_resolution_id
+     and r.recipient_id is not null
+     and r.recipient_id <> br.resolved_by
+   order by r.audience;
+
+  -- Attendees only care where the event is, so a replacement at the same venue
+  -- (a new period) tells them nothing. Only a confirmed event has attendees.
+  insert into notifications (recipient_id, type, event_request_id, payload)
+  select reg.attendee_id,
+         'event_venue_changed',
+         er.id,
+         jsonb_build_object(
+           'audience',          'attendee',
+           'eventRequestId',    er.id,
+           'eventName',         er.event_name,
+           'previousVenueName', v.name,
+           'venueName',         rv.name
+         )
+    from booking_resolutions br
+    join bookings b              on b.id = br.booking_id
+    join venues v                on v.id = b.venue_id
+    join event_requests er       on er.id = b.event_request_id
+    join bookings rb             on rb.id = br.replacement_booking_id
+    join venues rv               on rv.id = rb.venue_id
+    join event_registrations reg on reg.event_request_id = er.id
+   where br.id = p_resolution_id
+     and rb.venue_id <> b.venue_id
+     and er.status::text = 'confirmed'
+     and reg.status = 'registered'
+   order by reg.attendee_id;
+$$;
+revoke execute on function notify_flagged_booking_resolved(uuid, text) from public, anon, authenticated;

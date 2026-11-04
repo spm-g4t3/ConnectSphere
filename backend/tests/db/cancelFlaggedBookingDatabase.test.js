@@ -442,6 +442,8 @@ describe('SCRUM-266 AC3 and AC5: cancelling a flagged booking', () => {
             venueName: (await one('select name from venues where id = $1', [venueId])).name,
             startsAt: expect.any(String),
             endsAt: expect.any(String),
+            previousStartsAt: null,
+            previousEndsAt: null,
             reason: 'Venue closed for repairs',
             resolvedAt: expect.any(String),
             resolvedByRole: 'venue_staff',

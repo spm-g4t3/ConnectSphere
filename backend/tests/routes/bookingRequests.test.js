@@ -1215,14 +1215,20 @@ describe('SCRUM-258 AC1: Venue Staff see the pending requests', () => {
   });
 
   it('SCRUM266_W7_the_queue_names_the_flagged_booking_a_request_replaces', async () => {
-    const replaces = { booking_id: OTHER_BOOKING_ID, venue_name: 'Hall B', starts_at: START, ends_at: END };
+    const replaces = {
+      booking_id: OTHER_BOOKING_ID,
+      status: 'flagged_for_review',
+      venue_name: 'Hall B',
+      starts_at: START,
+      ends_at: END,
+    };
     const client = createFakeClient([ok([pendingRow({ replaces }), pendingRow({ id: OTHER_BOOKING_ID, replaces: null })])]);
 
     const res = await listPending(client);
 
     expect(res.status).toBe(200);
     expect(res.body.map((r) => r.replaces)).toEqual([
-      { bookingId: OTHER_BOOKING_ID, venueName: 'Hall B', startsAt: START, endsAt: END },
+      { bookingId: OTHER_BOOKING_ID, status: 'flagged_for_review', venueName: 'Hall B', startsAt: START, endsAt: END },
       null,
     ]);
   });

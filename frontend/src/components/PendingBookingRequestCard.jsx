@@ -50,11 +50,13 @@ function plural(count, one, many) {
 }
 
 /**
- * Why a conflicting request is flagged. conflictingWith lists the bookings in
- * the way now; it empties when they go, but the status never reverts, so the
- * empty case has to say the clash is gone rather than name nothing.
+ * Why a request can't be approved, or why a conflicting one now can.
+ * conflictingWith lists the bookings in the way now; it empties when they go,
+ * but the status never reverts, so the empty case has to say the clash is
+ * gone rather than name nothing. When the event moved, the clash is with its
+ * new times, not the request's own, so the note says so.
  */
-function conflictingNote(conflictingWith) {
+function conflictingNote(conflictingWith, moved) {
   if (conflictingWith.length === 0) {
     return "The booking this request clashed with is no longer in the way, so it can now be approved.";
   }
@@ -63,14 +65,20 @@ function conflictingNote(conflictingWith) {
     period: formatVenuePeriod(other.startsAt, other.endsAt),
   }));
   if (named.length === 1) {
+    const clash = moved
+      ? `The event's new times clash with ${named[0].name}, booked at this venue for ${named[0].period}. `
+      : `${named[0].name} was approved at this venue for ${named[0].period}. `;
     return (
-      `${named[0].name} was approved at this venue for ${named[0].period}. ` +
+      clash +
       "This request can't be approved while that booking stands; it can be rejected, or left for the coordinator to withdraw."
     );
   }
   const list = named.map(({ name, period }) => `${name}, ${period}`).join("; ");
+  const clash = moved
+    ? `The event's new times clash with these bookings at this venue: ${list}. `
+    : `These events were approved at this venue for overlapping times: ${list}. `;
   return (
-    `These events were approved at this venue for overlapping times: ${list}. ` +
+    clash +
     "This request can't be approved while those bookings stand; it can be rejected, or left for the coordinator to withdraw."
   );
 }
@@ -100,6 +108,10 @@ export default function PendingBookingRequestCard({
   const regionId = `pending-booking-${item.id}`;
   const conflictingNoteId = `${regionId}-conflicting`;
   const eventNoteId = `${regionId}-event-status`;
+  const moved = eventMovedFromRequest(item);
+  // The period an approval books: the event's current times once it moved.
+  // Setup and turnaround are read against these, not the request's old times.
+  const approvalPeriod = moved ? { ...item, startsAt: item.eventStartsAt, endsAt: item.eventEndsAt } : item;
 
   // Hints only, so Venue Staff are not offered a refusal the server is certain
   // to give (EVENT_NOT_BOOKABLE, BOOKING_PERIOD_CONFLICT); it re-checks both
@@ -108,7 +120,9 @@ export default function PendingBookingRequestCard({
     typeof item.eventStatus === "string" &&
     item.eventStatus !== "" &&
     !BOOKABLE_EVENT_STATUSES.includes(item.eventStatus);
-  const blockedByBooking = item.status === CONFLICTING && conflictingWith.length > 0;
+  // conflictingWith is filled for a pending request too, when the event's new
+  // times clash with a booking; either status is blocked the same way.
+  const blockedByBooking = conflictingWith.length > 0;
   const approveBlockedBy = eventNotBookable ? eventNoteId : blockedByBooking ? conflictingNoteId : undefined;
   const reasonId = `${regionId}-reason`;
   const reasonErrorId = `${regionId}-reason-error`;
@@ -154,19 +168,20 @@ export default function PendingBookingRequestCard({
             </p>
           )}
           {/* Said before Approve: the collapsed row shows the request's own times, not the ones approved. */}
-          {eventMovedFromRequest(item) && (
+          {moved && (
             <p className="pending-bookings__event-status">
               Event moved to {formatVenuePeriod(item.eventStartsAt, item.eventEndsAt)}; approving books the new
               times.
             </p>
           )}
-          {/* Said before Approve, as approving also cancels the flagged booking. */}
+          {/* Said before Approve: approving cancels a still-flagged booking, or books a
+              second venue when that booking was reinstated. */}
           {item.replaces && (
             <p className="pending-bookings__event-status">{replacesFlaggedBookingText(item.replaces)}</p>
           )}
-          {item.status === CONFLICTING && (
+          {(item.status === CONFLICTING || blockedByBooking) && (
             <p id={conflictingNoteId} className="pending-bookings__conflicting">
-              {conflictingNote(conflictingWith)}
+              {conflictingNote(conflictingWith, moved)}
             </p>
           )}
 
@@ -180,10 +195,10 @@ export default function PendingBookingRequestCard({
             </dd>
             <dt>Occupies</dt>
             <dd>
-              {occupiedText(item)}
-              {occupiedPeriodParts(item).length > 1 && (
+              {occupiedText(approvalPeriod)}
+              {occupiedPeriodParts(approvalPeriod).length > 1 && (
                 <span className="pending-bookings__breakdown">
-                  {formatOccupiedPeriod(item, formatVenueRange)}
+                  {formatOccupiedPeriod(approvalPeriod, formatVenueRange)}
                 </span>
               )}
             </dd>
@@ -206,6 +221,12 @@ export default function PendingBookingRequestCard({
             suitabilityOverridden={item.suitabilityOverridden}
             overriddenCriteria={item.overriddenCriteria}
           />
+          {/* Suitability is advisory and not re-run when the event moves. */}
+          {moved && item.suitability && (
+            <p className="pending-bookings__event-status">
+              Suitability was checked for the request&apos;s original times.
+            </p>
+          )}
 
           <h3>Overlapping requests</h3>
           {overlapping.length === 0 ? (

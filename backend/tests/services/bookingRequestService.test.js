@@ -907,6 +907,7 @@ describe('SCRUM258_AC1 the Venue Staff queue of pending requests', () => {
   it('SCRUM266_W7_a_request_replacing_a_flagged_booking_names_it_in_camelCase', async () => {
     const replaces = {
       booking_id: OTHER_BOOKING,
+      status: 'flagged_for_review',
       venue_name: 'Harbour Room',
       starts_at: '2026-12-01T10:00:00+00:00',
       ends_at: '2026-12-01T12:00:00+00:00',
@@ -917,6 +918,7 @@ describe('SCRUM258_AC1 the Venue Staff queue of pending requests', () => {
 
     expect(request.replaces).toEqual({
       bookingId: OTHER_BOOKING,
+      status: 'flagged_for_review',
       venueName: 'Harbour Room',
       startsAt: '2026-12-01T10:00:00+00:00',
       endsAt: '2026-12-01T12:00:00+00:00',
@@ -942,6 +944,7 @@ describe('SCRUM258_AC1 the Venue Staff queue of pending requests', () => {
 
     expect(request.replaces).toEqual({
       bookingId: OTHER_BOOKING,
+      status: null,
       venueName: null,
       startsAt: '2026-12-01T10:00:00+00:00',
       endsAt: '2026-12-01T12:00:00+00:00',

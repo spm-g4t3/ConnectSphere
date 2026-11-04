@@ -584,6 +584,29 @@ describe('SCRUM-258 AC2-AC6: deciding a booking request', () => {
       expect((await bookingRow(atOld.id)).status).toBe('pending');
     });
 
+    it('SCRUM593_AC6_other_requests_are_judged_at_their_own_events_new_period', async () => {
+      const venue = await makeVenue();
+      const { id } = await pending(venue, at('18:00'), at('20:00'));
+      // Stored 14:00-16:00 with the event moved onto 18:00-20:00, and stored
+      // 18:00-20:00 with the event moved off to 10:00-12:00.
+      const movedOn = await movedRequest(venue);
+      const movedOff = await insertBooking(await makeEvent({ start: at('10:00'), end: at('12:00') }), venue, {
+        start: at('18:00'),
+        end: at('20:00'),
+      });
+
+      const result = await decide(id, 'approve');
+
+      expect(result.marked_conflicting).toEqual([movedOn.id]);
+      expect((await bookingRow(movedOn.id)).status).toBe('conflicting');
+      expect((await bookingRow(movedOff)).status).toBe('pending');
+      const [notice] = await rows(
+        `select payload from notifications where booking_id = $1 and type = 'booking_request_conflicting'`,
+        [movedOn.id],
+      );
+      expect(notice.payload.approvedBookingId).toBe(id);
+    });
+
     it('SCRUM593_AC7_rejecting_a_request_whose_event_moved_keeps_its_period', async () => {
       const { id } = await movedRequest(await makeVenue());
 

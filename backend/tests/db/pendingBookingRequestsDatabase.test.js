@@ -271,6 +271,21 @@ describe('SCRUM-258 AC1: the pending booking requests Venue Staff decide on', ()
     expect((await entryFor(moved.id)).conflicting_with.map((c) => c.booking_id)).toEqual([atNew]);
   });
 
+  it('SCRUM593_AC9_a_pending_request_whose_event_moved_onto_a_booking_lists_it', async () => {
+    const venue = await makeVenue();
+    const moved = await movedRequest(venue);
+    const inTheWay = await insertBooking(await makeEvent({ start: at('16:00'), end: at('18:00') }), venue, {
+      start: at('16:00'),
+      end: at('18:00'),
+      status: 'approved',
+    });
+
+    const entry = await entryFor(moved.id);
+
+    expect(entry.status).toBe('pending');
+    expect(entry.conflicting_with.map((c) => c.booking_id)).toEqual([inTheWay]);
+  });
+
   it('SCRUM593_AC9_an_event_with_no_period_is_judged_at_the_requests_own', async () => {
     const venue = await makeVenue();
     const request = await pending(venue, at('10:00'), at('12:00'), at('07:00'));

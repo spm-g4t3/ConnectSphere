@@ -337,14 +337,15 @@ describe('SCRUM-258 AC3: overlapping requests become conflicting', () => {
       expect(item.conflicting_with).toEqual([]);
     });
 
-    it('SCRUM258_AC3_a_pending_item_names_nothing_even_beside_an_approved_booking', async () => {
+    it('SCRUM593_AC9_a_pending_item_beside_an_approved_booking_names_it_too', async () => {
       const venue = await makeVenue();
-      await conflictingBehindApproval(venue);
-      // Overlaps the approval but arrived after it, so nothing marked it.
+      const { approved } = await conflictingBehindApproval(venue);
+      // Overlaps the approval but arrived after it, so nothing marked it; the
+      // queue still shows what an approval would clash with.
       const later = await pending(venue, at('11:30'), at('12:30'));
       expect(await statusOf(later.id)).toBe('pending');
 
-      expect((await queueItem(later.id)).conflicting_with).toEqual([]);
+      expect((await queueItem(later.id)).conflicting_with.map((c) => c.booking_id)).toEqual([approved.id]);
     });
 
     it('SCRUM258_AC3_a_block_or_another_events_hold_over_a_conflicting_item_is_not_named', async () => {

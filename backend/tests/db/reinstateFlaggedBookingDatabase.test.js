@@ -530,6 +530,8 @@ describe('SCRUM-266 AC2 and AC5: reinstating a flagged booking', () => {
             venueName: venue.name,
             startsAt: expect.any(String),
             endsAt: expect.any(String),
+            previousStartsAt: null,
+            previousEndsAt: null,
             reason: 'The block was moved',
             resolvedAt: expect.any(String),
             resolvedByRole: 'venue_staff',
@@ -930,6 +932,81 @@ describe('SCRUM-266 AC2 and AC5: reinstating a flagged booking', () => {
       );
       expect(new Date(notice.payload.startsAt)).toEqual(new Date(at('18:00')));
       expect(new Date(notice.payload.endsAt)).toEqual(new Date(at('20:00')));
+    });
+
+    it('SCRUM593_AC8_the_resolution_notice_names_the_period_it_moved_from_only_when_it_moved', async () => {
+      const { id: moved } = await flaggedByMove(await makeVenue());
+      const { id: kept, blockId } = await flagged();
+      await db.query('update venue_blocks set removed_at = now() where id = $1', [blockId]);
+
+      await reinstate(moved);
+      await reinstate(kept);
+
+      const payloadOf = async (bookingId) =>
+        (
+          await one(
+            `select payload from notifications where booking_id = $1 and type = 'flagged_booking_resolved'`,
+            [bookingId],
+          )
+        ).payload;
+      const movedPayload = await payloadOf(moved);
+      expect(new Date(movedPayload.previousStartsAt)).toEqual(new Date(at('14:00')));
+      expect(new Date(movedPayload.previousEndsAt)).toEqual(new Date(at('16:00')));
+      expect(await payloadOf(kept)).toMatchObject({ previousStartsAt: null, previousEndsAt: null });
+    });
+
+    /** The notices of one type about one booking. */
+    const noticesOfType = (bookingId, type) =>
+      rows('select recipient_id, payload from notifications where booking_id = $1 and type = $2', [bookingId, type]);
+
+    it('SCRUM593_AC1_a_request_that_clashed_only_with_the_old_period_returns_to_pending', async () => {
+      const venue = await makeVenue();
+      // B asked for 14:00-16:00 first; approving A there marked it conflicting.
+      const waiting = await insertBooking(await makeEvent(), venue);
+      const { id } = await flaggedByMove(venue);
+      expect((await bookingRow(waiting)).status).toBe('conflicting');
+
+      const result = await reinstate(id);
+
+      expect(result.returned_to_pending).toEqual([waiting]);
+      expect((await bookingRow(waiting)).status).toBe('pending');
+      const notices = await noticesOfType(waiting, 'booking_request_conflict_cleared');
+      expect(notices).toEqual([
+        { recipient_id: coordinator, payload: expect.objectContaining({ releasedBookingId: id }) },
+      ]);
+    });
+
+    it('SCRUM593_AC1_a_freed_request_is_rechecked_at_its_own_events_period', async () => {
+      const venue = await makeVenue();
+      // C stores 22:00-23:00, where another booking sits, but its event moved to
+      // 14:00-16:00, which only A's old period blocks.
+      await approved(venue, await makeEvent({ start: at('22:00'), end: at('23:00') }));
+      const waiting = await seedBooking(db, {
+        venueId: venue,
+        eventId: await makeEvent(),
+        status: 'conflicting',
+        start: at('22:00'),
+        end: at('23:00'),
+      });
+      const { id } = await flaggedByMove(venue);
+
+      expect((await reinstate(id)).returned_to_pending).toEqual([waiting]);
+      expect((await bookingRow(waiting)).status).toBe('pending');
+    });
+
+    it('SCRUM593_AC1_a_pending_request_over_the_new_period_is_marked_conflicting', async () => {
+      const venue = await makeVenue();
+      const waiting = await insertBooking(await makeEvent({ start: at('18:00'), end: at('20:00') }), venue);
+      const { id, eventId } = await flaggedByMove(venue);
+
+      const result = await reinstate(id);
+
+      expect(result.marked_conflicting).toEqual([waiting]);
+      expect((await bookingRow(waiting)).status).toBe('conflicting');
+      const [notice] = await noticesOfType(waiting, 'booking_request_conflicting');
+      expect(notice.recipient_id).toBe(coordinator);
+      expect(notice.payload).toMatchObject({ approvedBookingId: id, approvedEventRequestId: eventId });
+      expect(new Date(notice.payload.approvedStartsAt)).toEqual(new Date(at('18:00')));
     });
   });
 

@@ -820,6 +820,73 @@ describe("a request whose event has moved (SCRUM-593)", () => {
     ).toBeInTheDocument();
   });
 
+  it("SCRUM593_AC11_a_moved_requests_setup_and_turnaround_are_read_against_the_new_times", async () => {
+    // Occupied is the approval period (new times plus padding), outside the request's old 09:00-17:00.
+    vi.mocked(getPendingBookingRequests).mockResolvedValue([
+      item("1", {
+        eventStartsAt: NEW_STARTS,
+        eventEndsAt: NEW_ENDS,
+        occupiedStartsAt: "2026-12-03T09:30:00+08:00",
+        occupiedEndsAt: "2026-12-03T16:30:00+08:00",
+      }),
+    ]);
+    const { user } = renderQueue();
+    await screen.findByText("Event 1");
+    const region = await openCard(user, "1");
+
+    expect(region.textContent).toMatch(/including setup and turnaround/);
+    expect(region.querySelector(".pending-bookings__breakdown").textContent).toContain(
+      `Event ${formatVenueRange(NEW_STARTS, NEW_ENDS)}`,
+    );
+  });
+
+  it("SCRUM593_AC11_a_pending_request_whose_new_times_clash_says_so_and_cannot_be_approved", async () => {
+    vi.mocked(getPendingBookingRequests).mockResolvedValue([
+      item("1", { eventStartsAt: NEW_STARTS, eventEndsAt: NEW_ENDS, conflictingWith: [clash("b1", "Tech Talk")] }),
+    ]);
+    const { user } = renderQueue();
+    await screen.findByText("Event 1");
+    const region = await openCard(user, "1");
+
+    expect(region.querySelector(".pending-bookings__conflicting").textContent).toBe(
+      `The event's new times clash with Tech Talk, booked at this venue for ${formatVenuePeriod(CLASH_STARTS, CLASH_ENDS)}. ` +
+        "This request can't be approved while that booking stands; it can be rejected, or left for the coordinator to withdraw.",
+    );
+    const approve = within(region).getByRole("button", { name: "Approve" });
+    expect(approve).toBeDisabled();
+    expect(approve).toHaveAccessibleDescription(/can't be approved while that booking stands/);
+  });
+
+  it("SCRUM593_AC11_a_moved_request_clashing_with_several_bookings_names_each", async () => {
+    vi.mocked(getPendingBookingRequests).mockResolvedValue([
+      item("1", {
+        eventStartsAt: NEW_STARTS,
+        eventEndsAt: NEW_ENDS,
+        conflictingWith: [clash("b1", "Tech Talk"), clash("b2", "Gala Dinner")],
+      }),
+    ]);
+    const { user } = renderQueue();
+    await screen.findByText("Event 1");
+    const region = await openCard(user, "1");
+
+    const period = formatVenuePeriod(CLASH_STARTS, CLASH_ENDS);
+    expect(region.querySelector(".pending-bookings__conflicting").textContent).toBe(
+      `The event's new times clash with these bookings at this venue: Tech Talk, ${period}; Gala Dinner, ${period}. ` +
+        "This request can't be approved while those bookings stand; it can be rejected, or left for the coordinator to withdraw.",
+    );
+  });
+
+  it("SCRUM593_AC11_a_moved_requests_suitability_says_it_was_checked_for_the_original_times", async () => {
+    vi.mocked(getPendingBookingRequests).mockResolvedValue([
+      item("1", { eventStartsAt: NEW_STARTS, eventEndsAt: NEW_ENDS, suitability: UNSUITABLE }),
+    ]);
+    const { user } = renderQueue();
+    await screen.findByText("Event 1");
+    const region = await openCard(user, "1");
+
+    expect(within(region).getByText("Suitability was checked for the request's original times.")).toBeInTheDocument();
+  });
+
   it.each([
     ["match the request's", { eventStartsAt: "2026-12-01T09:00:00+08:00", eventEndsAt: "2026-12-01T17:00:00+08:00" }],
     ["are absent", {}],
