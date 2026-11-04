@@ -1,0 +1,77 @@
+// flaggedBookingService.js
+//
+// The frontend's calls to the flagged booking API, kept beside the other
+// service files so components never build a URL themselves.
+
+import { getData, postData } from "./apiData";
+
+/**
+ * Every booking flagged for review (GET /flagged-bookings), oldest flag first,
+ * across all venues. Each item carries the event, the venue, the booking's
+ * period and occupied period, the event's current period, the flag (time,
+ * review reason and the block that caused it, if any) and `reinstatable`.
+ * Not re-sorted by callers: the server's order is the list's.
+ *
+ * Failures: 401, 403 (not Venue Staff), 500. None flagged is 200 [].
+ *
+ * @returns {Promise<Array>} possibly empty
+ */
+export async function getFlaggedBookings() {
+  return getData("/flagged-bookings");
+}
+
+/**
+ * One event's flagged bookings (GET /flagged-bookings/events/:eventRequestId),
+ * oldest flag first, for its assigned coordinator. Items are shaped as
+ * getFlaggedBookings' are, plus `replacementRequests`: the live (pending or
+ * conflicting) requests made to replace each one.
+ *
+ * Failures: 400 (malformed id), 401, 403 (not this event's assigned
+ * coordinator), 404 (no such event), 500. None flagged is 200 [].
+ *
+ * @param {string} eventRequestId
+ * @returns {Promise<Array>} possibly empty
+ */
+export async function getEventFlaggedBookings(eventRequestId) {
+  return getData(`/flagged-bookings/events/${eventRequestId}`);
+}
+
+/**
+ * Reinstates a flagged booking (POST /flagged-bookings/:id/reinstate).
+ *
+ * The server re-checks everything under its locks. Failures: 400 (malformed
+ * id, a missing or blank reason, or one over 1000 characters), 401, 403, 404,
+ * and 409 with a `code`: BOOKING_NOT_FLAGGED, SAFETY_FLAG_NOT_REINSTATABLE,
+ * EVENT_NOT_BOOKABLE, BOOKING_PERIOD_STALE (the event has no period),
+ * BOOKING_PERIOD_CHANGED (the event's times changed after the list loaded, so
+ * the expected period no longer matches), VENUE_RETIRED, BOOKING_CHANGED, or
+ * BOOKING_PERIOD_CONFLICT with `conflicts`.
+ *
+ * A booking that no longer covers its event is moved to the event's period
+ * and approved there; its `resolution.previousStartsAt`/`previousEndsAt` then
+ * name the period it had, and are null otherwise.
+ *
+ * @param {string} id      the booking's id
+ * @param {string} reason  why it is reinstated
+ * @param {Object} expected  the period the card showed reinstating holds: the
+ *   event's times when the booking moves, else its own (SCRUM-593)
+ * @param {string} expected.expectedStartsAt  ISO 8601
+ * @param {string} expected.expectedEndsAt    ISO 8601
+ * @returns {Promise<Object>} the booking, now approved, with `resolution`
+ */
+export async function reinstateFlaggedBooking(id, reason, { expectedStartsAt, expectedEndsAt }) {
+  return postData(`/flagged-bookings/${id}/reinstate`, { reason, expectedStartsAt, expectedEndsAt });
+}
+
+/**
+ * Cancels a flagged booking (POST /flagged-bookings/:id/cancel), whatever
+ * flagged it. Failures: 400 as reinstateFlaggedBooking's, 401, 403, 404, and
+ * 409 BOOKING_NOT_FLAGGED or BOOKING_CHANGED.
+ *
+ * @param {string} id      the booking's id
+ * @param {string} reason  why it is cancelled
+ * @returns {Promise<Object>} the booking, now cancelled, with `resolution`
+ */
+export async function cancelFlaggedBooking(id, reason) {
+  return postData(`/flagged-bookings/${id}/cancel`, { reason });
+}

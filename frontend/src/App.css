@@ -1,0 +1,1265 @@
+/* Old names, aliased to the tokens in index.css so existing per-screen rules
+   keep working until each screen moves to the new names. */
+:root {
+  --ink: var(--color-ink);
+  --muted: var(--color-muted);
+  --line: var(--color-line);
+  --paper: var(--color-paper);
+  --teal: var(--color-accent);
+  --teal-dark: var(--color-accent-dark);
+  --shadow: var(--shadow-card);
+}
+
+* { box-sizing: border-box; }
+button, input { font: inherit; }
+button { cursor: pointer; }
+.app-shell { min-height: 100svh; }
+.app-nav { align-items: center; background: var(--paper); border-bottom: 1px solid var(--line); display: flex; gap: 32px; justify-content: space-between; padding: 18px clamp(20px, 5vw, 72px); }
+.app-nav::before { color: var(--teal-dark); content: "ConnectSphere"; font-size: 1.2rem; font-weight: 800; letter-spacing: -0.03em; }
+.app-nav__links { display: flex; gap: 8px; list-style: none; margin: 0 auto 0 0; padding: 0; }
+.app-nav__link { border-bottom: 2px solid transparent; color: var(--muted); display: inline-block; padding: 9px 12px; text-decoration: none; transition: background-color 140ms ease, color 140ms ease, border-color 140ms ease; }
+.app-nav__link:hover { background: #eef6f3; color: var(--teal-dark); }
+.app-nav__link--active { border-color: var(--teal); color: var(--teal-dark); font-weight: 700; }
+.app-nav__user { align-items: center; display: flex; gap: 16px; font-size: 0.84rem; color: var(--muted); }
+.app-nav__notifications { align-items: center; color: var(--teal-dark); display: inline-flex; gap: 6px; text-decoration: none; }
+.app-nav__notifications:hover { text-decoration: underline; }
+.app-nav__badge { background: var(--teal); border-radius: 999px; color: white; font-size: 0.72rem; font-weight: 700; line-height: 1; min-width: 1.4em; padding: 3px 7px; text-align: center; }
+.app-nav button, .dashboard button, .login-form button, .venue-search button { background: var(--teal); border: 0; border-radius: 6px; color: white; padding: 10px 16px; }
+.app-nav button:hover, .dashboard button:hover, .login-form button:hover, .venue-search button:hover { background: var(--teal-dark); }
+.app-nav button:disabled, .login-form button:disabled { cursor: wait; opacity: 0.65; }
+/* SCRUM-110: .dashboard was missing from the rule above, so "Retiring...",
+   the disabled Cancel and a retired row's Edit rendered full-strength teal --
+   indistinguishable from a live button, when that disabled state is the only
+   affordance the retire flow has. Its own rule rather than appended to that
+   one: cursor: wait is right for a login in flight, but a permanently
+   disabled Edit is not-allowed, not a wait. */
+.dashboard button:disabled { cursor: not-allowed; opacity: 0.65; }
+.auth-success { animation: auth-success-fade 3.5s ease-in-out forwards; background: #e8f7f1; border: 1px solid #b9e2d1; border-radius: 6px; color: #17684f; margin: 18px auto 0; max-width: 1080px; padding: 10px 14px; }
+@keyframes auth-success-fade {
+  0%, 100% { opacity: 0; transform: translateY(-6px); }
+  10%, 80% { opacity: 1; transform: translateY(0); }
+}
+.login-form, .placeholder-page, .dashboard, .venue-search { margin: 0 auto; max-width: 1080px; padding: clamp(42px, 8vw, 88px) 24px; }
+.login-form { background: var(--paper); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); margin-top: 9vh; max-width: 440px; padding: 38px; }
+.login-form h1, .placeholder-page h1, .dashboard h1, .venue-search > h1 { color: var(--ink); font-size: clamp(2rem, 4vw, 3.25rem); letter-spacing: -0.05em; margin: 0 0 12px; }
+.login-form label { color: var(--muted); display: grid; font-size: 0.9rem; gap: 7px; margin: 20px 0; }
+.login-form input { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); padding: 12px; }
+.login-form input:focus { border-color: var(--teal); outline: 2px solid rgba(8, 127, 123, 0.16); }
+.login-form button { width: 100%; }
+.login-form__notice { background: #fff8e6; border: 1px solid #f0d99a; border-radius: 6px; color: #6b4e00; padding: 10px 12px; }
+.session-timeout__backdrop { align-items: center; background: rgba(20, 24, 33, 0.55); display: flex; inset: 0; justify-content: center; padding: 16px; position: fixed; z-index: 1000; }
+.session-timeout { background: #fff; border-radius: 10px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3); max-width: 440px; padding: 24px; width: 100%; }
+.session-timeout h2 { margin: 0 0 8px; }
+.session-timeout__actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+.session-timeout__error { background: #fff0ee; border-radius: 6px; color: #a43c32; padding: 8px 10px; }
+.eyebrow { color: var(--teal); font-size: 0.75rem; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; }
+.placeholder-page p, .loading-screen { color: var(--muted); }
+.loading-screen { align-items: center; display: grid; min-height: 100svh; place-items: center; }
+.dashboard { padding-top: 54px; }
+.safety-review__queue > li { align-items: flex-start; }
+/* Names, venues and notes can be long single words; wrap them inside a 360px screen. */
+.safety-review__queue > li > div { min-width: 0; overflow-wrap: anywhere; }
+.safety-review__queue p { margin: 5px 0; }
+.safety-review__detail h2, .safety-review__arrangements strong { overflow-wrap: anywhere; }
+.safety-review__detail h3 { color: var(--teal-dark); margin: 24px 0 12px; }
+.safety-review__facts { display: grid; gap: 7px 16px; grid-template-columns: minmax(150px, 220px) minmax(0, 1fr); margin: 14px 0; }
+.safety-review__facts dt { color: var(--muted); font-size: 0.86rem; font-weight: 700; }
+.safety-review__facts dd { color: var(--ink); margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.safety-review__arrangements > li { align-items: flex-start; display: block; }
+.safety-review__affected { align-items: center; display: flex; gap: 8px; margin: 12px 0; }
+.safety-review__response { border-top: 1px solid var(--line); display: grid; gap: 14px; margin-top: 24px; padding-top: 8px; }
+.safety-review__response label { color: var(--muted); display: grid; gap: 7px; max-width: 720px; }
+.safety-review__response textarea { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; padding: 10px; }
+.safety-review__response textarea { resize: vertical; }
+.safety-review__choices { border: 0; display: grid; gap: var(--space-2); margin: 0; min-width: 0; padding: 0; }
+.safety-review__choices legend { color: var(--color-muted); margin-bottom: var(--space-2); padding: 0; }
+.safety-review__response .safety-review__choice { align-items: start; background: var(--color-paper); border: 1px solid var(--color-line); border-radius: var(--radius-control); color: var(--color-ink); cursor: pointer; gap: var(--space-3); grid-template-columns: auto minmax(0, 1fr); min-height: 44px; padding: var(--space-3); }
+.safety-review__response .safety-review__choice:has(input:checked) { background: var(--color-accent-soft); border-color: var(--color-accent); }
+.safety-review__choice input { accent-color: var(--color-accent); margin: var(--space-1) 0 0; }
+.safety-review__choice input:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.safety-review__choice-text { display: grid; gap: var(--space-1); min-width: 0; }
+.safety-review__choice-name { font-weight: 700; }
+.safety-review__choice-consequence { color: var(--color-muted); font-size: var(--font-size-sm); overflow-wrap: anywhere; }
+.safety-review__history li { align-items: flex-start; display: grid; justify-content: start; overflow-wrap: anywhere; }
+.safety-review__history span { color: var(--muted); font-size: 0.88rem; }
+/* The detail heading below has no top margin, so the back link keeps a gap. */
+.dashboard--safety-officer > section > .ui-button--link { margin-bottom: var(--space-3); }
+/* Two classes so the green outranks the muted .dashboard p colour. */
+.dashboard .safety-review__success { background: var(--color-success-soft); border-radius: var(--radius-control); color: var(--color-success); padding: var(--space-2) var(--space-3); }
+/* Two columns leave the values too narrow on a phone, so each label sits above its value. */
+@media (max-width: 720px) {
+  .safety-review__facts { gap: var(--space-1); grid-template-columns: minmax(0, 1fr); }
+  .safety-review__facts dd { margin-bottom: var(--space-2); }
+}
+.safety-approval-notice { align-items: flex-start; background: #e8f7f1; border: 1px solid #9dd9c3; border-radius: 8px; color: #145b45; display: flex; gap: 10px; margin: 12px 0; padding: 12px 14px; }
+.safety-approval-notice__check { align-items: center; background: #17684f; border-radius: 50%; color: white; display: inline-flex; flex: 0 0 22px; font-size: 0.85rem; font-weight: 800; height: 22px; justify-content: center; line-height: 1; }
+.safety-approval-notice p { color: inherit; margin: 3px 0 0; }
+.dashboard h1 { overflow-wrap: anywhere; }
+.dashboard > section { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); margin-top: 22px; padding: 24px; }
+.dashboard h2 { color: var(--teal-dark); font-size: 1.2rem; margin: 0 0 18px; }
+.dashboard ul { list-style: none; margin: 0; padding: 0; }
+.dashboard li { align-items: center; border-top: 1px solid var(--line); display: flex; gap: 12px; justify-content: space-between; padding: 14px 0; }
+.dashboard li:first-child { border-top: 0; }
+.dashboard li button { font-size: 0.84rem; padding: 7px 11px; }
+.dashboard p { color: var(--muted); }
+.dashboard > section > ul > li { align-items: center; }
+/* SCRUM-181. The "View calendar" links are router Links, so no button rule
+   reaches them; these give them the action-row button look (the small
+   size of .dashboard li button), as the create-event link above does. */
+.venue-catalogue__calendar-link, .venue-search__calendar-link { background: var(--teal); border-radius: 6px; color: white; display: inline-block; font-size: 0.84rem; padding: 7px 11px; text-decoration: none; }
+.venue-catalogue__calendar-link:hover, .venue-search__calendar-link:hover { background: var(--teal-dark); }
+.venue-search__calendar-link { margin-left: 12px; }
+/* Router Links wearing Button classes: no button rule makes them a box. */
+.dashboard--organiser a.ui-button, .my-event-requests a.ui-button, .registration-events-list a.ui-button { display: inline-block; }
+.dashboard--organiser a.ui-button--primary, .my-event-requests a.ui-button--secondary, .registration-events-list a.ui-button--secondary { text-decoration: none; }
+.dashboard--organiser .dashboard--organiser__event-row { align-items: flex-start; display: block; }
+.dashboard--organiser__event-summary { align-items: center; display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-3); min-width: 0; }
+.dashboard--organiser__event-date { color: var(--color-muted); font-size: var(--font-size-sm); }
+.dashboard--organiser__event-details > summary { align-items: center; cursor: pointer; display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); justify-content: space-between; list-style-position: inside; }
+.dashboard--organiser__event-details > summary:hover { color: var(--color-accent-dark); }
+.dashboard--organiser__event-details dl { display: grid; gap: 7px var(--space-4); grid-template-columns: minmax(150px, 220px) minmax(0, 1fr); margin: 14px 0; }
+.dashboard--organiser__event-details dt { color: var(--color-muted); font-size: var(--font-size-sm); font-weight: 700; }
+.dashboard--organiser__event-details dd { color: var(--color-ink); margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.dashboard--organiser__event-details > .ui-button--link { margin-top: var(--space-1); }
+.dashboard--organiser__clarification { background: var(--color-warning-soft); border-left: 3px solid #bb7a12; color: #61440d !important; margin: var(--space-3) 0; padding: 10px var(--space-3); white-space: pre-wrap; }
+.dashboard--organiser .dashboard--organiser__deadline-row { align-items: flex-start; display: grid; gap: var(--space-2) 18px; grid-template-columns: minmax(0, 1fr) auto; }
+.dashboard--organiser__deadline-row p { margin: 6px 0 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.dashboard--organiser__deadline-meta { align-items: flex-end; display: flex; flex-direction: column; gap: 5px; text-align: right; }
+.dashboard--organiser__deadline-row > .ui-button { grid-column: 1 / -1; justify-self: start; }
+/* One clear ring for every Organiser control and focused title, so keyboard
+   users can always see where they are. */
+.dashboard--organiser :is(a, button, input, select, textarea, summary, [tabindex]):focus-visible,
+.my-event-requests :is(a, button, input, select, textarea, summary, [tabindex]):focus-visible,
+.event-registration-page :is(a, button, input, select, textarea, summary, [tabindex]):focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+/* Event names, notes and references can be one long word; wrap them inside a 360px screen. */
+.dashboard--organiser, .my-event-requests, .event-registration-page { overflow-wrap: anywhere; }
+.my-event-requests { margin: 0 auto; max-width: 1080px; padding: 54px var(--space-5); }
+.my-event-requests > .ui-button--link { margin-bottom: 18px; }
+.my-event-requests__header { align-items: center; display: flex; gap: 20px; justify-content: space-between; margin-bottom: var(--space-5); }
+.my-event-requests__header h1 { color: var(--color-ink); font-size: 1.8rem; margin: 0; }
+.my-event-requests__list { display: grid; gap: 14px; list-style: none; margin: 0; padding: 0; }
+.my-event-requests__item { background: var(--color-paper); border: 1px solid var(--color-line); border-radius: var(--radius-card); box-shadow: 0 6px 18px rgba(24, 61, 58, 0.05); display: block; padding: 20px; transition: background-color 0.8s ease, border-color 0.8s ease, box-shadow 0.8s ease; }
+/* SCRUM-172 (AC7): the event a notification was opened for. */
+/* A row opened from a link pulses while the page glides to it, then fades back
+   when MyEventRequests drops the class (FOCUS_HIGHLIGHT_MS). */
+.my-event-requests__item--focused { animation: focused-row-pulse 1.2s ease-in-out 0.4s 2; background-color: #eef8f7; border-color: var(--color-accent); box-shadow: 0 0 0 3px rgba(8, 127, 123, 0.22); }
+@keyframes focused-row-pulse {
+  50% { box-shadow: 0 0 0 7px rgba(8, 127, 123, 0.12); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .my-event-requests__item, .my-event-requests__item--focused { animation: none; transition: none; }
+}
+.my-event-requests__item-main { align-items: center; display: flex; flex-wrap: wrap; gap: var(--space-2) 14px; }
+.my-event-requests__item-description { line-height: 1.5; margin: 10px 0; }
+/* SCRUM-486 (SCRUM-520). Where a submitted request stands with its
+   coordinator, directly under the status description it qualifies: the
+   summary teal of the page's other secondary lines, pulled up under the
+   description as the reassign hint is under its field. */
+.my-event-requests__assignment { color: var(--color-accent-dark); font-size: var(--font-size-md); margin: -6px 0 10px; }
+.my-event-requests__item-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: 14px; }
+.event-request-form, .change-request-form { background: var(--color-paper); border: 1px solid var(--color-line); border-radius: var(--radius-card); display: grid; gap: 18px; margin: 0 0 var(--space-5); padding: var(--space-5); }
+/* SCRUM-355. A revision keeps the rejection it answers beside the form on a
+   wide screen, and above it on a narrow one. A draft never rejected has no
+   aside, so the form keeps the full width. */
+.my-event-requests__revision { align-items: start; display: grid; gap: 0 20px; }
+@media (min-width: 900px) {
+  .my-event-requests__revision:has(> .decision-history) { grid-template-columns: minmax(0, 1fr) minmax(260px, 340px); }
+  .my-event-requests__revision > .decision-history { grid-column: 2; grid-row: 1; position: sticky; top: 16px; }
+}
+/* The red of a rejection, as an error notice; the coordinator's
+   resubmission mark is amber, a thing to note rather than a failure. */
+.decision-history { background: var(--paper); border: 1px solid var(--line); border-left: 3px solid #a43c32; border-radius: 8px; display: grid; gap: 10px; margin: 0 0 24px; min-width: 0; padding: 16px 18px; }
+.decision-history h2, .decision-history h3 { color: var(--ink); font-size: 0.95rem; margin: 4px 0 0; }
+.decision-history .decision-history__reason { background: #fff0ee; border-radius: 6px; display: grid; gap: 4px; padding: 10px 12px; }
+.decision-history .decision-history__reason strong { color: #a43c32; font-size: 0.86rem; }
+.decision-history .decision-history__reason p { color: var(--ink); margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.decision-history .decision-history__resubmission { background: #fff6e5; border-radius: 6px; color: #8a5a00; font-weight: 700; margin: 0; padding: 10px 12px; }
+.decision-history:has(> .decision-history__resubmission) { border-left-color: #bb7a12; }
+.decision-history__list { display: grid; gap: 8px; list-style: none; margin: 0; padding: 0; }
+.decision-history__list li { border-left: 2px solid var(--line); color: var(--muted); font-size: 0.86rem; padding: 2px 0 2px 12px; }
+.decision-history__list li strong { color: var(--ink); }
+.decision-history .decision-history__list p { color: var(--ink); margin: 4px 0 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.event-request-form h1 { color: var(--color-ink); margin: 0; }
+.event-request-form > label, .change-request-form > label { color: var(--color-muted); display: grid; gap: 7px; line-height: 1.4; }
+.event-request-form input, .event-request-form textarea, .change-request-form input, .change-request-form textarea, .change-request-form select { background: var(--color-paper); border: 1px solid var(--color-line); border-radius: var(--radius-control); color: var(--color-ink); font: inherit; min-width: 0; padding: 10px var(--space-3); width: 100%; }
+.event-request-form input:focus, .event-request-form textarea:focus, .change-request-form input:focus, .change-request-form textarea:focus, .change-request-form select:focus { border-color: var(--color-accent); }
+.event-request-form__row { display: grid; gap: var(--space-4); grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.event-request-form__row label { color: var(--color-muted); display: grid; gap: 7px; }
+.event-request-form__actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.event-request-form__submit-hint { align-self: center; color: var(--color-muted); font-size: var(--font-size-sm); margin: 0; }
+.event-request-form__notice, .change-request-form__notice { background: var(--color-accent-soft); border-left: 3px solid var(--color-accent); color: var(--color-ink); margin: 0; padding: var(--space-3) 14px; }
+.my-event-requests__panel-header { margin: 0 0 var(--space-4); }
+.my-event-requests__panel-header h1 { color: var(--color-ink); font-size: 1.5rem; margin: 0; }
+.my-event-requests__panel-header p { color: var(--color-muted); margin: var(--space-1) 0 0; overflow-wrap: anywhere; }
+.my-event-requests__change-history { background: var(--color-paper); border: 1px solid var(--color-line); border-radius: var(--radius-card); padding: 20px; }
+.my-event-requests__change-history h2 { color: var(--color-ink); font-size: 1.1rem; margin: 0 0 var(--space-1); }
+.dashboard--coordinator > section { text-align: left; }
+.dashboard.dashboard--event-page { max-width: 1200px; }
+.dashboard--coordinator > section > ul { margin-top: 10px; }
+.dashboard--coordinator .coordinator-request-detail__main > section,
+.dashboard--coordinator .coordinator-request-detail__main .ui-tabs__panel > section,
+.dashboard--coordinator .coordinator-request-detail__rail > section { border-top: 1px solid var(--color-line); margin-top: 18px; padding-top: 18px; }
+.dashboard--coordinator .coordinator-request-detail__main > section:first-child,
+.dashboard--coordinator .coordinator-request-detail__main .ui-tabs__panel > section:first-child,
+.dashboard--coordinator .coordinator-request-detail__rail > section:first-child { border-top: 0; margin-top: 0; padding-top: 0; }
+.coordinator-request-detail__main > .ui-tabs { margin-top: var(--space-5); }
+.dashboard--coordinator .coordinator-request-detail h3 { color: var(--teal-dark); font-size: 1rem; margin: 0 0 12px; }
+.dashboard .coordinator-request-detail .coordinator-request-detail__title { line-height: 1.25; margin: 0 0 var(--space-2); overflow-wrap: anywhere; }
+.dashboard .coordinator-request-detail .coordinator-request-detail__badges { align-items: center; display: flex; flex-wrap: wrap; gap: var(--space-2); margin: 0 0 var(--space-2); }
+.dashboard .coordinator-request-detail .coordinator-request-detail__facts { color: var(--color-ink); margin: 0 0 var(--space-2); overflow-wrap: anywhere; }
+.dashboard--coordinator .coordinator-request-detail__header > p { line-height: 1.5; }
+/* The event screen sits in narrow dashboard cards and on its own wide page, so
+   it splits into main column and rail on its own width, not the viewport's. */
+.coordinator-request-detail { container-type: inline-size; }
+.coordinator-request-detail__body { display: grid; gap: var(--space-5); margin-top: var(--space-5); }
+.coordinator-request-detail__main, .coordinator-request-detail__rail { min-width: 0; }
+.coordinator-request-detail__rail { border-top: 1px solid var(--color-line); padding-top: var(--space-5); }
+@container (min-width: 900px) {
+  .coordinator-request-detail__body { align-items: start; grid-template-columns: minmax(0, 1fr) minmax(260px, 320px); }
+  .coordinator-request-detail__rail { border: 1px solid var(--color-line); border-radius: var(--radius-card); padding: var(--space-4); position: sticky; top: var(--space-4); }
+}
+.dashboard--coordinator .coordinator-request-detail li { line-height: 1.55; }
+.dashboard--coordinator .coordinator-request-detail li strong { color: var(--muted); display: block; margin-bottom: 3px; }
+.dashboard--coordinator .coordinator-request-detail li > span { display: block; overflow-wrap: anywhere; }
+.coordinator-request-detail__actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-3); }
+/* Outranks the main column's divider rules: the card draws its own border. */
+.dashboard--coordinator .coordinator-request-detail__main > section.coordinator-request-detail__next-step { background: var(--color-paper); border: 1px solid var(--color-line); border-radius: var(--radius-card); display: grid; gap: var(--space-3); margin-top: 0; padding: var(--space-4) var(--space-5); }
+.coordinator-request-detail__next-step > :is(h2, h3, h4, p) { margin: 0; }
+.coordinator-request-detail__next-step .coordinator-request-detail__waiting { display: grid; gap: var(--space-2); }
+.coordinator-decision { border: 0; display: grid; gap: var(--space-2); margin: 0; min-width: 0; padding: 0; }
+.coordinator-decision legend { color: var(--color-ink); font-weight: 700; margin-bottom: var(--space-1); padding: 0; }
+.coordinator-clarification .coordinator-decision__option { align-items: flex-start; border: 1px solid var(--color-line); border-radius: var(--radius-control); color: var(--color-ink); cursor: pointer; display: flex; gap: var(--space-3); padding: var(--space-3) var(--space-4); }
+.coordinator-clarification .coordinator-decision__option--selected { border-color: var(--color-accent); }
+.coordinator-decision__option input { accent-color: var(--color-accent); margin: var(--space-1) 0 0; }
+.coordinator-decision__text { display: grid; gap: var(--space-1); }
+.coordinator-decision__label { font-weight: 700; }
+.coordinator-decision__hint { color: var(--color-muted); font-size: var(--font-size-sm); }
+.coordinator-request-detail__stepper { display: grid; gap: var(--space-2); list-style: none; margin: 0 0 var(--space-4); padding: 0; }
+/* Row and start stated, so the .dashboard li rules neither stack each dot over
+   its label at phone width nor push the label to the far edge. */
+.coordinator-request-detail .coordinator-request-detail__stepper > li.coordinator-request-detail__step { align-items: center; color: var(--color-muted); display: flex; flex-direction: row; font-size: var(--font-size-md); gap: var(--space-2); justify-content: flex-start; padding: 0; }
+.coordinator-request-detail__step::before { border: 2px solid var(--color-line); border-radius: var(--radius-pill); box-sizing: border-box; content: ""; flex: none; height: 12px; width: 12px; }
+.coordinator-request-detail .coordinator-request-detail__stepper > li.coordinator-request-detail__step--done { color: var(--color-ink); }
+.coordinator-request-detail__step--done::before { background: var(--color-accent); border-color: var(--color-accent); }
+.coordinator-request-detail .coordinator-request-detail__stepper > li.coordinator-request-detail__step--current { color: var(--color-accent-dark); font-weight: 700; }
+.coordinator-request-detail__step--current::before { border-color: var(--color-accent); }
+/* One visible ring for every control and focused title on the coordinator's
+   screens, so keyboard users can always see where they are. */
+.dashboard--coordinator :is(a, button, input, select, textarea, summary, [tabindex]):focus-visible,
+.venue-search :is(a, button, input, select, textarea, [tabindex]):focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+/* Event and venue names can be one long word; they wrap inside a 360px screen. */
+.review-queue__title, .my-assigned-events__summary, .my-booking-requests__summary, .coordinator-attention__summary,
+.dashboard--coordinator .reassign-event > :is(h1, h2), .dashboard--coordinator .ui-confirm-dialog,
+.venue-search > h1, .venue-search__results li, .booking-request, .venue-suitability-panel { min-width: 0; overflow-wrap: anywhere; }
+/* At phone width every control on these screens is a 44px target, and a
+   dialog's buttons wrap instead of running past its edge. */
+@media (max-width: 720px) {
+  .dashboard--coordinator :is(.review-queue, .my-assigned-events, .my-booking-requests, .coordinator-attention, .coordinator-request-detail, .event-cancellation-page, .event-completion-page, .event-significant-change-page, .event-details-edit-page, .reassign-event, .ui-confirm-dialog) :is(button, select, summary, input:not([type="checkbox"], [type="radio"])) { min-height: 44px; }
+  .dashboard--coordinator .coordinator-request-detail p > a:only-child { align-items: center; display: inline-flex; min-height: 44px; }
+  .dashboard--coordinator :is(.event-cancellation-page, .event-significant-change-page, .coordinator-clarification__fields, .event-venue-finder__group, .booking-request__warning) label:has(> input:is([type="checkbox"], [type="radio"])) { align-items: center; display: flex; gap: var(--space-2); min-height: 44px; }
+  .dashboard--coordinator .ui-confirm-dialog .ui-confirm-dialog__actions { flex-wrap: wrap; }
+  /* Find a Venue is its own page, outside the coordinator's dashboard wrapper. */
+  .venue-search :is(button, select, input:not([type="checkbox"], [type="radio"])) { min-height: 44px; }
+  .venue-search :is(.venue-search__calendar-link, .venue-search__context > .ui-button--link) { align-items: center; display: inline-flex; min-height: 44px; }
+  .venue-search :is(.venue-search__retired, .booking-request__warning) label:has(> input[type="checkbox"]) { align-items: center; display: flex; gap: var(--space-2); min-height: 44px; }
+  .booking-request__details { grid-template-columns: 1fr; }
+}
+.dashboard--coordinator .coordinator-change-requests > li { display: block; }
+.dashboard--coordinator .coordinator-change-requests__actions { align-items: start; }
+/* The rule above makes every .dashboard p muted grey, which would render a
+   failed retire in exactly the same voice as the empty-state text. Same
+   colour pair as .ui-error-notice. */
+.dashboard .unassigned-queue__error, .dashboard .venue-block-form__error, .dashboard .notification-inbox__row-error, .dashboard .venue-hold-form__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 6px 0 0; padding: 8px 12px; }
+/* NECESSARY, not cosmetic. .dashboard li above forces flex with
+   justify-content: space-between, which on a checkbox row throws the box to
+   one edge of the card and its label to the other with the whole width
+   between them -- unreadable, and unclickable as a pair. The same class of
+   bug SCRUM-110 fixed at :24-30. Scoped to .venue-form so the catalogue's
+   own rows keep the spread layout they want. */
+.dashboard--venue-staff .venue-form li { border-top: 0; display: block; padding: 4px 0; }
+/* One field style for the venue, block and hold forms, so the three read as
+   one family. Checkboxes keep the browser's own look. */
+.dashboard--venue-staff .venue-form > label, .dashboard--venue-staff .venue-block-form label, .dashboard--venue-staff .venue-hold-form label { color: var(--color-muted); display: grid; font-size: var(--font-size-md); gap: var(--space-2); margin: var(--space-4) 0 0; }
+.dashboard--venue-staff .venue-form input:not([type="checkbox"]), .dashboard--venue-staff .venue-form select, .dashboard--venue-staff .venue-form textarea,
+.dashboard--venue-staff .venue-block-form input, .dashboard--venue-staff .venue-block-form select, .dashboard--venue-staff .venue-block-form textarea,
+.dashboard--venue-staff .venue-hold-form input, .dashboard--venue-staff .venue-hold-form select { background: var(--color-paper); border: 1px solid var(--color-line); border-radius: var(--radius-control); color: var(--color-ink); font: inherit; max-width: 100%; min-width: 0; padding: var(--space-2) var(--space-3); width: 100%; }
+.dashboard--venue-staff .venue-form textarea, .dashboard--venue-staff .venue-block-form textarea { resize: vertical; }
+/* A ring of its own, because the accent border alone is too faint to find. */
+.dashboard--venue-staff .venue-form input:focus-visible, .dashboard--venue-staff .venue-form select:focus-visible, .dashboard--venue-staff .venue-form textarea:focus-visible,
+.dashboard--venue-staff .venue-block-form input:focus-visible, .dashboard--venue-staff .venue-block-form select:focus-visible, .dashboard--venue-staff .venue-block-form textarea:focus-visible,
+.dashboard--venue-staff .venue-hold-form input:focus-visible, .dashboard--venue-staff .venue-hold-form select:focus-visible { border-color: var(--color-accent); outline: 2px solid var(--color-accent); outline-offset: 1px; }
+.dashboard--venue-staff .venue-form [aria-invalid="true"], .dashboard--venue-staff .venue-block-form [aria-invalid="true"], .dashboard--venue-staff .venue-hold-form [aria-invalid="true"] { border-color: var(--color-danger); }
+.dashboard--venue-staff .venue-block-form__field-error, .dashboard--venue-staff .venue-hold-form__field-error { color: var(--color-danger); font-size: var(--font-size-sm); margin: var(--space-1) 0 0; }
+.dashboard--venue-staff .venue-form__help, .dashboard--venue-staff .venue-block-form__hint, .dashboard--venue-staff .venue-block-form__help, .dashboard--venue-staff .venue-hold-form__hint { color: var(--color-muted); font-size: var(--font-size-sm); margin: var(--space-1) 0 0; }
+.dashboard--venue-staff .venue-block-form button, .dashboard--venue-staff .venue-hold-form button { margin: var(--space-5) var(--space-2) 0 0; }
+/* A fieldset is as wide as its widest row by default; this lets it shrink to a phone. */
+.dashboard--venue-staff .venue-form fieldset { min-width: 0; }
+/* The opening hours sit beside their day on a wide screen, so they keep their own width there. */
+.dashboard--venue-staff .venue-form li input[type="time"] { width: auto; }
+/* SCRUM-493. The safety-fact boxes. They are the form's only textareas, so
+   they get the block form's control look here rather than a new shared rule.
+   The help line under each carries the code-point counter, which turns red
+   past 2,000 -- the server refuses at that point, so staff see it before
+   they save rather than after. */
+.dashboard--venue-staff .venue-form__counter { white-space: nowrap; }
+.dashboard--venue-staff .venue-form__counter--over { color: var(--color-danger); font-weight: 700; }
+/* The next-day note under an overnight day's times, in the accent so it
+   reads as information about the entry rather than as an error. */
+.dashboard--venue-staff .venue-form__closing,
+.dashboard--coordinator .event-venue-finder__ends { color: var(--teal); font-size: 0.84rem; margin: 4px 0 0; }
+.dashboard--venue-staff .venue-form__closing:empty,
+.dashboard--coordinator .event-venue-finder__ends:empty { margin: 0; }
+/* SCRUM-493. VenueSafetyFacts: label then value, the .decision-outcome shape.
+   Values keep the line breaks staff typed (a list of exits reads as a list)
+   and wrap rather than overflowing the card. "Not recorded" is muted and
+   italic so it cannot pass for entered text. A <dl>, not a list, so the
+   .dashboard li flex rule never reaches it.
+   NOT dashboard-scoped, on purpose: .venue-safety-facts is a unique BEM block
+   that nothing else uses, so it cannot leak, and it must look the same on
+   SCRUM-490's Safety Officer dashboard as on the venue staff one. */
+.venue-safety-facts { margin: 8px 0 0; }
+.venue-safety-facts__heading { margin: 0 0 6px; }
+.venue-safety-facts dl { display: grid; gap: 10px; margin: 0; }
+.venue-safety-facts dt { color: var(--muted); font-size: 0.86rem; font-weight: 700; }
+.venue-safety-facts dd { color: var(--ink); margin: 2px 0 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.venue-safety-facts .venue-safety-facts__not-recorded { color: var(--muted); font-style: italic; }
+/* SCRUM-126. The block form's start and end sit side by side on a __row,
+   which collapses to one column on a phone. */
+.dashboard--venue-staff .venue-block-form__row { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+/* NECESSARY, not cosmetic -- the same .dashboard li flex bug .venue-form li
+   fixes above, here on the field-error lists and the alert's list. */
+.dashboard--venue-staff .venue-block-form li { border-top: 0; display: block; padding: 2px 0; }
+/* SCRUM-125. The booking-conflict warning a block over approved bookings
+   raises. The same amber pair as .status--awaiting-review: a warning to act
+   on, not a failure. */
+.dashboard--venue-staff .block-conflicts { background: #fff6e5; border-left: 3px solid #8a5a00; border-radius: 8px; margin: 18px 0; padding: 14px 16px; }
+.dashboard--venue-staff .block-conflicts h3 { color: #8a5a00; font-size: 1rem; margin: 0 0 8px; }
+/* NECESSARY, not cosmetic -- the same .dashboard li flex bug .venue-form li
+   fixes above. With justify-content: space-between each row's name, period
+   and id would be thrown to opposite edges of the card. */
+.dashboard--venue-staff .block-conflicts__list li { border-top: 1px solid rgba(138, 90, 0, 0.18); display: flex; flex-wrap: wrap; gap: 6px 12px; justify-content: flex-start; padding: 8px 0; }
+.dashboard--venue-staff .block-conflicts__list li:first-child { border-top: 0; }
+.dashboard--venue-staff .block-conflicts__actions { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+/* The badge follows the venue's location inline, so it needs its own gap. */
+.dashboard--venue-staff .venue-catalogue__item-main .ui-status-badge { margin-left: var(--space-2); }
+/* A row's own error sits on its own line under the row's details. */
+.dashboard--venue-staff .venue-catalogue__item-main .ui-error-notice, .dashboard--venue-staff .venue-blocks__item-main .ui-error-notice { flex-basis: 100%; margin-top: var(--space-2); }
+/* SCRUM-127. The blocks panel. The notice uses the success green: a save,
+   possibly with bookings flagged, is a success to read, not a fault. */
+.dashboard--venue-staff .venue-blocks__notice { background: #e8f7f1; border-radius: 8px; margin: 12px 0; padding: 10px 14px; }
+.dashboard--venue-staff .venue-blocks__notice p { color: #17684f; margin: 4px 0; }
+/* NECESSARY, not cosmetic -- the same .dashboard li flex bug .venue-form li
+   fixes above. With justify-content: space-between each flagged booking's
+   name, period and id would be thrown to opposite edges of the notice. */
+.dashboard--venue-staff .venue-blocks__flagged li { display: flex; justify-content: flex-start; flex-wrap: wrap; gap: 6px 12px; border-top: 0; padding: 4px 0; }
+.dashboard--venue-staff .venue-blocks__current { margin-top: 22px; }
+/* SCRUM-484 (AC8). Bookings a setup or turnaround change flagged. The amber
+   of .block-conflicts, not the green notice: these need someone's attention. */
+.dashboard--venue-staff .venue-catalogue__flagged { background: #fff6e5; border-left: 3px solid #8a5a00; border-radius: 8px; margin: 12px 0 18px; padding: 14px 16px; }
+.dashboard--venue-staff .venue-catalogue__flagged h3 { color: #8a5a00; font-size: 1rem; margin: 0 0 8px; }
+.dashboard--venue-staff .venue-catalogue__flagged p { color: #8a5a00; font-size: 0.9rem; margin: 8px 0; }
+/* NECESSARY, not cosmetic -- the same .dashboard li flex bug .venue-form li
+   fixes above. Name and period stay together on the left. */
+.dashboard--venue-staff .venue-catalogue__flagged-list { list-style: none; margin: 0; padding: 0; }
+.dashboard--venue-staff .venue-catalogue__flagged-list li { border-top: 0; display: flex; flex-wrap: wrap; gap: 6px 12px; justify-content: flex-start; padding: 4px 0; }
+.dashboard--venue-staff .venue-blocks__current h3 { font-size: 1rem; margin: 0 0 8px; }
+/* Rows keep the .dashboard li spread -- details left, actions right, as in
+   the catalogue -- but top-aligned, because notes can wrap to several lines. */
+.dashboard--venue-staff .venue-blocks__list li { align-items: flex-start; }
+.dashboard--venue-staff .venue-blocks__item-main { align-items: center; display: flex; flex: 1; flex-wrap: wrap; gap: 6px 12px; min-width: 0; }
+.dashboard--venue-staff .venue-blocks__notes, .dashboard--venue-staff .venue-blocks__clash-note, .dashboard--venue-staff .venue-blocks__ended-note { flex-basis: 100%; margin: 0; overflow-wrap: anywhere; }
+.dashboard--venue-staff .venue-blocks__notes { color: var(--ink); white-space: pre-wrap; }
+.dashboard--venue-staff .venue-blocks__clash-note { color: #8a5a00; font-size: 0.86rem; }
+.dashboard--venue-staff .venue-blocks__ended-note { font-size: 0.84rem; }
+.dashboard--venue-staff .venue-blocks__item-actions { align-items: center; display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: 8px; }
+.dashboard--venue-staff .venue-blocks__item--ended { opacity: 0.7; }
+/* The clashing block, in the same amber as the booking-conflict warning. */
+.dashboard--venue-staff .venue-blocks__item--clash { border-left: 3px solid #8a5a00; padding-left: 10px; }
+/* SCRUM-131. Rows wrap, so an open block history can take a full line under
+   the row's details and actions. */
+.dashboard--venue-staff .venue-blocks__list > li { flex-wrap: wrap; }
+.dashboard--venue-staff .venue-blocks__audit { color: var(--muted); flex-basis: 100%; font-size: 0.84rem; margin: 0; overflow-wrap: anywhere; }
+/* SCRUM-491. The hold panel, shaped like the block one above: the amber
+   warning for what is in the way, and the green notice for a hold placed. */
+/* NECESSARY, not cosmetic -- the same .dashboard li flex bug .venue-form li
+   fixes above, on the field-error lists and the alert's list. */
+.dashboard--venue-staff .venue-hold-form li { border-top: 0; display: block; padding: 2px 0; }
+.dashboard--venue-staff .venue-holds__conflicts { background: #fff6e5; border-left: 3px solid #8a5a00; border-radius: 8px; margin: 18px 0; padding: 14px 16px; }
+.dashboard--venue-staff .venue-holds__conflicts h3 { color: #8a5a00; font-size: 1rem; margin: 0 0 8px; }
+.dashboard--venue-staff .venue-holds__conflict-list li { border-top: 1px solid rgba(138, 90, 0, 0.18); display: flex; flex-wrap: wrap; gap: 6px 12px; justify-content: flex-start; padding: 8px 0; }
+.dashboard--venue-staff .venue-holds__conflict-list li:first-child { border-top: 0; }
+.dashboard--venue-staff .venue-holds__notice { background: #e8f7f1; border-radius: 8px; margin: 12px 0; padding: 10px 14px; }
+.dashboard--venue-staff .venue-holds__notice p { color: #17684f; margin: 4px 0; }
+.dashboard--venue-staff .venue-holds__current { margin-top: 22px; }
+.dashboard--venue-staff .venue-holds__current h3 { font-size: 1rem; margin: 0 0 8px; }
+.dashboard--venue-staff .venue-holds__list li { align-items: flex-start; }
+.dashboard--venue-staff .venue-holds__item-main { align-items: center; display: flex; flex: 1; flex-wrap: wrap; gap: 6px 12px; min-width: 0; }
+.dashboard--venue-staff .venue-holds__audit { color: var(--muted); flex-basis: 100%; font-size: 0.84rem; margin: 0; overflow-wrap: anywhere; }
+.dashboard--venue-staff .block-history { border-top: 1px solid var(--line); flex-basis: 100%; margin-top: 6px; padding-top: 8px; width: 100%; }
+.dashboard--venue-staff .block-history ul { list-style: none; margin: 0; padding: 0; }
+/* NECESSARY, not cosmetic -- the same .dashboard li flex bug .venue-form li
+   fixes above. Without it each entry's header and its changes would be
+   spread to opposite edges of the row, with a rule between every line. */
+.dashboard--venue-staff .block-history li { display: block; border-top: 0; padding: 4px 0; }
+.dashboard--venue-staff .block-history .venue-history__meta { align-items: baseline; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.dashboard--venue-staff .block-history .venue-detail__help { color: var(--muted); font-size: 0.84rem; margin: 6px 0 0; }
+/* History values are raw jsonb turned into text: long joined code lists, a
+   whole week of opening hours, a JSON.stringify of last resort. Without
+   these they overflow the card rather than wrapping, and the <pre> fallback
+   would keep its monospace default and scroll sideways. */
+.dashboard--venue-staff .venue-history__value { color: var(--ink); font-size: 0.86rem; margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+/* changedBy and eventRequestId are unjoined uuids -- no endpoint resolves
+   either to a name, so they are rendered as identifiers and need to read as
+   one rather than as prose. */
+.dashboard--venue-staff code { background: #eef2f1; border-radius: 4px; color: var(--muted); font-size: 0.78rem; padding: 2px 6px; }
+/* Catalogue rows: View bookings & history leads, and Retire, which cannot be
+   undone, stands apart at the end. */
+.dashboard--venue-staff .venue-catalogue__item-main { min-width: 0; overflow-wrap: anywhere; }
+.dashboard--venue-staff .venue-catalogue__item-actions { align-items: center; display: flex; flex-wrap: wrap; gap: var(--space-2); justify-content: flex-end; }
+.dashboard--venue-staff .venue-catalogue__item-actions .venue-catalogue__retire { margin-left: var(--space-4); }
+/* The calendar link sits among the secondary buttons, so it takes their look
+   rather than the primary fill it has on the venue search. */
+.dashboard--venue-staff .venue-catalogue__calendar-link { background: var(--color-paper); border: 1px solid var(--color-accent-dark); border-radius: var(--radius-control); color: var(--color-accent-dark); font-size: inherit; padding: 10px var(--space-4); }
+.dashboard--venue-staff .venue-catalogue__calendar-link:hover { background: var(--color-accent-soft); }
+.dashboard--venue-staff .venue-catalogue__calendar-link:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+/* Venue and event names can be one long word; they wrap inside the card. */
+.dashboard--venue-staff .venue-form h2, .dashboard--venue-staff .venue-detail h2, .dashboard--venue-staff .venue-blocks h2, .dashboard--venue-staff .venue-holds h2,
+.dashboard--venue-staff .venue-detail li, .dashboard--venue-staff .block-conflicts__list li, .dashboard--venue-staff .venue-holds__conflict-list li,
+.dashboard--venue-staff .ui-confirm-dialog { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 720px) {
+  .dashboard--venue-staff .venue-catalogue__item-actions { justify-content: flex-start; width: 100%; }
+  .dashboard--venue-staff .venue-catalogue__item-actions .venue-catalogue__retire { margin-left: auto; }
+  .dashboard--venue-staff .venue-block-form__row { grid-template-columns: 1fr; }
+  /* Each day's name above its opening and closing times, which share the row. */
+  .dashboard--venue-staff .venue-form fieldset li { display: grid; gap: var(--space-2); grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dashboard--venue-staff .venue-form fieldset li > label, .dashboard--venue-staff .venue-form fieldset li > .venue-form__closing { grid-column: 1 / -1; }
+  .dashboard--venue-staff .venue-form li input[type="time"] { width: 100%; }
+  .dashboard--venue-staff .ui-confirm-dialog .ui-confirm-dialog__actions { flex-wrap: wrap; }
+}
+/* SCRUM-45. A COPY of the badge rules above, not an unscoping of them. The
+   comment at :56-61 says in as many words that scoping them to one dashboard
+   is blast-radius control and that defining the unscoped base belongs to
+   whoever owns the design system -- so the Coordinator's queue takes its own
+   scope rather than quietly making that decision for three other screens.
+   The groups listed are the only ones a queue row can carry (submitted,
+   under_review, pending_clarification) plus SCRUM-47's two fallbacks, which
+   are styled for the reason SCRUM-47 exists: a fallback the UI cannot style
+   renders as an unstyled gap. */
+.dashboard--coordinator .status-badge { border-radius: 999px; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; margin-left: 10px; padding: 3px 10px; text-transform: uppercase; }
+.dashboard--coordinator .status--awaiting-review { background: #fff6e5; color: #8a5a00; }
+.dashboard--coordinator .status--under-review { background: #e9f1fb; color: #2b5285; }
+.dashboard--coordinator .status--action-required { background: #fff0ee; color: #a43c32; }
+.dashboard--coordinator .status--unavailable, .dashboard--coordinator .status--unknown { background: #eef2f1; color: var(--muted); }
+/* SCRUM-333. "My events" shows every status, not only the three a queue row
+   can carry, so the coordinator scope needs the decided and finished colours
+   too. Without them those badges keep their shape and lose their colour.
+   The same pairs .dashboard--organiser uses (:62-70), so a status reads in the
+   same colour on the coordinator's screen as on the Organiser's. Still a
+   scoped copy, not an unscoped base, for the reason the comment above gives. */
+.dashboard--coordinator .status--approved { background: #e8f7f1; color: #17684f; }
+.dashboard--coordinator .status--confirmed { background: #e2f2ee; color: #075c5a; }
+.dashboard--coordinator .status--completed { background: #e8edf0; color: #42545a; }
+.dashboard--coordinator .status--rejected { background: #fff0ee; color: #a43c32; }
+.dashboard--coordinator .status--cancelled { background: #eef2f1; color: var(--muted); }
+/* SCRUM-333. My events' status groups. Rows inherit `.dashboard li` (a flex
+   row, details left and the Open button right); these only space the groups
+   and lay out the left side. The finished groups are <details>, so their
+   heading is a <summary> styled to match the open groups' heading. */
+.my-assigned-events__group { margin-top: 20px; }
+.my-assigned-events__group > :is(h2, h3), .my-assigned-events__group > summary { color: var(--ink); font-size: 0.95rem; font-weight: 700; margin: 0 0 4px; }
+.my-assigned-events__group > summary { cursor: pointer; }
+.my-assigned-events__group > summary:hover { color: var(--teal-dark); }
+.my-assigned-events__count { color: var(--muted); font-weight: 400; }
+.my-assigned-events__summary { display: grid; gap: 4px; min-width: 0; }
+.my-assigned-events__title { align-items: center; display: flex; flex-wrap: wrap; gap: 6px 0; }
+.my-assigned-events__meta { color: var(--muted); display: flex; flex-wrap: wrap; font-size: 0.85rem; gap: 4px 16px; }
+/* SCRUM-255. The coordinator's venue requests. Rows inherit `.dashboard li`
+   like My events, so these lay out the left side and the withdraw controls.
+   The booking status groups get their own classes, since an event's status
+   classes above describe event stages, not a booking's. */
+.my-booking-requests__summary { display: grid; gap: 4px; min-width: 0; }
+.my-booking-requests__title { align-items: center; display: flex; flex-wrap: wrap; gap: 6px 0; }
+.my-booking-requests__meta { color: var(--muted); display: flex; flex-wrap: wrap; font-size: 0.85rem; gap: 4px 16px; }
+.my-booking-requests__note { color: var(--muted); font-size: 0.85rem; }
+.my-booking-requests__flag { background: #fff6e5; border-left: 3px solid #8a5a00; border-radius: 6px; color: #8a5a00; font-size: 0.85rem; padding: 6px 10px; }
+.my-booking-requests__confirm { align-items: center; display: flex; flex-wrap: wrap; gap: 8px 10px; }
+.my-booking-requests__confirm span { color: var(--muted); font-size: 0.9rem; }
+.my-booking-requests__notice { background: #e8f7f1; border-radius: 6px; color: #17684f; margin: 6px 0 0; padding: 8px 12px; }
+/* ui.css styles a <button>; these let a router Link carry the same classes. */
+.dashboard--attendee a.ui-button { display: inline-block; }
+.dashboard--attendee a.ui-button--primary { text-decoration: none; }
+/* Plain in-text links match the event-name links instead of browser blue;
+   link-styled buttons keep their own colours from ui.css. */
+.dashboard--attendee a:not(.ui-button) { color: var(--color-accent-dark); }
+.browse-open-events__row { padding-block: 10px; }
+.browse-open-events__summary { display: grid; gap: 2px; min-width: 0; }
+.browse-open-events__meta > span:last-child { flex-basis: 100%; font-size: 0.75rem; font-style: italic; opacity: 0.8; white-space: normal; }
+.browse-event-details__facts > div { background: #f5f9f7; border: 1px solid #e5eeea; border-radius: 7px; padding: 8px 12px; }
+.browse-event-details__facts { gap: 8px 12px !important; margin-bottom: 12px !important; }
+.browse-event-details__facts dt { font-size: 0.75rem !important; text-transform: uppercase; letter-spacing: 0.04em; }
+.browse-event-details__facts dd { font-size: 0.92rem; font-weight: 600; }
+.browse-open-events__title { align-items: center; display: flex; flex-wrap: wrap; gap: 6px 10px; }
+.browse-open-events__title a { color: var(--teal-dark); overflow-wrap: anywhere; }
+.browse-open-events__meta { color: var(--muted); display: flex; flex-wrap: wrap; font-size: 0.85rem; gap: 4px 16px; }
+.browse-open-events .ui-status-badge { flex: 0 0 auto; }
+/* SCRUM-495. One open event. Its facts are a definition list, not .dashboard li
+   rows, and the description keeps the organiser's line breaks. */
+.browse-event-details__facts { display: grid; gap: 10px 24px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); margin: 0 0 18px; }
+.browse-event-details__facts dt { color: var(--muted); font-size: 0.86rem; font-weight: 700; }
+.browse-event-details__facts dd { align-items: center; color: var(--ink); display: flex; flex-wrap: wrap; gap: 6px 10px; margin: 2px 0 0; overflow-wrap: anywhere; }
+.dashboard .browse-event-details__about-heading { margin: 0 0 var(--space-2); }
+.browse-event-details__description { color: var(--ink) !important; overflow-wrap: anywhere; white-space: pre-wrap; }
+.attendee-event-information__location { white-space: pre-wrap; }
+.attendee-event-information__message { white-space: pre-wrap; }
+.browse-event-details__register { align-items: center; display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 18px 0; }
+.browse-event-details__register p { margin: 0; }
+/* The attendee screens' "showing as last loaded" warning, with its Try again. */
+.browse-open-events__notice { align-items: center; background: var(--color-warning-soft); border-radius: var(--radius-control); color: var(--color-warning); display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-3); justify-content: space-between; margin: 0 0 var(--space-3); padding: var(--space-2) var(--space-3); }
+.dashboard .browse-open-events__notice p { color: var(--color-warning); margin: 0; }
+.browse-event-details__success { background: var(--color-success-soft); border-radius: var(--radius-control); margin: 0 0 var(--space-3); padding: var(--space-2) var(--space-3); }
+.dashboard .browse-event-details__success p { color: var(--color-success); margin: 0; }
+/* One clear ring for every attendee control, links styled as buttons included,
+   and for the notices that take focus after an action. */
+.dashboard--attendee :is(a, button, [tabindex="-1"]):focus-visible { outline: 3px solid var(--color-accent); outline-offset: 2px; }
+.dashboard--attendee .ui-error-notice { margin: 0 0 var(--space-3); }
+/* Event names can be one long word; wrap them inside a 360px screen. */
+.dashboard--attendee li, .dashboard--attendee .browse-event-details__success, .dashboard--attendee .ui-error-notice { overflow-wrap: anywhere; }
+.clarification-overdue { color: #a43c32; font-weight: 700; }
+.my-assigned-events__needs-attention { background: #fff6e5; border-left: 3px solid #bb7a12; margin-top: 16px; padding: 12px; }
+.clarification-history { display: grid; gap: 10px; margin: 12px 0 0; }
+.clarification-history__entry { background: #f7faf9; border-left: 3px solid var(--teal); display: grid; gap: 7px; margin: 0; min-width: 0; padding: 12px 14px; }
+.clarification-history__entry--reply { background: #f8f9fc; border-left-color: #7183a0; }
+.clarification-history__entry--closure { background: #faf8f4; border-left-color: #bb7a12; }
+.clarification-history__entry--overdue { border-left-color: #a43c32; }
+.clarification-history__header { align-items: baseline; display: flex; flex-wrap: wrap; gap: 2px 8px; min-width: 0; }
+.clarification-history__header > strong { color: var(--ink); font-size: 0.86rem; margin-right: auto; }
+.clarification-history__meta, .clarification-history__author { color: var(--muted); font-size: 0.78rem; }
+.clarification-history__overdue { color: #a43c32; font-size: 0.76rem; font-weight: 700; }
+.clarification-history__message { color: var(--ink) !important; margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.clarification-history__fields, .clarification-history__deadline { color: var(--muted) !important; font-size: 0.8rem; margin: 0; overflow-wrap: anywhere; }
+.clarification-history__fields strong { color: var(--ink); }
+.clarification-current { background: #f7faf9; border-left: 3px solid var(--teal); display: grid; gap: 6px; margin: 10px 0 16px; padding: 10px 12px; }
+.clarification-current > strong { color: var(--teal-dark); font-size: 0.82rem; }
+.clarification-current p { color: var(--ink) !important; margin: 0; white-space: pre-wrap; }
+.clarification-current > span { color: var(--muted); font-size: 0.8rem; }
+.clarification-history__state { color: var(--muted); font-size: 0.88rem; margin: 10px 0; }
+.clarification-reply { display: grid; gap: var(--space-3); }
+/* The size it had as an h2, so the panel title does not jump. */
+.clarification-reply > h1 { font-size: 1.5rem; }
+.clarification-reply label { display: grid; gap: 7px; }
+.clarification-history__open { margin-top: 8px; }
+.clarification-history-dialog { border: 0; border-radius: 12px; box-shadow: 0 18px 55px #102a2a40; color: var(--ink); margin: auto; max-height: min(82vh, 760px); max-width: min(680px, calc(100vw - 32px)); overflow-y: auto; padding: 22px; width: 100%; }
+.clarification-history-dialog::backdrop { background: #14262580; }
+.clarification-history-dialog__header { align-items: flex-start; border-bottom: 1px solid var(--line); display: flex; gap: 16px; justify-content: space-between; margin-bottom: 14px; padding-bottom: 14px; }
+.clarification-history-dialog__header h2 { font-size: 1.2rem; margin: 0; }
+.clarification-history-dialog__header p { color: var(--muted); margin: 4px 0 0; }
+.clarification-history-dialog__close { flex: 0 0 auto; }
+.clarification-reply textarea { border: 1px solid var(--color-line); border-radius: var(--radius-control); color: var(--color-ink); font: inherit; min-width: 0; padding: 10px var(--space-3); resize: vertical; }
+/* A fieldset is as wide as its widest content by default; min-width: 0 lets it fit a phone. */
+.clarification-reply__amendments { border: 1px solid var(--color-line); border-radius: var(--radius-card); display: grid; gap: var(--space-3); margin: 0; min-width: 0; padding: var(--space-4); }
+.clarification-reply__amendments legend { color: var(--color-accent-dark); font-weight: 700; padding: 0 6px; }
+.clarification-reply__amendments p { color: var(--color-muted); margin: 0; }
+.clarification-reply input, .clarification-reply__amendments textarea { border: 1px solid var(--color-line); border-radius: var(--radius-control); color: var(--color-ink); font: inherit; min-width: 0; padding: 10px var(--space-3); }
+.clarification-amendments { background: #f7faf9; border: 1px solid var(--color-line); border-radius: 10px; display: grid; gap: var(--space-4); padding: 18px; }
+.clarification-amendments__heading { align-items: flex-start; display: flex; flex-wrap: wrap; gap: var(--space-3); justify-content: space-between; }
+.clarification-amendments__heading h2 { color: var(--color-ink); font-size: var(--font-size-base); margin: 0; }
+.clarification-amendments__heading p { font-size: var(--font-size-md); margin: 5px 0 0; }
+.clarification-amendments__heading .ui-status-badge { white-space: nowrap; }
+.clarification-amendments .clarification-reply__amendments { background: var(--color-paper); }
+.clarification-amendments__grid { display: grid; gap: var(--space-3) var(--space-4); grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); }
+.clarification-amendments__empty { background: var(--color-paper); border: 1px dashed #c7d6d1; border-radius: var(--radius-card); display: grid; gap: 6px; padding: 14px; }
+.clarification-amendments__empty strong { color: var(--color-ink); font-size: var(--font-size-md); }
+.clarification-amendments__empty span { color: var(--color-muted); font-size: var(--font-size-md); line-height: 1.5; }
+.clarification-amendments__readonly { border-top: 1px solid var(--color-line); padding-top: var(--space-3); }
+.clarification-amendments__readonly summary { color: var(--color-accent-dark); cursor: pointer; font-size: var(--font-size-md); font-weight: 700; }
+.clarification-amendments__readonly dl { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); margin: 14px 0 0; }
+.clarification-amendments__readonly dl > div { background: var(--color-paper); border: 1px solid var(--color-line); border-radius: 7px; min-width: 0; padding: 10px var(--space-3); }
+.clarification-amendments__readonly dt { color: var(--color-muted); font-size: 0.76rem; font-weight: 700; margin-bottom: var(--space-1); }
+.clarification-amendments__readonly dd { color: var(--color-ink); font-size: var(--font-size-md); margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.coordinator-clarification__fields { border: 1px solid var(--line); border-radius: 8px; display: grid; gap: 8px; margin: 0; padding: 14px; }
+.coordinator-clarification__fields legend { color: var(--teal-dark); font-weight: 700; padding: 0 6px; }
+.coordinator-clarification__fields p { color: var(--muted); font-size: 0.86rem; margin: 0; }
+.coordinator-clarification__fields label { align-items: center; display: flex; gap: 8px; }
+.coordinator-request-detail__complete-hint { color: var(--muted); font-size: 0.88rem; margin: 0 0 8px; }
+.coordinator-request-detail__completed-notice { color: #17684f; font-weight: 700; margin: 0 0 8px; }
+.coordinator-request-detail__closing-notes p { margin: 0 0 6px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.coordinator-request-detail__closing-notes .coordinator-request-detail__closing-notes-audience { color: var(--muted); font-size: 0.84rem; white-space: normal; }
+/* SCRUM-384: Needs attention, beside My events. Rows inherit `.dashboard li`, as My events' do. */
+.coordinator-attention__count { color: var(--muted); font-weight: 400; }
+.coordinator-attention__summary { display: grid; gap: 4px; min-width: 0; }
+.coordinator-attention__summary a { color: var(--ink); font-weight: 700; text-decoration: none; }
+.coordinator-attention__summary a:hover { color: var(--teal-dark); text-decoration: underline; }
+.coordinator-attention__reason { background: #fff6e5; border-radius: 6px; color: #8a5a00; font-size: 0.84rem; justify-self: start; padding: 3px 9px; }
+.coordinator-attention__meta { color: var(--muted); display: flex; flex-wrap: wrap; font-size: 0.85rem; gap: 4px 16px; }
+/* SCRUM-384: the Mark as completed panel, laid out as the cancellation panel is. */
+.event-completion-page { display: grid; gap: 18px; }
+.event-completion-page > :is(h1, h2) { color: var(--ink); font-size: clamp(1.8rem, 4vw, 2.7rem); letter-spacing: -0.04em; margin: 0; overflow-wrap: anywhere; }
+/* The page is a grid, which would stretch its Back link to the full width. */
+.event-completion-page > .ui-button, .event-cancellation-page > .ui-button, .event-significant-change-page > .ui-button, .event-details-edit-page > .ui-button { justify-self: start; }
+.event-completion-page__intro { margin: 0; }
+.event-completion { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); display: grid; gap: 18px; padding: clamp(20px, 4vw, 32px); }
+.event-completion form { display: grid; gap: 12px; }
+.event-completion form > label { color: var(--muted); display: grid; gap: 7px; }
+.event-completion textarea { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; min-height: 110px; padding: 10px 12px; resize: vertical; }
+.event-completion textarea:focus { border-color: var(--teal); outline: 2px solid rgba(8, 127, 123, 0.16); }
+.event-completion__help { color: var(--muted); font-size: 0.86rem; margin: 0; }
+.event-completion__confirmation { display: grid; gap: 12px; }
+.event-completion__confirmation dl { margin: 0; }
+.event-completion__confirmation dt { color: var(--muted); font-size: 0.8rem; font-weight: 700; margin-bottom: 4px; }
+.event-completion__notes-preview { background: #f7faf9; border-left: 3px solid var(--teal); margin: 0; overflow-wrap: anywhere; padding: 10px 12px; white-space: pre-wrap; }
+/* SCRUM-489: the safety check submission panel. A table, not a list, so
+   .dashboard li's spread-out flex row never reaches it. */
+.safety-check-submission__checklist { border-collapse: collapse; margin: 4px 0 12px; width: 100%; }
+.safety-check-submission__checklist caption { color: var(--muted); font-size: 0.86rem; font-weight: 700; padding-bottom: 6px; text-align: left; }
+.safety-check-submission__checklist th, .safety-check-submission__checklist td { border-bottom: 1px solid var(--line); overflow-wrap: anywhere; padding: 8px; text-align: left; vertical-align: top; }
+.safety-check-submission__checklist thead th { color: var(--muted); font-size: 0.8rem; font-weight: 700; }
+.safety-check-submission form { display: grid; gap: 8px; }
+.safety-check-submission__confirmation label { align-items: flex-start; display: flex; gap: 9px; }
+.safety-check-submission__confirmation p, .safety-check-submission__confirmation blockquote { margin: 4px 0; }
+.safety-check-submission__note { color: var(--muted); display: grid; gap: 7px; margin-top: 8px; }
+.safety-check-submission__note textarea { border: 1px solid var(--line); border-radius: 6px; box-sizing: border-box; color: var(--ink); font: inherit; min-height: 96px; padding: 10px 12px; resize: vertical; width: 100%; }
+.safety-check-submission__hint, .safety-check-submission__counter { color: var(--muted); font-size: 0.86rem; margin: 0; }
+.safety-check-submission__counter { font-variant-numeric: tabular-nums; }
+.safety-check-submission form > button { justify-self: start; margin-top: 6px; }
+.event-cancellation-page { display: grid; gap: 18px; }
+.event-cancellation-page > :is(h1, h2) { color: var(--ink); font-size: clamp(1.8rem, 4vw, 2.7rem); letter-spacing: -0.04em; margin: 0; overflow-wrap: anywhere; }
+.event-cancellation-page__intro { margin: 0; }
+.event-cancellation { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); display: grid; gap: 18px; padding: clamp(20px, 4vw, 32px); }
+.event-cancellation form { display: grid; gap: 16px; }
+.event-cancellation form > label { color: var(--muted); display: grid; gap: 7px; }
+.event-cancellation textarea { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; min-height: 86px; padding: 10px 12px; resize: vertical; }
+.event-cancellation textarea:focus { border-color: var(--teal); outline: 2px solid rgba(8, 127, 123, 0.16); }
+.event-cancellation fieldset { border: 1px solid var(--line); border-radius: 8px; display: grid; gap: 10px; margin: 0; padding: 14px; }
+.event-cancellation fieldset legend { color: var(--teal-dark); font-weight: 700; padding: 0 6px; }
+.event-cancellation fieldset label, .event-cancellation__confirmation label { align-items: flex-start; color: var(--ink); display: flex; gap: 9px; }
+.event-cancellation input[type="radio"], .event-cancellation input[type="checkbox"] { flex: 0 0 auto; margin-top: 4px; }
+.event-cancellation__impact { border-top: 1px solid var(--line); display: grid; gap: 10px; padding-top: 18px; }
+.event-cancellation__impact > :is(h3, h4) { color: var(--teal-dark); margin: 0; }
+.event-cancellation__impact section > :is(h4, h5) { margin: 0 0 6px; }
+.event-cancellation__impact section ul { margin: 0; padding-left: 22px; }
+.event-cancellation__impact section li { line-height: 1.5; }
+.event-cancellation__impact p { color: var(--muted); font-size: 0.9rem; line-height: 1.5; margin: 0; }
+.event-cancellation__confirmation { border-top: 1px solid var(--line); display: grid; gap: 14px; padding-top: 18px; }
+.event-cancellation dl { display: grid; gap: 8px 16px; grid-template-columns: minmax(130px, 180px) minmax(0, 1fr); margin: 0; }
+.event-cancellation dt { color: var(--muted); font-weight: 700; }
+.event-cancellation dd { margin: 0; overflow-wrap: anywhere; }
+.event-significant-change-page { display: grid; gap: 18px; }
+.event-significant-change-page > :is(h1, h2) { color: var(--ink); font-size: clamp(1.8rem, 4vw, 2.7rem); letter-spacing: -0.04em; margin: 0; overflow-wrap: anywhere; }
+.event-significant-change { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); display: grid; gap: 18px; padding: clamp(20px, 4vw, 32px); }
+.event-significant-change form { display: grid; gap: 16px; }
+.event-significant-change form > label { color: var(--muted); display: grid; gap: 7px; }
+.event-significant-change input:not([type="checkbox"]), .event-significant-change textarea { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; padding: 10px 12px; }
+.event-significant-change textarea { resize: vertical; }
+.event-significant-change__equipment { align-items: flex-start; color: var(--ink) !important; display: flex !important; gap: 9px; }
+.event-significant-change__equipment input { flex: 0 0 auto; margin-top: 4px; }
+.event-significant-change__impact, .event-significant-change__confirmation { border-top: 1px solid var(--line); display: grid; gap: 10px; padding-top: 18px; }
+.event-significant-change__impact > :is(h2, h3) { color: var(--teal-dark); margin: 0; }
+.event-significant-change__impact { gap: 16px; }
+.event-significant-change__stats { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+.event-significant-change__stat { background: #f4f8f7; border: 1px solid var(--line); border-radius: 8px; display: grid; gap: 2px; padding: 12px 14px; }
+.event-significant-change__stat strong { color: var(--teal-dark); font-size: 1.8rem; line-height: 1.1; }
+.event-significant-change__stat span { color: var(--muted); font-size: 0.85rem; }
+.event-significant-change__notice { background: #fff7e6; border: 1px solid #f0d9a8; border-radius: 8px; color: var(--ink); margin: 0; padding: 10px 14px; }
+.event-significant-change__group { display: grid; gap: 8px; }
+.event-significant-change__group > :is(h3, h4) { color: var(--ink); font-size: 1rem; margin: 0; }
+.event-significant-change__group ul { display: grid; gap: 8px; list-style: none; margin: 0; padding: 0; }
+.event-significant-change__group li { border: 1px solid var(--line); border-radius: 8px; display: grid; gap: 2px; padding: 10px 14px; }
+.event-significant-change__item-name { color: var(--ink); font-weight: 600; }
+.event-significant-change__item-detail { color: var(--muted); font-size: 0.88rem; }
+.event-significant-change__tag { background: #eef2f1; border-radius: 999px; color: var(--muted); font-size: 0.75rem; font-style: normal; font-weight: 500; margin-left: 8px; padding: 2px 8px; }
+.event-significant-change__footnote { color: var(--muted); font-size: 0.88rem; margin: 0; }
+
+/* SCRUM-387: the coordinator's direct edit, laid out as the significant change page. */
+.event-details-edit-page { display: grid; gap: 18px; }
+.event-details-edit-page > :is(h1, h2) { color: var(--ink); font-size: clamp(1.8rem, 4vw, 2.7rem); letter-spacing: -0.04em; margin: 0; overflow-wrap: anywhere; }
+.event-details-edit { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); display: grid; gap: 18px; padding: clamp(20px, 4vw, 32px); }
+.event-details-edit form { display: grid; gap: 16px; }
+.event-details-edit__field { display: grid; gap: 6px; }
+.event-details-edit__field > label { color: var(--muted); display: grid; gap: 7px; }
+.event-details-edit input, .event-details-edit textarea { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; padding: 10px 12px; }
+.event-details-edit textarea { resize: vertical; }
+.event-details-edit [aria-invalid="true"] { border-color: #a43c32; }
+.event-details-edit__field-error { color: #a43c32; font-size: 0.86rem; margin: 0; padding-left: 18px; }
+.event-details-edit__notice { background: #fff7e6; border: 1px solid #f0d9a8; border-radius: 8px; color: var(--ink); margin: 0; padding: 10px 14px; }
+.event-details-edit__hint, .event-details-edit__counter { color: var(--muted); font-size: 0.85rem; margin: 0; }
+.event-details-edit__counter { justify-self: end; }
+.event-details-edit__message { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 0; padding: 10px 12px; }
+.coordinator-request-detail__edit-saved { background: #eef7f3; border-radius: 6px; color: var(--teal-dark); margin: 8px 0; padding: 10px 12px; }
+
+/* SCRUM-387: the change history, on the coordinator's detail and the Organiser's row. */
+.event-change-history { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; display: grid; gap: 10px; margin: 0 0 24px; min-width: 0; padding: 16px 18px; }
+.event-change-history h3 { color: var(--ink); font-size: 0.95rem; margin: 0; }
+.event-change-history__list { display: grid; gap: 10px; list-style: none; margin: 0; padding: 0; }
+.event-change-history__entry { border-left: 2px solid var(--line); display: grid; gap: 3px; padding: 2px 0 2px 12px; }
+.event-change-history__heading { align-items: baseline; display: flex; flex-wrap: wrap; gap: 8px; }
+.event-change-history__heading strong { color: var(--ink); }
+.event-change-history__source { background: #eef2f1; border-radius: 999px; color: var(--muted); font-size: 0.75rem; padding: 2px 8px; }
+.event-change-history__values, .event-change-history__reason { color: var(--ink); margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.event-change-history__meta { color: var(--muted); font-size: 0.85rem; margin: 0; }
+.event-significant-change__confirmation label { align-items: flex-start; color: var(--ink); display: flex; gap: 9px; }
+.event-significant-change__confirmation input { flex: 0 0 auto; margin-top: 4px; }
+/* An organiser with no name on record is shown by id, which must read as an
+   identifier, not prose. The same treatment venue history gives its uuids. */
+.dashboard--coordinator .my-assigned-events code { background: #eef2f1; border-radius: 4px; color: var(--muted); font-size: 0.78rem; padding: 2px 6px; }
+/* SCRUM-334. AssignmentHistory renders on two screens: inside the
+   coordinator's event panel (.dashboard--coordinator) and inside a <details>
+   on the Organiser's list (.my-event-requests). Scoped to the component's own
+   class rather than to either screen, so one set of rules serves both. That
+   does not reopen the blast-radius question the badge comments above raise:
+   that is about class names several screens already share, and
+   .assignment-history__* exist only in this component.
+
+   Two rules from the coordinator side have to be beaten, so they are written
+   here at matching specificity and later in the file:
+     - `.dashboard li` makes every list item a spread-out flex row, which
+       would push a history entry's lines apart. `.assignment-history li` is
+       the same specificity and later, so it wins.
+     - `.dashboard p` greys every paragraph. The current coordinator and the
+       note are content, not commentary, so they get --ink back.
+   The entries avoid <strong> and direct-child <span> for the same reason:
+   the event panel styles `li strong` and `li > span` as blocks. */
+.assignment-history { margin-top: 8px; }
+.assignment-history h4 { color: var(--muted); font-size: 0.82rem; letter-spacing: 0.04em; margin: 14px 0 6px; text-transform: uppercase; }
+.assignment-history .assignment-history__current { color: var(--ink); margin: 0; }
+.assignment-history__label { color: var(--muted); font-size: 0.86rem; font-weight: 700; margin-right: 6px; }
+.assignment-history__name { font-weight: 600; }
+.assignment-history__list { list-style: none; margin: 0; padding: 0; }
+.assignment-history li { border-left: 2px solid var(--line); border-top: 0; display: block; margin: 0; padding: 6px 0 10px 14px; }
+.assignment-history__movement { color: var(--ink); line-height: 1.45; }
+.assignment-history__meta { color: var(--muted); font-size: 0.84rem; margin-top: 2px; }
+.assignment-history .assignment-history__note { background: #eef6f3; border-left: 3px solid var(--teal); color: var(--ink); margin: 8px 0 0; padding: 8px 12px; white-space: pre-wrap; }
+.assignment-history__no-note { color: var(--muted); font-size: 0.84rem; font-style: italic; margin-top: 4px; }
+/* A person with no name on record is shown by id, which must read as an
+   identifier. The same treatment as the organiser id on My events. */
+.assignment-history code { background: #eef2f1; border-radius: 4px; color: var(--muted); font-size: 0.78rem; font-weight: 400; padding: 2px 6px; }
+/* The Organiser's copy sits inside .my-event-requests__details, whose summary
+   is the heading, so the history starts a little below it. */
+.my-event-requests__details .assignment-history { margin-top: 12px; }
+/* SCRUM-334. The coordinator's side of the handover: the Reassign button, the
+   confirmation after it, and the handover panel. Coordinator-only, so scoped
+   to .dashboard--coordinator, which also gives the buttons the dashboard's
+   teal. */
+.dashboard--coordinator .coordinator-reassign { margin-top: 14px; }
+.dashboard--coordinator .coordinator-reassign__notice { background: #e8f7f1; border-radius: 6px; color: #17684f; margin: 14px 0 0; padding: 8px 12px; }
+.dashboard--coordinator .reassign-event > :is(h1, h2) { margin-bottom: 8px; }
+.dashboard--coordinator .reassign-event__form { display: grid; gap: 14px; margin-top: 16px; max-width: 560px; }
+.dashboard--coordinator .reassign-event__form label { color: var(--muted); display: grid; gap: 7px; min-width: 0; }
+.dashboard--coordinator .reassign-event__form select, .dashboard--coordinator .reassign-event__form textarea { background: white; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; min-width: 0; padding: 10px 12px; }
+.dashboard--coordinator .reassign-event__form textarea { min-height: 96px; resize: vertical; }
+.dashboard--coordinator .reassign-event__form select:focus, .dashboard--coordinator .reassign-event__form textarea:focus { border-color: var(--teal); outline: 2px solid rgba(8, 127, 123, 0.16); }
+.dashboard--coordinator .reassign-event__hint { font-size: 0.84rem; margin: -6px 0 0; }
+.dashboard--coordinator .reassign-event__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+/* SCRUM-486 (SCRUM-519). The Lead's unassigned queue. It renders in two
+   places, the Lead's dashboard and /unassigned-queue, and in both it is a
+   <section> directly inside .dashboard, so the card, the h2, the row layout
+   (`.dashboard li`, details left and the Assign button right) and the teal
+   buttons come from the dashboard rules, as they do for the review queue.
+   Scoped to the component's own class, not to .dashboard--coordinator-lead,
+   so nothing here depends on which of the two pages it is on. These only lay
+   out the left side of a row, with My events' values: the event name, then
+   the organiser, period, attendance and waiting time as smaller muted lines
+   under it -- secondary to the name, not headings of their own. */
+.unassigned-queue__item > div { display: grid; gap: 4px; min-width: 0; }
+.unassigned-queue__item p { font-size: 0.85rem; margin: 0; overflow-wrap: anywhere; }
+.unassigned-queue__waiting { color: var(--muted); }
+/* The confirmation after an assignment, the same green notice the handover
+   confirmation uses. */
+.unassigned-queue .unassigned-queue__confirmation { background: #e8f7f1; border-radius: 6px; color: #17684f; margin: 0 0 14px; padding: 8px 12px; }
+/* SCRUM-539. A row's Assign and Cancel request side by side. */
+.unassigned-queue__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+/* The waiting count beside the title reads as a note, not part of the name. */
+.unassigned-queue__count { color: var(--color-muted); font-weight: 400; }
+.dashboard--coordinator-lead > section > .ui-button--link, .dashboard--coordinator > section > .ui-button--link { margin-bottom: var(--space-3); }
+/* One visible ring for every control and focused title on the Lead's screens,
+   so keyboard users can always see where they are. */
+.dashboard--coordinator-lead :is(a, button, input, select, textarea, [tabindex]):focus-visible,
+.assigned-events :is(a, button, input, select, textarea, [tabindex]):focus-visible,
+.assignment-history:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+/* At phone width each row's actions go under its details, and long names wrap. */
+@media (max-width: 720px) {
+  .dashboard .unassigned-queue__item, .dashboard .assigned-events li { align-items: flex-start; flex-direction: column; }
+  .unassigned-queue__item strong, .assign-coordinator h2, .assign-coordinator__choice { overflow-wrap: anywhere; }
+}
+/* SCRUM-486 (SCRUM-519). The Lead's picker: the handover panel's layout and
+   values (.reassign-event__*, above), which are scoped to the coordinator's
+   dashboard and so do not reach the Lead's. Scoped to its own class instead,
+   for the reason the queue's rules give. The radio list is a fieldset, framed
+   as the clarification form's field list is. */
+.assign-coordinator h2 { margin-bottom: 8px; }
+/* The request being assigned: label then value, the .decision-outcome shape,
+   under this panel's own class so the two can change apart. */
+.assign-coordinator__request { display: grid; gap: var(--space-1) var(--space-4); grid-template-columns: minmax(120px, 180px) minmax(0, 1fr); margin: var(--space-4) 0 0; max-width: 560px; }
+.assign-coordinator__request dt { color: var(--color-muted); font-size: var(--font-size-sm); font-weight: 700; }
+.assign-coordinator__request dd { color: var(--color-ink); margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+/* At phone width each label sits above its value. After the rules above, so it wins. */
+@media (max-width: 720px) {
+  .assign-coordinator__request { gap: 0; grid-template-columns: 1fr; }
+  .assign-coordinator__request dd { margin-bottom: var(--space-2); }
+}
+.assign-coordinator__form { display: grid; gap: 14px; margin-top: 16px; max-width: 560px; }
+.assign-coordinator__form > label { color: var(--muted); display: grid; gap: 7px; }
+.assign-coordinator__form textarea { background: white; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; min-height: 96px; padding: 10px 12px; resize: vertical; }
+.assign-coordinator__form textarea:focus { border-color: var(--teal); outline: 2px solid rgba(8, 127, 123, 0.16); }
+.assign-coordinator__form fieldset { border: 1px solid var(--line); border-radius: 8px; display: grid; gap: 8px; margin: 0; min-width: 0; padding: 14px; }
+.assign-coordinator__form legend { color: var(--teal-dark); font-weight: 700; padding: 0 6px; }
+/* Each choice a row, so the whole row is the target and the counts line up.
+   The chosen row takes the nav's active treatment (teal-dark text on the
+   hover tint, a teal edge), so the one choice the Lead has made reads at a
+   glance rather than only by the radio's dot. */
+.assign-coordinator__choice { align-items: center; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); cursor: pointer; display: flex; gap: 8px; padding: 10px 12px; }
+.assign-coordinator__choice:hover { background: #eef6f3; }
+.assign-coordinator__choice:has(input:checked) { background: #eef6f3; border-color: var(--teal); color: var(--teal-dark); font-weight: 700; }
+.assign-coordinator__hint { font-size: 0.84rem; margin: -6px 0 0; }
+.assign-coordinator__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+/* SCRUM-19. DecisionOutcome renders on the coordinator's event panel
+   (.dashboard--coordinator) and on the Organiser's list (.my-event-requests),
+   so, like .assignment-history above, it is scoped to its own class rather
+   than to either screen. A two-column definition list, label then value, the
+   shape .my-event-requests__details dl already uses for the event details.
+   The values are content, not commentary, so they keep --ink against
+   `.dashboard p`'s grey (they are <dd>, which that rule does not reach). */
+.decision-outcome { display: grid; gap: 6px 16px; grid-template-columns: minmax(110px, 160px) minmax(0, 1fr); margin: 8px 0 0; }
+.decision-outcome dt { color: var(--muted); font-size: 0.86rem; font-weight: 700; }
+.decision-outcome dd { color: var(--ink); margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+/* The Organiser's decision block sits on the row itself, so it is set off from
+   the description above it the way the clarification note is. */
+.my-event-requests__decision { background: #f6f9f8; border-left: 3px solid var(--color-accent); margin: var(--space-3) 0; padding: 10px var(--space-3); }
+.my-event-requests__decision > strong { color: var(--color-ink); display: block; font-size: var(--font-size-md); }
+.dashboard--coordinator .coordinator-start-review { display: grid; gap: 10px; justify-items: start; }
+.dashboard--coordinator .coordinator-start-review p { margin: 0; }
+/* NECESSARY, not cosmetic, and the same class of bug .venue-form li fixes
+   above. .dashboard li forces flex with justify-content: space-between, which
+   on a label/value row throws "Purpose" to one edge of the card and the
+   answer to the other with the whole width between them. Scoped to the detail
+   panel only -- the queue's own rows genuinely want the spread layout, since
+   that is what puts the Review button on the right. */
+.dashboard--coordinator .coordinator-request-detail li { border-top: 0; display: block; padding: 4px 0; }
+/* SCRUM-128. The Coordinator's notifications card. The row keeps the shared
+   .dashboard li flex -- it is what puts "Mark as read" on the right, as the
+   queue's Review button is -- but align-items: center would float the button
+   against the middle of a three-line body, so it is pinned to the top, and
+   the body is allowed to take the width. Unread rows get a teal edge and a
+   "New" pill; read rows are muted rather than hidden, so they stay readable
+   without competing with what still needs attention. */
+.dashboard .notification-inbox li { align-items: flex-start; }
+.dashboard .notification-inbox__body { flex: 1; min-width: 0; }
+.dashboard .notification-inbox__body p { margin: 0 0 4px; }
+.dashboard .notification-inbox__headline strong { color: var(--ink); }
+.dashboard .notification-inbox__detail { overflow-wrap: anywhere; }
+.dashboard .notification-inbox__time { font-size: 0.8rem; }
+.dashboard .notification-inbox__item--unread { border-left: 3px solid var(--teal); padding-left: 12px; }
+.dashboard .notification-inbox__item--read { opacity: 0.7; }
+.dashboard .notification-inbox__new { background: #e8f7f1; border-radius: 999px; color: #17684f; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; margin-left: 10px; padding: 3px 10px; text-transform: uppercase; }
+/* The prototype's "Needs your action" rule: solid dark teal, for whoever must act next. */
+.dashboard .notification-inbox__action { background: var(--teal-dark); border-radius: 999px; color: #fff; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; margin-left: 10px; padding: 3px 10px; }
+/* The handoff banner on venue search. Needs a rule of its own because
+   .venue-search has no card styling at all -- it is a bare filter bar -- so
+   without one the context reads as a stray sentence above the inputs rather
+   than as "you arrived here from somewhere". */
+.venue-search__context { background: var(--paper); border: 1px solid var(--line); border-left: 3px solid var(--teal); border-radius: 8px; margin-bottom: 18px; padding: 12px 16px; }
+.venue-search__context p { color: var(--muted); margin: 4px 0; }
+.venue-search__context > .ui-button--link { margin: 0 0 var(--space-2); }
+.venue-search__filters { align-items: end; display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr) minmax(160px, 220px) auto; }
+.venue-search__filters input, .venue-search__window input { border: 1px solid var(--line); border-radius: 6px; min-width: 0; padding: 10px 12px; }
+/* SCRUM-130: the optional date window sits on its own row under the filter
+   bar, so the existing three-column bar keeps its shape. align-items: start
+   because a field's error list makes its cell taller than its neighbour's. */
+.venue-search__window { align-items: start; display: grid; gap: 12px; grid-template-columns: minmax(0, 220px) minmax(0, 220px) auto; justify-content: start; margin-top: 12px; }
+.venue-search__window label { color: var(--muted); display: grid; font-size: 0.9rem; gap: 7px; }
+.venue-search__window > button { align-self: end; }
+.venue-search__field-error { color: #a43c32; font-size: 0.84rem; list-style: none; margin: 6px 0 0; padding: 0; }
+.venue-search__retired { margin-top: 12px; }
+.venue-search__retired label { align-items: center; color: var(--muted); display: inline-flex; font-size: 0.9rem; gap: 8px; }
+.venue-search__results .ui-status-badge { margin-left: var(--space-2); }
+.venue-search__hint, .venue-search__window-note { color: var(--muted); font-size: 0.84rem; margin: 8px 0; }
+/* SCRUM-254: "Request this venue" and the request panel it opens. */
+.venue-search__request { margin-left: 12px; }
+.venue-search__request:disabled, .booking-request button:disabled { cursor: not-allowed; opacity: 0.55; }
+.booking-request { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; margin: 18px 0; padding: 14px 16px; }
+.booking-request > :is(h2, h3, h4) { margin: 0 0 10px; }
+.booking-request button { background: var(--teal); border: 0; border-radius: 6px; color: white; padding: 10px 16px; }
+.booking-request__details { display: grid; gap: 6px 16px; grid-template-columns: minmax(140px, 220px) minmax(0, 1fr); margin: 0 0 14px; }
+.booking-request__details dt { color: var(--muted); font-size: 0.9rem; }
+.booking-request__details dd { margin: 0; }
+.booking-request__notes { color: var(--muted); display: grid; font-size: 0.9rem; gap: 7px; }
+.booking-request__notes textarea { border: 1px solid var(--line); border-radius: 6px; font: inherit; padding: 10px 12px; }
+.booking-request__field-error { color: #a43c32; font-size: 0.84rem; list-style: none; margin: 6px 0 0; padding: 0; }
+.booking-request__warning { background: #fff6e5; border-left: 3px solid #8a5a00; border-radius: 8px; margin: 14px 0; padding: 12px 14px; }
+.booking-request__warning > :is(h3, h4, h5) { color: #8a5a00; margin: 0 0 8px; }
+.booking-request__warning label { align-items: flex-start; display: flex; gap: 8px; }
+.booking-request .ui-error-notice, .venue-search .ui-error-notice { margin-top: var(--space-3); }
+.booking-request__conflicts { list-style: none; margin: 10px 0 0; padding: 0; }
+.booking-request__conflicts li { border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 6px 12px; padding: 8px 0; }
+/* SCRUM-484 (AC7). The setup/turnaround note on a block row takes a line of
+   its own, so the .dashboard li spread does not push it to the far edge. */
+.booking-request__conflicts .booking-request__conflict-note { color: var(--muted); flex-basis: 100%; font-size: 0.84rem; }
+.booking-request__actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.booking-request__success { background: #e8f7f1; border-radius: 6px; color: #17684f; padding: 10px 14px; }
+.my-event-requests__details { border-top: 1px solid var(--color-line); margin-top: 14px; padding-top: 10px; }
+.my-event-requests__details summary { color: var(--color-accent-dark); cursor: pointer; font-size: var(--font-size-md); font-weight: 700; }
+.my-event-requests__details dl { display: grid; gap: var(--space-2) var(--space-4); grid-template-columns: minmax(140px, 220px) minmax(0, 1fr); margin: 14px 0 var(--space-1); }
+.my-event-requests__details dt { color: var(--color-muted); font-size: var(--font-size-sm); font-weight: 700; }
+.my-event-requests__details dd { color: var(--color-ink); font-size: var(--font-size-md); margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.event-registration-page { margin: 0 auto; max-width: 960px; padding: 38px var(--space-5) 72px; }
+.event-registration-page > .ui-button--link { display: inline-block; margin-bottom: var(--space-5); }
+.event-registration-page__summary [role="status"] { background: var(--color-success-soft); border-radius: var(--radius-control); color: var(--color-success); font-weight: 700; margin: 18px 0 0; padding: 10px 14px; }
+.event-registration-page__summary > .ui-button { margin-top: 22px; }
+.event-registration-page__header { margin-bottom: var(--space-5); }
+.event-registration-page__header .eyebrow { margin: 0 0 var(--space-2); }
+.event-registration-page__header h1 { color: var(--color-ink); font-size: clamp(1.8rem, 4vw, 2.5rem); letter-spacing: -0.04em; margin: 0 0 var(--space-3); overflow-wrap: anywhere; }
+.event-registration-page__header p:not(.eyebrow) { color: var(--color-muted); margin: 6px 0; }
+.event-registration-page__summary, .event-registration-page__form { background: var(--color-paper); border: 1px solid var(--color-line); border-radius: 10px; box-shadow: 0 8px 24px rgba(24, 61, 58, 0.06); margin-top: 20px; padding: clamp(20px, 4vw, 30px); }
+.event-registration-page__summary h2, .event-registration-page__form h2 { color: var(--color-ink); font-size: var(--font-size-h2); margin: 0 0 var(--space-2); }
+.event-registration-page__summary dl { display: grid; gap: var(--space-3); grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin: 20px 0 0; }
+.event-registration-page__summary dl > div { background: #f5f9f7; border: 1px solid #e5eeea; border-radius: 7px; min-width: 0; padding: 13px 15px; }
+.event-registration-page__summary dt { color: var(--color-muted); font-size: 0.8rem; font-weight: 700; margin-bottom: 5px; }
+.event-registration-page__summary dd { color: var(--color-ink); font-size: 0.95rem; font-weight: 600; line-height: 1.45; margin: 0; overflow-wrap: anywhere; }
+.event-registration-page__form > p { color: var(--color-muted); line-height: 1.5; margin: 0; }
+.event-registration-page__toggle { align-items: center; background: #f5f9f7; border: 1px solid var(--color-line); border-radius: var(--radius-card); color: var(--color-ink); display: flex; gap: var(--space-3); margin: 22px 0; padding: 15px var(--space-4); }
+.event-registration-page__toggle input { accent-color: var(--color-accent); height: 19px; margin: 0; width: 19px; }
+.event-registration-page__toggle span { font-weight: 700; }
+.event-registration-page__fields { display: grid; gap: 18px 20px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.event-registration-page__fields label { color: var(--color-ink); display: grid; font-size: var(--font-size-md); font-weight: 700; gap: var(--space-2); min-width: 0; }
+.event-registration-page__optional, .event-registration-page__hint { color: var(--color-muted); font-size: 0.8rem; font-weight: 400; }
+.event-registration-page__fields input { background: var(--color-paper); border: 1px solid #aebfba; border-radius: var(--radius-control); color: var(--color-ink); font: inherit; min-height: 44px; min-width: 0; padding: 9px 11px; width: 100%; }
+.event-registration-page__fields input:focus { border-color: var(--color-accent); }
+.event-registration-page__hint { line-height: 1.4; }
+.event-registration-page__actions { align-items: center; display: flex; flex-wrap: wrap; gap: 14px; margin-top: var(--space-5); }
+.event-registration-page__actions [role="status"] { color: var(--color-success); font-weight: 700; margin: 0; }
+.event-registration-page__notice { background: var(--color-warning-soft); border-left: 4px solid #bb7a12; border-radius: 5px; color: #61440d; line-height: 1.5; margin-top: 20px; padding: 13px var(--space-4); }
+.my-event-requests__clarification { background: var(--color-warning-soft); border-left: 3px solid #bb7a12; color: #61440d; margin: 14px 0; padding: 10px var(--space-3); white-space: pre-wrap; }
+.coordinator-clarification { display: grid; gap: 12px; }
+.coordinator-clarification label { color: var(--muted); display: grid; gap: 7px; }
+.coordinator-clarification textarea { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; min-height: 96px; padding: 10px 12px; resize: vertical; }
+.coordinator-clarification textarea:focus { border-color: var(--teal); outline: 2px solid rgba(8, 127, 123, 0.16); }
+.coordinator-clarification__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 0; padding: 8px 12px; }
+.coordinator-clarification__amendments > summary { color: var(--teal-dark); cursor: pointer; font-size: 0.9rem; font-weight: 700; }
+.coordinator-clarification__amendments[open] { display: grid; gap: 10px; }
+.coordinator-review-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.coordinator-change-requests li { border-top: 1px solid var(--line); padding: 12px 0; }
+.coordinator-change-requests li:first-child { border-top: 0; }
+.coordinator-change-requests p { color: var(--ink); margin: 6px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.coordinator-change-requests small { color: var(--muted); text-transform: capitalize; }
+.coordinator-change-requests__actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.coordinator-change-requests__reject-form { display: grid; flex-basis: 100%; gap: 10px; margin-top: 8px; }
+.coordinator-change-requests__reject-form label { color: var(--muted); display: grid; gap: 6px; }
+.coordinator-change-requests__reject-form textarea { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; min-height: 72px; padding: 9px 11px; resize: vertical; }
+.coordinator-change-requests__outcome { font-size: 0.9rem; font-weight: 700; }
+.change-request-status-list { list-style: none; margin: var(--space-4) 0 0; padding: 0; }
+.change-request-status-list__item { border-top: 1px solid var(--color-line); display: grid; gap: var(--space-2); padding: 14px 0; }
+.change-request-status-list__item:first-child { border-top: 0; }
+.change-request-status-list__field { color: var(--color-ink); font-weight: 700; }
+.change-request-status-list__details { color: var(--color-muted); overflow-wrap: anywhere; white-space: pre-wrap; }
+.change-request-status-list__statuses { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.change-request-status-list__decision-notes { background: #f3f6f4; color: var(--color-ink); margin: 0; padding: 9px 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.change-request-status-list__date { color: var(--color-muted); font-size: var(--font-size-sm); }
+
+/* SCRUM-402: a submission's fields together, on the Organiser's form and list. */
+.change-request-form__row { border: 1px solid var(--color-line); border-radius: var(--radius-card); display: grid; gap: 10px; margin: 0; min-width: 0; padding: 14px; }
+.change-request-form__row label { color: var(--color-muted); display: grid; gap: 7px; }
+.change-request-form__row > .ui-button, .change-request-form > .ui-button--secondary { justify-self: start; }
+.change-request-status-list__fields { display: grid; gap: var(--space-2); list-style: none; margin: 0; padding: 0; }
+.change-request-status-list__note { color: var(--color-ink); margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+
+/* SCRUM-402: the coordinator reviews a submission as a whole. */
+.change-request-review { display: grid; gap: 10px; }
+.change-request-review__rows { display: grid; gap: 8px; list-style: none; margin: 0; padding: 0; }
+.change-request-review__row { display: grid; gap: 2px; }
+.change-request-review__tag { background: #eef2f1; border-radius: 999px; color: var(--muted); font-size: 0.75rem; justify-self: start; padding: 2px 8px; }
+.change-request-review__current { color: var(--muted); }
+.change-request-review__requested { color: var(--ink); font-weight: 600; }
+.change-request-review__note { color: var(--ink); margin: 6px 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.change-request-review__preview { display: grid; gap: 12px; }
+.change-request-review__invalid { background: #fff0ee; border-radius: 6px; color: #a43c32; padding: 10px 12px; }
+.change-request-review__invalid ul, .change-request-review__impact-list { margin: 6px 0 0; padding-left: 18px; }
+.change-request-review__accept, .change-request-review__decline, .change-request-review__cancel { display: grid; gap: 8px; }
+.change-request-review__accept label, .change-request-review__decline label, .change-request-review__cancel label { color: var(--muted); display: grid; gap: 6px; }
+.change-request-review textarea { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; padding: 10px 12px; }
+.change-request-review__hint, .change-request-review__notice { background: #eef6f3; border-radius: 6px; color: var(--ink); margin: 0; padding: 10px 12px; }
+.change-request-review__close { justify-self: start; }
+.change-request-review__equipment:focus { outline: 2px solid rgba(8, 127, 123, 0.3); outline-offset: 4px; }
+.my-assigned-events__change-requests { background: #fff6e5; border-radius: 4px; color: #8a5a00; font-size: 0.78rem; font-weight: 700; margin-left: 8px; padding: 3px 8px; }
+/* SCRUM-180: the venue calendar. Unscoped, unlike the dashboard panels above,
+   because it has its own route (/venues/:venueId/calendar) and is not rendered
+   inside a .dashboard wrapper -- so it brings its own page width, button and
+   list rules rather than borrowing them. The three entry tones reuse the
+   palette's success, warning and error pairs, and each also carries its own
+   words ("Booked", "Booked - under review", "Blocked") and a different left
+   border style, so the meaning never rests on colour alone. */
+.venue-calendar-page { margin: 0 auto; max-width: 1080px; padding: clamp(34px, 6vw, 64px) 24px; }
+.venue-calendar__header { align-items: center; display: flex; flex-wrap: wrap; gap: 8px 14px; }
+.venue-calendar__header .eyebrow { flex-basis: 100%; }
+.venue-calendar__header h1 { color: var(--ink); font-size: clamp(1.8rem, 3.5vw, 2.6rem); letter-spacing: -0.04em; margin: 0; overflow-wrap: anywhere; }
+.venue-calendar__toolbar { align-items: center; display: flex; flex-wrap: wrap; gap: 12px 24px; justify-content: space-between; margin: 24px 0 8px; }
+.venue-calendar__nav, .venue-calendar__views { display: flex; flex-wrap: wrap; gap: 6px; }
+.venue-calendar button:focus-visible { outline: 3px solid rgba(8, 127, 123, 0.35); outline-offset: 2px; }
+.venue-calendar__title { color: var(--teal-dark); font-size: 1.2rem; margin: 18px 0 12px; }
+/* The table scrolls inside this box on a narrow screen, rather than seven
+   columns being squeezed unreadable or the whole page scrolling sideways. */
+.venue-calendar__scroll { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); max-width: 100%; overflow-x: auto; }
+.venue-calendar__grid { border-collapse: collapse; min-width: 720px; table-layout: fixed; width: 100%; }
+.venue-calendar__grid th { border-bottom: 1px solid var(--line); color: var(--muted); font-size: 0.8rem; font-weight: 700; padding: 10px 8px; text-align: left; }
+.venue-calendar__grid td { border-left: 1px solid var(--line); border-top: 1px solid var(--line); padding: 6px; vertical-align: top; }
+.venue-calendar__grid td:first-child { border-left: 0; }
+.venue-calendar__grid--week td { height: 160px; }
+.venue-calendar__grid--month td { height: 104px; }
+.venue-calendar__date { color: var(--ink); }
+.venue-calendar__cell--muted { background: #f6f8f7; }
+.venue-calendar__cell--today { background: #eef6f3; box-shadow: inset 0 3px 0 var(--teal); }
+/* The day number is a link-variant Button; .ui-button carries the class too so
+   these outrank its padding and underline whichever stylesheet loads last. */
+.venue-calendar .venue-calendar__day-number.ui-button { background: transparent; border: 0; color: var(--color-accent-dark); font-weight: 700; padding: 2px 6px; text-decoration: none; }
+.venue-calendar__cell--muted .venue-calendar__day-number.ui-button { color: var(--muted); }
+.venue-calendar .venue-calendar__cell--today .venue-calendar__day-number.ui-button { background: var(--teal); border-radius: 999px; color: white; }
+.venue-calendar__entries { display: grid; gap: 6px; list-style: none; margin: 4px 0 0; padding: 0; }
+.venue-calendar__entry { border-left: 4px solid; border-radius: 6px; display: grid; font-size: 0.84rem; gap: 2px; overflow-wrap: anywhere; padding: 6px 8px; }
+/* The key's swatch: an entry's left border and fill in miniature. Before the
+   tone rules below, which it shares, so their border style wins. */
+.venue-calendar__swatch { border-left: 4px solid; border-radius: var(--radius-control); display: inline-block; flex: 0 0 auto; height: var(--space-4); width: var(--space-5); }
+.venue-calendar__entry-time { color: var(--muted); font-size: 0.78rem; }
+.venue-calendar__entry-label { font-weight: 700; }
+.venue-calendar__entry-detail { color: var(--ink); }
+.venue-calendar__entry--booked, .venue-calendar__swatch--booked { background: #e8f7f1; border-color: #17684f; color: #17684f; }
+.venue-calendar__entry--review, .venue-calendar__swatch--review { background: #fff6e5; border-color: #8a5a00; border-left-style: dashed; color: #8a5a00; }
+.venue-calendar__entry--blocked, .venue-calendar__swatch--blocked { background: #fff0ee; border-color: #a43c32; border-left-style: double; border-left-width: 6px; color: #a43c32; }
+/* SCRUM-491 (AC6). A tentative hold: blue, and dotted, so it reads as
+   provisional beside a solid booking even without colour. */
+.venue-calendar__entry--held, .venue-calendar__swatch--held { background: #e9f1fb; border-color: #2b5285; border-left-style: dotted; color: #2b5285; }
+.venue-calendar__grid--month .venue-calendar__entry { font-size: 0.76rem; padding: 3px 6px; }
+.venue-calendar__legend { color: var(--color-muted); display: flex; flex-wrap: wrap; font-size: var(--font-size-sm); gap: var(--space-2) var(--space-4); list-style: none; margin: 0 0 var(--space-3); padding: 0; }
+.venue-calendar__legend li { align-items: center; display: inline-flex; gap: var(--space-2); }
+@media (max-width: 720px) {
+  /* The month keeps its seven columns at phone width: no minimum, tighter cells. */
+  .venue-calendar__grid { min-width: 0; }
+  .venue-calendar__grid th { font-size: var(--font-size-xs); overflow-wrap: anywhere; padding: var(--space-1); }
+  .venue-calendar__grid td { padding: 2px; }
+  .venue-calendar__grid--month td { height: 72px; }
+  .venue-calendar .venue-calendar__day-number.ui-button { font-size: var(--font-size-sm); padding: 0 var(--space-1); }
+  .venue-calendar__grid--month .venue-calendar__entry { border-left-width: 3px; font-size: var(--font-size-xs); padding: 2px; }
+  /* The week turns into an agenda, each day's name beside its entries, since
+     seven columns of times would be too narrow to read. */
+  .venue-calendar__grid--week { display: grid; grid-template-columns: minmax(64px, auto) minmax(0, 1fr); }
+  .venue-calendar__grid--week thead, .venue-calendar__grid--week tbody, .venue-calendar__grid--week tr { display: contents; }
+  .venue-calendar__grid--week th { border-bottom: 0; border-top: 1px solid var(--color-line); grid-column: 1; padding: var(--space-2); }
+  .venue-calendar__grid--week td, .venue-calendar__grid--week td:first-child { border-left: 1px solid var(--color-line); grid-column: 2; height: auto; min-height: 44px; padding: var(--space-1); }
+  .venue-calendar__grid--week :is(th, td):nth-child(1) { border-top: 0; grid-row: 1; }
+  .venue-calendar__grid--week :is(th, td):nth-child(2) { grid-row: 2; }
+  .venue-calendar__grid--week :is(th, td):nth-child(3) { grid-row: 3; }
+  .venue-calendar__grid--week :is(th, td):nth-child(4) { grid-row: 4; }
+  .venue-calendar__grid--week :is(th, td):nth-child(5) { grid-row: 5; }
+  .venue-calendar__grid--week :is(th, td):nth-child(6) { grid-row: 6; }
+  .venue-calendar__grid--week :is(th, td):nth-child(7) { grid-row: 7; }
+}
+@media (max-width: 720px) {
+   .app-nav { align-items: flex-start; flex-wrap: wrap; gap: 12px 16px; padding: 14px 18px; }
+   .app-nav__links { flex: 1 1 100%; gap: 2px; order: 3; overflow-x: auto; width: 100%; }
+   .app-nav__link { padding: 9px 10px; white-space: nowrap; }
+   .app-nav__user { margin-left: auto; max-width: 100%; }
+   .dashboard { padding: 34px 18px; }
+   .dashboard h1 { font-size: 2rem; line-height: 1.15; }
+   .dashboard > section { margin-top: 16px; padding: 18px; }
+   .dashboard li { align-items: flex-start; flex-direction: column; }
+   .dashboard > section > ul > li { align-items: flex-start; }
+   .dashboard--organiser__event-details dl { grid-template-columns: 1fr; gap: 3px; }
+   .dashboard--organiser__event-details dd { margin-bottom: 7px; }
+   .dashboard--coordinator .coordinator-request-detail .event-venue-finder__result-row { grid-template-columns: 1fr; }
+   .dashboard--organiser .dashboard--organiser__deadline-row { grid-template-columns: 1fr; }
+   .dashboard--organiser__deadline-meta { align-items: flex-start; text-align: left; }
+   .my-event-requests { padding: 36px 18px; }
+   .my-event-requests__header { align-items: flex-start; flex-direction: column; }
+   .my-event-requests__item { padding: var(--space-4); }
+   .event-registration-page { padding: 28px 18px 48px; }
+   .event-registration-page__fields { grid-template-columns: 1fr; }
+   .event-registration-page__summary dl { grid-template-columns: 1fr; }
+   .event-registration-page__actions { align-items: flex-start; flex-direction: column; }
+   .event-request-form, .change-request-form { padding: 18px; }
+   .event-request-form__row, .venue-search__filters, .venue-search__window { grid-template-columns: 1fr; }
+   .my-event-requests__details dl { grid-template-columns: 1fr; gap: 3px; }
+   .my-event-requests__details dd { margin-bottom: var(--space-2); }
+   .decision-outcome { grid-template-columns: 1fr; gap: 3px; }
+   .decision-outcome dd { margin-bottom: 8px; }
+   .venue-calendar-page { padding: 30px 18px; }
+   .venue-calendar__toolbar { align-items: flex-start; flex-direction: column; }
+}
+/* SCRUM-141 (SCRUM-20). The event venue finder inside the coordinator's event
+   panel. Scoped under .coordinator-request-detail so nothing leaks into
+   /venue-search, which keeps its own .venue-search__* rules. The panel only
+   ever renders inside .dashboard--coordinator, so that prefix is kept for
+   specificity against the panel's own `li` rules above.
+   The field-error lists and the results are <li>s, so the shared
+   `.dashboard li` flex rule (spread, rule between rows) is overridden below:
+   NECESSARY, not cosmetic -- the same bug .venue-form li fixes. */
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder { display: grid; gap: 12px; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__row { align-items: start; display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__field { display: grid; gap: 7px; min-width: 0; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__field label,
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__group legend { color: var(--muted); font-size: 0.9rem; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__field input,
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__field select { border: 1px solid var(--line); border-radius: 6px; min-width: 0; padding: 10px 12px; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__group { border: 1px solid var(--line); border-radius: 8px; margin: 0; min-width: 0; padding: 10px 14px 12px; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__options { display: flex; flex-wrap: wrap; gap: 8px 18px; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__option { align-items: center; display: inline-flex; font-size: 0.9rem; gap: 8px; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__hint { color: var(--muted); font-size: 0.84rem; margin: 0; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__actions { display: flex; justify-content: flex-start; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__field-error { color: #a43c32; font-size: 0.84rem; list-style: none; margin: 0; padding: 0; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__field-error li { border-top: 0; display: block; padding: 0; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__no-match { color: var(--muted); font-size: 0.9rem; margin: 0; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__results { list-style: none; margin: 0; padding: 0; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__results li { border-top: 1px solid var(--line); display: block; padding: 8px 0; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__results li:first-child { border-top: 0; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__result > :is(h3, h4) { font-size: 1rem; margin: 0 0 6px; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__result dl { display: grid; gap: 4px; margin: 0; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__result-row { display: grid; gap: 2px 16px; grid-template-columns: minmax(140px, 200px) minmax(0, 1fr); }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__result dt { color: var(--muted); font-size: 0.86rem; font-weight: 700; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__result dd { font-size: 0.9rem; margin: 0; overflow-wrap: anywhere; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__request { margin-top: 8px; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__browse { font-size: 0.9rem; margin: 12px 0 0; }
+/* SCRUM-191: suitability check, inside the event's "Find a venue". */
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__check { margin: 8px 8px 0 0; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__other { display: grid; gap: 8px; justify-items: start; margin-top: 12px; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__other-body { display: grid; gap: 8px; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__other-row { align-items: center; display: flex; flex-wrap: wrap; gap: 8px 12px; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__other-row label { color: var(--muted); font-size: 0.9rem; }
+.dashboard--coordinator .coordinator-request-detail .event-venue-finder__other-row select { border: 1px solid var(--line); border-radius: 6px; max-width: 100%; min-width: 0; padding: 10px 12px; }
+/* SCRUM-188: read out, not shown (the verdict's venue name). */
+.visually-hidden { border: 0; clip: rect(0 0 0 0); height: 1px; margin: -1px; overflow: hidden; padding: 0; position: absolute; white-space: nowrap; width: 1px; }
+.venue-suitability-panel__note { color: var(--muted); font-size: 0.9em; margin: 0 0 10px; }
+.venue-suitability-panel { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; margin: 18px 0; padding: 14px 16px; }
+.venue-suitability-panel > :is(h2, h3, h4) { margin: 0 0 10px; }
+.venue-suitability-panel__loading { color: var(--muted); margin: 0; }
+.venue-suitability-panel__actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.venue-suitability__verdict { border-radius: 6px; font-weight: 700; margin: 0 0 10px; padding: 8px 12px; }
+.venue-suitability__verdict--met { background: #e8f7f1; color: #17684f; }
+.venue-suitability__verdict--unmet { background: #fff6e5; color: #8a5a00; }
+.venue-suitability__criteria { list-style: none; margin: 0 0 12px; padding: 0; }
+.venue-suitability .venue-suitability__criteria li { border-top: 1px solid var(--line); display: grid; gap: 2px 12px; grid-template-columns: 80px minmax(120px, 160px) minmax(0, 1fr); padding: 6px 0; }
+.venue-suitability__criterion--met strong { color: #17684f; }
+.venue-suitability__criterion--unmet strong { color: #a43c32; }
+.venue-suitability__criterion-detail { overflow-wrap: anywhere; }
+.venue-suitability > :is(h4, h5, h6) { font-size: 0.95rem; margin: 0 0 6px; }
+.venue-suitability__checked { display: grid; gap: 4px; margin: 0; }
+.venue-suitability__checked-row { display: grid; gap: 2px 16px; grid-template-columns: minmax(140px, 200px) minmax(0, 1fr); }
+.venue-suitability__checked dt { color: var(--muted); font-size: 0.86rem; font-weight: 700; }
+.venue-suitability__checked dd { font-size: 0.9rem; margin: 0; overflow-wrap: anywhere; }
+/* SCRUM-188 AC7. An overridden criterion: amber, the "warning to act on"
+   pair, so it reads differently from a plain unmet one. */
+.venue-suitability__criterion--overridden strong { color: #8a5a00; }
+/* Phone layout: after the base column rules above, which it must override at equal specificity. */
+@media (max-width: 720px) {
+  .venue-suitability .venue-suitability__criteria li, .venue-suitability__checked-row { grid-template-columns: 1fr; }
+}
+/* SCRUM-188 AC7. The suitability summary on a Venue Staff booking row. The
+   row keeps the .dashboard li spread for its time, id and status, and wraps
+   so the summary takes a full line beneath them. Not dashboard-scoped beyond
+   that override, so SCRUM-258's review screen gets the same look. */
+.dashboard li.venue-detail__booking--with-suitability { flex-wrap: wrap; }
+.venue-detail__booking-event { flex: 1 1 100%; }
+.booking-suitability { flex: 1 1 100%; min-width: 0; }
+.booking-suitability p { margin: 0 0 6px; }
+.booking-suitability__verdict-value { border-radius: 6px; padding: 0 8px; }
+.booking-suitability__verdict-value--met { background: #e8f7f1; color: #17684f; }
+.booking-suitability__verdict-value--unmet { background: #fff6e5; color: #8a5a00; }
+.booking-suitability .booking-suitability__override { background: #fff6e5; border-left: 3px solid #8a5a00; border-radius: 6px; color: #8a5a00; font-weight: 700; padding: 6px 10px; }
+.booking-suitability .booking-suitability__none { color: var(--muted); font-style: italic; }
+.booking-suitability__details summary { cursor: pointer; margin-bottom: 8px; }
+/* SCRUM-192: the live recheck of the event's requested venues. */
+.event-venue-suitability { display: grid; gap: 10px; justify-items: start; }
+.event-venue-suitability__list { list-style: none; margin: 0; padding: 0; width: 100%; }
+.event-venue-suitability .event-venue-suitability__item { border-top: 1px solid var(--line); display: block; padding: 10px 0; }
+.event-venue-suitability .event-venue-suitability__item:first-child { border-top: 0; }
+.event-venue-suitability__item h4 { font-size: 1rem; margin: 0 0 6px; }
+.event-venue-suitability__meta { color: var(--muted); display: flex; flex-wrap: wrap; font-size: 0.9rem; gap: 6px 14px; margin: 0 0 8px; }
+.event-venue-suitability__verdict { border-radius: 6px; font-weight: 700; padding: 0 8px; }
+.event-venue-suitability__verdict--met { background: #e8f7f1; color: #17684f; }
+.event-venue-suitability__verdict--unmet { background: #fff6e5; color: #8a5a00; }
+.event-venue-suitability__alert, .event-venue-suitability__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 0 0 8px; padding: 8px 12px; }
+.event-venue-suitability__note { color: var(--muted); font-size: 0.9rem; margin: 0 0 8px; }
+.event-venue-suitability__loading, .event-venue-suitability__empty { color: var(--muted); margin: 0; }
+.event-venue-suitability__details summary { cursor: pointer; margin-bottom: 8px; }
+
+/* SCRUM-487: coordinator overview */
+/* /assigned-events: the unassigned count, the coordinators' table and the
+   events list's filters. One block at the end, as App.css is shared by every
+   story. The table's cells take the venue calendar's values; the table scrolls
+   inside itself on a narrow screen rather than widening the page. */
+.assigned-events__unassigned { align-items: baseline; display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 12px 0 8px; }
+.assigned-events__unassigned p { margin: 0; }
+/* The box scrolls, not the table, so the table keeps its table role. */
+.coordinator-workload__scroll { overflow-x: auto; }
+.coordinator-workload { border-collapse: collapse; width: 100%; }
+.coordinator-workload th, .coordinator-workload td { border-bottom: 1px solid var(--line); padding: 10px 8px; text-align: left; }
+.coordinator-workload thead th { color: var(--muted); font-size: 0.8rem; font-weight: 700; }
+.coordinator-workload td { font-variant-numeric: tabular-nums; }
+.assigned-events__filters { align-items: center; display: flex; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 12px; }
+.assigned-events__filters select { border: 1px solid var(--line); border-radius: 6px; max-width: 100%; padding: 10px 12px; }
+/* At phone width each label sits beside its own control, one pair per line. */
+@media (max-width: 720px) {
+  .assigned-events__filters { display: grid; grid-template-columns: auto minmax(0, 1fr); }
+  .assigned-events .my-assigned-events__summary { overflow-wrap: anywhere; }
+}
+/* The row title has no column gap, so the badge keeps the space the old per-screen badge had. */
+.my-assigned-events__title .ui-status-badge, .my-booking-requests__title .ui-status-badge, .review-queue__title .ui-status-badge { margin-left: var(--space-2); }
+
+/* SCRUM-258: Venue Staff's pending booking requests. Each card is a block, not
+   the flex row .dashboard li makes it, and its toggle reads as a row rather
+   than a teal button. Badge colours repeat the coordinator list's pair so a
+   status looks the same to both sides. */
+.dashboard .pending-bookings__card { display: block; padding: 0; }
+.dashboard .pending-bookings__toggle { align-items: center; background: transparent; border-radius: 0; color: var(--ink); display: flex; flex-wrap: wrap; font: inherit; gap: 6px 16px; padding: 14px 4px; text-align: left; width: 100%; }
+.dashboard .pending-bookings__toggle:hover, .dashboard .pending-bookings__toggle[aria-expanded="true"] { background: #f4f8f7; }
+.dashboard .pending-bookings__toggle span:not(.ui-status-badge) { color: var(--muted); font-size: 0.9rem; }
+.dashboard .pending-bookings__toggle .ui-status-badge { margin-left: auto; }
+/* Hover and expanded share one background, so keyboard focus gets its own ring; inset so the full-width row stays inside the card. */
+.dashboard .pending-bookings__toggle:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+/* Long unbroken event or venue names wrap instead of widening the page. */
+.dashboard .pending-bookings__toggle > * { min-width: 0; overflow-wrap: anywhere; }
+.pending-bookings__detail { overflow-wrap: anywhere; }
+@media (max-width: 720px) {
+  /* Event, venue, period and badge stack one per line rather than wrapping raggedly. */
+  .dashboard .pending-bookings__toggle { align-items: flex-start; flex-direction: column; gap: var(--space-1); }
+  .dashboard .pending-bookings__toggle .ui-status-badge { margin-left: 0; }
+}
+.pending-bookings__detail { display: grid; gap: 12px; padding: 4px 4px 20px; }
+/* Child combinators: the suitability check's own dl sits inside the card and would otherwise take this two-column grid, squeezing each of its rows into one narrow cell. */
+.pending-bookings__detail > dl { display: grid; gap: 7px 16px; grid-template-columns: minmax(150px, 220px) minmax(0, 1fr); margin: 0; }
+.pending-bookings__detail > dl > dt { color: var(--muted); font-size: 0.86rem; font-weight: 700; }
+.pending-bookings__detail > dl > dd { color: var(--ink); margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.pending-bookings__breakdown { color: var(--muted); display: block; font-size: 0.85rem; }
+.pending-bookings__detail h3 { color: var(--teal-dark); font-size: 1rem; margin: 6px 0 0; }
+.dashboard .pending-bookings__detail p { margin: 0; }
+.dashboard .pending-bookings__overlapping { list-style: decimal inside; }
+.dashboard .pending-bookings__overlapping li { display: list-item; padding: 6px 0; }
+.pending-bookings__overlapping li > * { margin-right: 12px; }
+.dashboard .pending-bookings__conflicting, .dashboard .pending-bookings__event-status { background: #fff0ee; border-left: 3px solid #a43c32; border-radius: 6px; color: #a43c32; padding: 8px 12px; }
+.pending-bookings__approve { align-items: center; display: flex; flex-wrap: wrap; gap: 8px 12px; }
+.pending-bookings__reject { display: grid; gap: 6px; max-width: 640px; }
+.pending-bookings__reject label { color: var(--muted); font-size: 0.9rem; margin-top: 6px; }
+.pending-bookings__reject textarea { border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: inherit; min-height: 70px; padding: 10px 12px; resize: vertical; }
+.pending-bookings__reject textarea[aria-invalid="true"] { border-color: #a43c32; }
+.pending-bookings__reject button { justify-self: start; margin-top: 6px; }
+.dashboard .pending-bookings__field-error { color: #a43c32; font-size: 0.84rem; }
+.dashboard .pending-bookings__error { background: #fff0ee; border-radius: 6px; color: #a43c32; margin: 6px 0 0; padding: 8px 12px; }
+.dashboard .pending-bookings__notice { background: #e8f7f1; border-radius: 6px; color: #17684f; margin: 6px 0 0; padding: 8px 12px; }
+@media (max-width: 640px) {
+  .pending-bookings__detail > dl { grid-template-columns: 1fr; }
+}
+
+/* SCRUM-315: why an event needs attention, under the event. */
+.needs-attention-reasons { background: #fdecea; border-left: 6px solid #c0362c; border-radius: 8px; list-style: none; margin: 8px 0; padding: 8px 12px; }
+.needs-attention-reasons li { overflow-wrap: anywhere; }
+
+/* SCRUM-478 registration list */
+.registration-list__count { color: var(--color-ink); font-size: 1.6rem; font-weight: 700; margin: var(--space-2) 0 0; }
+.registration-list__filter { margin: 20px 0; }
+.registration-list__table { border-collapse: collapse; width: 100%; }
+.registration-list__table th, .registration-list__table td { border-bottom: 1px solid var(--color-line); overflow-wrap: anywhere; padding: 10px var(--space-2); text-align: left; }
+.registration-list__table th { color: var(--color-muted); font-size: 0.8rem; }
+/* Four columns are too narrow to read on a phone, so each registration becomes a
+   card of label and value. The header row stays for screen readers only. */
+@media (max-width: 720px) {
+  .registration-list__table, .registration-list__table tbody { display: block; }
+  .registration-list__table thead { clip-path: inset(50%); height: 1px; overflow: hidden; position: absolute; white-space: nowrap; width: 1px; }
+  .registration-list__table tr { border-bottom: 1px solid var(--color-line); display: grid; gap: var(--space-1); padding: var(--space-2) 0; }
+  .registration-list__table td { border-bottom: 0; display: grid; gap: var(--space-2); grid-template-columns: minmax(0, 8rem) minmax(0, 1fr); padding: 0; }
+  .registration-list__table td::before { color: var(--color-muted); content: attr(data-label); font-size: var(--font-size-sm); font-weight: 700; }
+}

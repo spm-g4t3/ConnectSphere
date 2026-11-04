@@ -1,0 +1,97 @@
+// The Attendee's list of open events. The backend filters, sorts and counts;
+// nothing here does.
+import { Link } from "react-router-dom";
+import { getOpenEvents } from "../services/openEventService";
+import { REGISTRATION_UNAVAILABLE_MESSAGE } from "../services/registrationErrors";
+import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
+import useOpenEventRead from "./useOpenEventRead";
+import OpenEventAvailability, { RegisteredBadge, WaitlistedBadge } from "./OpenEventAvailability";
+import { openEventDetailsPath } from "../services/openEventRoutes";
+import { EVENT_TIME_NOTE, formatEventWhen } from "../services/openEventDisplay";
+import Button from "./ui/Button";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import LoadingText from "./ui/LoadingText";
+import useFocusAfterRetry from "./useFocusAfterRetry";
+
+const LIST_ERROR_MESSAGES = {
+  403: "Only Attendees can browse open events.",
+  500: "Open events could not be loaded. Please try again.",
+  503: REGISTRATION_UNAVAILABLE_MESSAGE,
+};
+
+function EventRow({ event }) {
+  return (
+    <li className="browse-open-events__row">
+      <div className="browse-open-events__summary">
+        <span className="browse-open-events__title">
+          <Link to={openEventDetailsPath(event.id)}>
+            <strong>{event.eventName || "Unnamed event"}</strong>
+          </Link>
+          {event.isRegistered && <RegisteredBadge />}
+          {event.waitlistPosition != null && <WaitlistedBadge position={event.waitlistPosition} />}
+        </span>
+        <span className="browse-open-events__meta">
+          <span>{formatEventWhen(event.startsAt, event.endsAt)}</span>
+          <span>{EVENT_TIME_NOTE}</span>
+        </span>
+      </div>
+      <OpenEventAvailability event={event} />
+    </li>
+  );
+}
+
+const LIST_FALLBACK = "Open events could not be loaded. Please try again.";
+
+export default function BrowseOpenEvents() {
+  const { data, loading, error, refreshFailed, load: fetchEvents } = useOpenEventRead(getOpenEvents, {
+    messages: LIST_ERROR_MESSAGES,
+    fallback: LIST_FALLBACK,
+  });
+  const events = data ?? [];
+  useRefetchOnReturn(fetchEvents);
+  const { headingRef, retry } = useFocusAfterRetry(fetchEvents);
+  return (
+    <>
+      <h1>Browse Open Events</h1>
+
+      <section className="browse-open-events" aria-labelledby="browse-open-events-heading">
+        <h2 ref={headingRef} tabIndex={-1} id="browse-open-events-heading">Events open for registration</h2>
+
+        {loading && <LoadingText />}
+
+        {error && (
+          <ErrorNotice
+            message={error}
+            onRetry={retry}
+          />
+        )}
+
+        {refreshFailed && (
+          <div className="browse-open-events__notice" role="status">
+            <p>Could not refresh the list. Showing the events as last loaded.</p>
+            <Button variant="secondary" onClick={retry}>
+              Try again
+            </Button>
+          </div>
+        )}
+
+        {/* Nothing open is a normal state, not an error. */}
+        {!loading && !error && events.length === 0 && (
+          <EmptyState
+            message="No events are currently open for registration."
+            nextStep="Check back later for new events."
+          />
+        )}
+
+        {!loading && !error && events.length > 0 && (
+          <ul>
+            {events.map((event) => (
+              <EventRow key={event.id} event={event} />
+            ))}
+          </ul>
+        )}
+      </section>
+    </>
+  );
+}

@@ -1,0 +1,81 @@
+// LoginForm.jsx
+
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "../auth/AuthContext";
+import Button from "./ui/Button";
+import ErrorNotice from "./ui/ErrorNotice";
+
+export default function LoginForm() {
+  const { login, sessionExpiredMessage } = useAuth();
+  const navigate = useNavigate();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+
+    if (!email || !password) {
+      setPassword("");
+      setError("Email and password are required");
+      return;
+    }
+
+    setSubmitting(true);
+    setError(null);
+
+    const result = await login(email, password);
+
+    setSubmitting(false);
+
+    if (!result.success) {
+      setPassword("");
+      setError(result.error);
+      return;
+    }
+
+    // Role-based redirect happens automatically via the Dashboard router,
+    // so a single redirect target works for all roles.
+    navigate("/dashboard");
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="login-form" noValidate>
+      <h1>Log in</h1>
+
+      {/* Why the user is here, when an expired session sent them. */}
+      {sessionExpiredMessage && (
+        <p className="login-form__notice" role="status">{sessionExpiredMessage}</p>
+      )}
+
+      <label>
+        Email
+        <input
+          type="email"
+          value={email}
+          onChange={(e) => { setEmail(e.target.value); setError(null); }}
+          required
+        />
+      </label>
+
+      <label>
+        Password
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => { setPassword(e.target.value); setError(null); }}
+          required
+        />
+      </label>
+
+      {/* No Try again: submitting the form again is the retry. */}
+      {error && <ErrorNotice message={error} />}
+
+      <Button type="submit" disabled={submitting}>
+        {submitting ? "Logging in..." : "Log in"}
+      </Button>
+    </form>
+  );
+}

@@ -6,6 +6,9 @@ node_modules/
 # Environment variables — never commit these
 .env
 .env.*
+_env
+*_env
+env.local
 !.env.example
 
 # Build output

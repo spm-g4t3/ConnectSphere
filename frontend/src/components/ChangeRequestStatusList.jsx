@@ -1,0 +1,139 @@
+// ChangeRequestStatusList.jsx
+// Shows the current state of every change request the Organiser has
+// submitted for a given event, so they can tell what's outstanding vs
+// processed (SCRUM-34).
+//
+// SCRUM-402 AC10: one card per submission (its requestGroupId), with its
+// fields, the Organiser's note, the outcome, the coordinator's reason or note
+// and when it was processed.
+
+import { getChangeRequests } from "../services/changeRequestService";
+import { useEffect, useState, useCallback } from "react";
+import { formatDateTime } from "../services/displayFormat";
+import { canRetryRead } from "../services/apiErrors";
+import { changeFieldLabel, groupChangeRequests, outcomeLabel } from "../services/changeRequestDisplay";
+import StatusBadge from "./ui/StatusBadge";
+import LoadingText from "./ui/LoadingText";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import useFocusAfterRetry from "./useFocusAfterRetry";
+
+const POLL_INTERVAL_MS = 15000;
+
+// The three states a change request moves through. Processed stays neutral:
+// the outcome badge beside it carries the approved or rejected colour.
+const STATUS_CONFIG = {
+  outstanding: { label: "Outstanding", tone: "warning" },
+  in_progress: { label: "In Progress", tone: "info" },
+  processed: { label: "Processed", tone: "neutral" },
+};
+
+// The label comes from outcomeLabel, shared with the coordinator's panel; only the
+// look is chosen here. An outcome not listed is styled as a plain closure.
+const DECISION_TONES = {
+  approved: "success",
+  rejected: "danger",
+  // Closed by the system when the whole event was, not decided on their own.
+  event_rejected: "danger",
+  event_cancelled: "danger",
+  event_completed: "neutral",
+};
+
+function useChangeRequests(eventRequestId) {
+  const [requests, setRequests] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null); // { message, retryable }
+
+  const fetchRequests = useCallback(async () => {
+    try {
+      const data = await getChangeRequests(eventRequestId);
+      setRequests(data);
+      setError(null);
+    } catch (err) {
+      setError({ message: "Could not load your change requests.", retryable: canRetryRead(err) });
+    } finally {
+      setLoading(false);
+    }
+  }, [eventRequestId]);
+
+  useEffect(() => {
+    fetchRequests();
+    const interval = setInterval(fetchRequests, POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [fetchRequests]);
+
+  // The first load and the poll keep the list on screen; only Try again shows Loading.
+  const reload = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    return fetchRequests();
+  }, [fetchRequests]);
+
+  return { requests, loading, error, reload };
+}
+
+export default function ChangeRequestStatusList({ eventRequestId }) {
+  const { requests, loading, error, reload } = useChangeRequests(eventRequestId);
+  const { headingRef, retry } = useFocusAfterRetry(reload);
+
+  // Every state renders in this box, so focus has somewhere to land after Try again.
+  const box = (content) => <div ref={headingRef} tabIndex={-1}>{content}</div>;
+
+  if (loading) return box(<LoadingText />);
+
+  if (error) {
+    return box(<ErrorNotice message={error.message} onRetry={error.retryable ? retry : undefined} />);
+  }
+
+  if (requests.length === 0) {
+    return box(
+      <EmptyState
+        message="You haven't requested any changes for this event."
+        nextStep="Use the form above to request one."
+      />,
+    );
+  }
+
+  return box(
+    <ul className="change-request-status-list">
+      {groupChangeRequests(requests).map((group) => {
+        const status = group.rows[0].status;
+        const config = STATUS_CONFIG[status] || { label: status, tone: "neutral" };
+        const outcome = outcomeLabel(group.decision);
+
+        return (
+          <li key={group.id} className="change-request-status-list__item">
+            <ul className="change-request-status-list__fields">
+              {group.rows.map((row) => (
+                <li key={row.id}>
+                  <div className="change-request-status-list__field">{changeFieldLabel(row.changeField)}</div>
+                  <div className="change-request-status-list__details">{row.details ?? row.requestedChange}</div>
+                </li>
+              ))}
+            </ul>
+            {group.organiserNote && (
+              <p className="change-request-status-list__note"><strong>Your note:</strong> {group.organiserNote}</p>
+            )}
+            <div className="change-request-status-list__statuses">
+              <StatusBadge tone={config.tone}>{config.label}</StatusBadge>
+              {outcome && (
+                <StatusBadge tone={DECISION_TONES[group.decision] ?? "neutral"}>
+                  Outcome: {outcome}
+                </StatusBadge>
+              )}
+            </div>
+            {group.decisionNotes && (
+              <p className="change-request-status-list__decision-notes">
+                <strong>{group.decision === "rejected" ? "Coordinator's reason:" : "Coordinator note:"}</strong> {group.decisionNotes}
+              </p>
+            )}
+            <span className="change-request-status-list__date">
+              Requested {formatDateTime(group.createdAt, "on an unrecorded date")}
+              {group.processedAt && `; processed ${formatDateTime(group.processedAt, "on an unrecorded date")}`}
+            </span>
+          </li>
+        );
+      })}
+    </ul>,
+  );
+}

@@ -1,0 +1,53 @@
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { PGlite } from '@electric-sql/pglite';
+import { btree_gist } from '@electric-sql/pglite/contrib/btree_gist';
+
+const DB_DIR = dirname(fileURLToPath(import.meta.url));
+const MIGRATIONS_DIR = join(DB_DIR, 'migrations');
+const BASELINE_DIR = join(DB_DIR, 'baseline');
+
+// What Supabase provides before any migration runs. The default privileges
+// mirror Supabase's, so table and function ACLs fingerprint the same as live.
+export const SUPABASE_PREAMBLE = `
+  create schema auth;
+  create table auth.users (id uuid primary key default gen_random_uuid(), email text);
+  create role anon nologin;
+  create role authenticated nologin;
+  create role service_role nologin bypassrls;
+  grant usage on schema public to anon, authenticated, service_role;
+  alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
+  alter default privileges in schema public grant all on functions to anon, authenticated, service_role;
+  alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
+`;
+
+function sqlFiles(dir) {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter((name) => name.endsWith('.sql'))
+    .sort();
+}
+
+export function baselineFiles() {
+  const baseline = sqlFiles(BASELINE_DIR).map((name) => join(BASELINE_DIR, name));
+  // Every numbered migration here is written after the squash and applies on top of it.
+  const later = sqlFiles(MIGRATIONS_DIR)
+    .filter((name) => /^\d+_.*\.sql$/.test(name))
+    .map((name) => join(MIGRATIONS_DIR, name));
+  return [...baseline, ...later];
+}
+
+export async function createDatabase(files) {
+  const db = new PGlite({ extensions: { btree_gist } });
+  await db.exec(SUPABASE_PREAMBLE);
+  for (const file of files) {
+    try {
+      await db.exec(readFileSync(file, 'utf8'));
+    } catch (error) {
+      error.message = `${file}: ${error.message}`;
+      throw error;
+    }
+  }
+  return db;
+}

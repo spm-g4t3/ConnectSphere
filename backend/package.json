@@ -1,0 +1,51 @@
+{
+  "name": "connectsphere-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ConnectSphere API server",
+  "type": "module",
+  "scripts": {
+    "start": "node src/app.js",
+    "dev": "nodemon src/app.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:concurrency": "vitest run tests/db/waitingListConcurrency.realdb.test.js",
+    "db:check": "node scripts/check-db.js",
+    "venue:check": "node scripts/check-venue-service.js",
+    "request:check": "node scripts/check-event-request-service.js",
+    "assignment:check": "node scripts/check-coordinator-assignment.js",
+    "change-request:check": "node scripts/check-event-change-request-service.js",
+    "routes:check": "node scripts/check-event-request-routes.js",
+    "venue-routes:check": "node scripts/check-venue-routes.js",
+    "equipment:check": "node scripts/check-equipment-service.js",
+    "equipment:seed": "node db/seeds/equipment.js",
+    "venues:seed": "node db/seeds/venues.js",
+    "venue-holds:seed": "node db/seeds/venueHolds.js",
+    "booking-suitability:seed": "node db/seeds/bookingSuitability.js",
+    "booking-suitability:unseed": "node db/seeds/bookingSuitabilityCleanup.js",
+    "notifications:seed": "node db/seeds/notifications.js",
+    "notifications:unseed": "node db/seeds/notificationsCleanup.js",
+    "venue-blocks:check": "node scripts/check-venue-blocks.js",
+    "venue-calendar:check": "node scripts/check-venue-calendar.js",
+    "booking-requests:check": "node scripts/check-booking-requests.js",
+    "equipment-availability:check": "node scripts/check-equipment-availability.js",
+    "venue-occupancy:check": "node scripts/check-venue-occupancy.js",
+    "venue-safety-facts:check": "node scripts/check-venue-safety-facts.js",
+    "venue-search:check": "node scripts/check-venue-search-text.js"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "@vitest/coverage-v8": "5.0.0",
+    "nodemon": "^3.1.0",
+    "pg": "^8.23.1",
+    "supertest": "^7.2.2",
+    "vitest": "^5.0.0"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.116.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1"
+  }
+}

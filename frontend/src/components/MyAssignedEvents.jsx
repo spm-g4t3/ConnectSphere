@@ -1,0 +1,368 @@
+// MyAssignedEvents.jsx
+//
+// SCRUM-333, for SCRUM-327 AC11: each coordinator has a "My events" list
+// showing the events assigned to them, grouped by status, earliest event
+// first, each showing the event name, the organiser, the date and the status.
+//
+// Beside the review queue, not instead of it. The queue is every event
+// awaiting a decision across the whole team, whoever holds it; this is the
+// work one coordinator holds, every status. Both are on the dashboard (see
+// EventCoordinatorDashboard for why).
+//
+// Built the way ReviewQueue is, on purpose, so the two sections on one screen
+// behave alike: a useCallback fetch, a refetch when the tab regains focus, a
+// status-keyed error table, readStatusDisplay and statusTone for badges,
+// an activePanel for the detail view, and a <section> root that takes its card
+// styling from whichever .dashboard--coordinator wrapper mounted it. That is
+// why App.jsx's /my-events route supplies the wrapper itself, as /review-queue does.
+
+import { useCallback, useEffect, useState } from "react";
+import { getMyAssignedEvents } from "../services/eventRequestService";
+import { canRetryRead } from "../services/apiErrors";
+import { readStatusDisplay, statusTone } from "../services/eventRequestStatusDisplay";
+import { formatDateTime } from "../services/displayFormat";
+import { isReplyOverdue } from "../services/datetimeFormat";
+import SafetyApprovalNotice from "./SafetyApprovalNotice";
+import NeedsAttentionBadge from "./NeedsAttentionBadge";
+import NeedsAttentionReasons from "./NeedsAttentionReasons";
+import CoordinatorRequestDetail from "./CoordinatorRequestDetail";
+import Button from "./ui/Button";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import LoadingText from "./ui/LoadingText";
+import StatusBadge from "./ui/StatusBadge";
+import useFocusAfterRetry from "./useFocusAfterRetry";
+import useReturnFocus from "./useReturnFocus";
+import { useRefetchOnReturn } from "../notifications/useRefetchOnReturn";
+
+// Keyed by status, the same shape as ReviewQueue's QUEUE_ERROR_MESSAGES.
+// GET /mine is gated on the coordinator role, so a 403 means the account's
+// role is wrong, an administration problem rather than a breakage, and the
+// message says so instead of "could not load".
+const MY_EVENTS_ERROR_MESSAGES = {
+  403: "Only Event Coordinators have a My events list.",
+  500: "Your events could not be loaded.",
+};
+
+// The order the groups appear in, and what each is called on this screen.
+//
+// Ordered by what needs the coordinator, not alphabetically. Alphabetical
+// would put Approved first and New in the middle, an order that means nothing
+// to the person reading it. Instead:
+//
+//   1. New, not yet reviewed (submitted): nobody has touched these, and the
+//      coordinator is the one person who now can.
+//   2. Under review: the coordinator's move, already started.
+//   3. Waiting on the organiser (pending clarification): the coordinator asked
+//      a question and is waiting for the answer, so it needs watching more
+//      than acting on.
+//   4. Approved (approved and in planning): decided; the arrangements are
+//      still to make.
+//   5. Confirmed: going ahead. Nothing to do but be ready on the day.
+//   6. Then the three finished groups, collapsed (see below).
+//
+// Keyed on statusDisplay.group, not the raw status, because the group is the
+// stable half of the contract (eventRequestStatusDisplay.js says why): a
+// status added later lands in an existing group and this table needs no edit.
+//
+// The headings are this screen's, not a copy of the status vocabulary. The
+// server's labels are written for the Organiser, so pending clarification is
+// "Action Needed", meaning the Organiser's action. Read by a coordinator, that
+// heading would say the opposite of the truth. Each row's badge still shows
+// the server's label, so the status itself is never re-worded here.
+const OPEN_GROUPS = [
+  { group: "AWAITING_REVIEW", heading: "New, not yet reviewed" },
+  { group: "UNDER_REVIEW", heading: "Under review" },
+  { group: "ACTION_REQUIRED", heading: "Waiting on the organiser" },
+  { group: "APPROVED", heading: "Approved" },
+  { group: "CONFIRMED", heading: "Confirmed" },
+];
+
+// Collapsed by default. The list never shrinks: the backend returns every
+// status, so that a coordinator can still find the event they rejected when
+// its Organiser asks why. Over a semester, finished events become most of the
+// list. Collapsed, they stay one click away and the screen stays about the
+// work that is still open. <details> rather than state and a toggle button:
+// it is the browser's own disclosure control, works from the keyboard and to
+// a screen reader with nothing added, and EventOrganiserDashboard already uses
+// it for the same job.
+const FINISHED_GROUPS = [
+  { group: "COMPLETED", heading: "Completed" },
+  { group: "REJECTED", heading: "Rejected" },
+  { group: "CANCELLED", heading: "Cancelled" },
+];
+
+/**
+ * Group the server's list for display, keeping the server's order.
+ *
+ * The backend already orders the whole list, earliest event first with
+ * undated events last. Splitting it into groups keeps that order within each
+ * group, because each event is appended in the order it arrived. Nothing is
+ * re-sorted here, for the reason ReviewQueue gives: "what is coming up
+ * soonest" is a fact the server answered, and a second answer in the client is
+ * how two screens start disagreeing.
+ *
+ * A group in neither table above (a fallback such as UNKNOWN, or a group added
+ * to the backend later) is still shown, after the open groups and before the
+ * finished ones: it is not known to be finished, so it must not be collapsed
+ * out of sight. Its heading is the server's label for its first event.
+ *
+ * @param {Array} events  the response of GET /event-requests/mine
+ * @returns {Array<{group, heading, finished, events}>} only non-empty groups
+ */
+function groupByStatus(events) {
+  const byGroup = new Map();
+  for (const event of events) {
+    const { group } = readStatusDisplay(event);
+    if (!byGroup.has(group)) byGroup.set(group, []);
+    byGroup.get(group).push(event);
+  }
+
+  const named = new Set([...OPEN_GROUPS, ...FINISHED_GROUPS].map((entry) => entry.group));
+  const unnamed = [...byGroup.keys()]
+    .filter((group) => !named.has(group))
+    .map((group) => ({ group, heading: readStatusDisplay(byGroup.get(group)[0]).label }));
+
+  return [
+    ...[...OPEN_GROUPS, ...unnamed].map((entry) => ({ ...entry, finished: false })),
+    ...FINISHED_GROUPS.map((entry) => ({ ...entry, finished: true })),
+  ]
+    .filter((entry) => byGroup.has(entry.group))
+    .map((entry) => ({ ...entry, events: byGroup.get(entry.group) }));
+}
+
+/**
+ * Who organised the event, never the word "null".
+ *
+ * organiserName is null when the Organiser has no name on record. The id is
+ * then the only thing that identifies them, so it is shown as an identifier,
+ * and the label says why a name is missing rather than leaving a blank.
+ */
+function OrganiserName({ event }) {
+  if (event.organiserName) return <span>{event.organiserName}</span>;
+
+  return (
+    <span>
+      No name on record <code title={event.organiserId ?? undefined}>{event.organiserId ?? "unknown"}</code>
+    </span>
+  );
+}
+
+function EventRow({ event, onOpen, openerRef }) {
+  // Labels come from the API, so this component never interprets a status.
+  const display = readStatusDisplay(event);
+  const overdue = event.status === "pending_clarification" &&
+    event.clarificationReplyByDate &&
+    isReplyOverdue(event.clarificationReplyByDate);
+
+  return (
+    <li className="my-assigned-events__row">
+      <div className="my-assigned-events__summary">
+        <span className="my-assigned-events__title">
+          <strong>{event.eventName}</strong>
+          <StatusBadge tone={statusTone(display.group)}>{display.label}</StatusBadge>
+          <NeedsAttentionBadge event={event} />
+          {/* SCRUM-402 (SCRUM-404): submissions waiting, counted by GET /mine. */}
+          {event.openChangeRequestCount > 0 && (
+            <span className="my-assigned-events__change-requests">
+              {event.openChangeRequestCount === 1 ? "1 change request" : `${event.openChangeRequestCount} change requests`}
+            </span>
+          )}
+        </span>
+        <span className="my-assigned-events__meta">
+          <span>{formatDateTime(event.proposedStart, "Date not set")}</span>
+          {overdue && <strong className="clarification-overdue">Overdue</strong>}
+          <span>
+            Organiser: <OrganiserName event={event} />
+          </span>
+        </span>
+        <SafetyApprovalNotice status={event.status} />
+        <NeedsAttentionReasons event={event} />
+      </div>
+      <Button ref={openerRef} onClick={() => onOpen(event)}>Open</Button>
+    </li>
+  );
+}
+
+/**
+ * @param {object} props
+ * @param {Function} [props.onEventChanged]  told when the detail panel changed an event
+ * @param {boolean} [props.asPage]  true at /my-events, where the title is the
+ *                                  page's h1; on the dashboard it is h2
+ */
+export default function MyAssignedEvents({ onEventChanged, asPage = false } = {}) {
+  const [events, setEvents] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [retryable, setRetryable] = useState(false);
+
+  // Which panel is open, if any: { mode: "detail", request } | null. The same
+  // full-page-panel-with-a-back-button pattern ReviewQueue uses.
+  const [activePanel, setActivePanel] = useState(null);
+  // The finished groups the coordinator has opened. Kept here, as the list
+  // unmounts while an event is open, so Back can reach a row inside one.
+  const [openFinished, setOpenFinished] = useState(() => new Set());
+
+  const fetchEvents = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await getMyAssignedEvents();
+      setEvents(data);
+      // An event handed over leaves this list; keep its panel open (SCRUM-334)
+      // so the coordinator sees the handover rather than losing the page.
+      setActivePanel((current) => {
+        if (!current) return current;
+        const refreshed = data.find((event) => event.id === current.request.id);
+        return refreshed ? { ...current, request: refreshed } : current;
+      });
+      setError(null);
+      return data;
+    } catch (err) {
+      setError(
+        MY_EVENTS_ERROR_MESSAGES[err.response?.status] ||
+          "Your events could not be loaded.",
+      );
+      setRetryable(canRetryRead(err));
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchEvents();
+  }, [fetchEvents]);
+
+  // Refetch when the coordinator comes back to the tab, for ReviewQueue's
+  // reason: these events change while the coordinator is not looking. An
+  // Organiser answers a clarification, a colleague hands an event over, and
+  // the list should show it the moment the coordinator looks again. One
+  // request per visit, not one every few seconds per open tab.
+  useRefetchOnReturn(fetchEvents);
+
+  // Try again goes away as its read starts, so focus moves to the title.
+  const { headingRef, retry } = useFocusAfterRetry(fetchEvents);
+  // An event can be listed twice (Needs attention and its group), so the
+  // opener is keyed by where it was opened from as well as by the event.
+  const openerKey = activePanel ? `${activePanel.from}:${activePanel.request.id}` : null;
+  const { listHeadingRef, rowRef, returnFocusTo } = useReturnFocus(openerKey, loading);
+  function titleRef(node) {
+    headingRef.current = node;
+    listHeadingRef.current = node;
+  }
+  function closeDetail() {
+    returnFocusTo(openerKey);
+    setActivePanel(null);
+  }
+  const Title = asPage ? "h1" : "h2";
+  // One level under the title, wherever the list is mounted.
+  const GroupHeading = asPage ? "h2" : "h3";
+
+  // The row from this list is a complete event request (the backend selects
+  // the same columns as every other read), so the detail panel renders from it
+  // with no second fetch, as it does from a queue row. On its own page the h1
+  // stays above the panel, so the page keeps its one h1.
+  if (activePanel?.mode === "detail") {
+    return (
+      <section>
+        {asPage && <h1>My events</h1>}
+        <Button variant="link" onClick={closeDetail}>
+          &larr; Back to my events
+        </Button>
+        <CoordinatorRequestDetail
+          request={activePanel.request}
+          focusOnOpen
+          onReviewDecisionProcessed={() => {
+            closeDetail();
+            fetchEvents();
+            onEventChanged?.();
+          }}
+          onChangeRequestProcessed={() => {
+            onEventChanged?.();
+            return fetchEvents();
+          }}
+        />
+      </section>
+    );
+  }
+
+  const groups = groupByStatus(events);
+  const openFrom = (from) => (request) => setActivePanel({ mode: "detail", request, from });
+  function toggleFinished(group, open) {
+    setOpenFinished((previous) => {
+      const next = new Set(previous);
+      if (open) next.add(group);
+      else next.delete(group);
+      return next;
+    });
+  }
+  const now = new Date();
+  const overdueClarifications = events
+    .filter((event) =>
+      event.status === "pending_clarification" &&
+      event.clarificationReplyByDate &&
+      isReplyOverdue(event.clarificationReplyByDate, now))
+    .sort((first, second) =>
+      first.clarificationReplyByDate.localeCompare(second.clarificationReplyByDate));
+
+  return (
+    <section className="my-assigned-events">
+      <Title ref={titleRef} tabIndex={-1}>
+        My events
+      </Title>
+
+      {loading && <LoadingText />}
+      {/* Hidden while a read is in flight, so Try again cannot start a second one. */}
+      {error && !loading && <ErrorNotice message={error} onRetry={retryable ? retry : undefined} />}
+      {!loading && !error && overdueClarifications.length > 0 && (
+        <div className="my-assigned-events__needs-attention" role="region" aria-label="Needs attention">
+          <GroupHeading>Needs attention</GroupHeading>
+          <p>Clarification reply dates have passed. No status change has been made.</p>
+          <ul>
+            {overdueClarifications.map((event) => (
+              <EventRow key={event.id} event={event} onOpen={openFrom("attention")} openerRef={rowRef(`attention:${event.id}`)} />
+            ))}
+          </ul>
+        </div>
+      )}
+      {/* Nothing assigned is the good state, not a missing resource. */}
+      {!loading && !error && events.length === 0 && (
+        <EmptyState
+          message="No events are assigned to you right now."
+          nextStep="Events appear here when the Event Coordinator Lead assigns them to you."
+        />
+      )}
+
+      {groups.map(({ group, heading, finished, events: groupEvents }) => {
+        const rows = (
+          <ul>
+            {groupEvents.map((event) => (
+              <EventRow key={event.id} event={event} onOpen={openFrom("group")} openerRef={rowRef(`group:${event.id}`)} />
+            ))}
+          </ul>
+        );
+
+        return finished ? (
+          <details
+            key={group}
+            className="my-assigned-events__group my-assigned-events__group--finished"
+            open={openFinished.has(group)}
+            onToggle={(toggle) => toggleFinished(group, toggle.currentTarget.open)}
+          >
+            <summary>
+              {heading} <span className="my-assigned-events__count">({groupEvents.length})</span>
+            </summary>
+            {rows}
+          </details>
+        ) : (
+          <div key={group} className="my-assigned-events__group">
+            <GroupHeading>
+              {heading} <span className="my-assigned-events__count">({groupEvents.length})</span>
+            </GroupHeading>
+            {rows}
+          </div>
+        );
+      })}
+    </section>
+  );
+}

@@ -1,0 +1,60 @@
+/**
+ * The Technical Support dashboard's equipment request queue, mounted at
+ * /api/equipment-requests.
+ *
+ *   GET /    ?status=pending_review|under_review|arranged|cannot_be_fully_arranged|cancelled
+ *            ?includePast=true   also events that have ended
+ *
+ *   GET /reviewed-by-me   the requests the caller started or took over before
+ *
+ * Technical Support Staff only; reading changes nothing.
+ * Statuses: 200; 400 bad status or includePast (queue only); 401; 403; 500.
+ */
+
+import express from 'express';
+
+import { getEquipmentRequestQueue, getRequestsReviewedByMe } from '../services/equipmentQueueService.js';
+import { requireAuth as defaultRequireAuth } from '../middleware/requireAuth.js';
+import { createRequireRole } from '../middleware/requireRole.js';
+import { ROLE } from '../domain/userRole.js';
+import { createErrorMiddleware } from '../http/handleError.js';
+
+
+/** Answers whatever a handler throws or rejects with; see src/http/handleError.js. */
+const errorMiddleware = createErrorMiddleware('equipment request queue route');
+
+
+/**
+ * Build the router, optionally over injected middleware and client.
+ *
+ * @param {object} [options]
+ * @param {Function} [options.requireAuth]
+ * @param {Function} [options.requireRole]  a factory
+ * @param {object}   [options.client]       a Supabase client, usually a test double
+ * @returns {import('express').Router}
+ */
+export function createEquipmentQueueRouter({
+  requireAuth = defaultRequireAuth,
+  requireRole = createRequireRole,
+  client,
+} = {}) {
+  const router = express.Router();
+
+  router.use(requireAuth);
+
+  router.get('/', requireRole(ROLE.TECHNICAL_SUPPORT_STAFF), async (req, res) => {
+    res.status(200).json(await getEquipmentRequestQueue(req.query, { callerId: req.user.id, client }));
+  });
+
+  router.get('/reviewed-by-me', requireRole(ROLE.TECHNICAL_SUPPORT_STAFF), async (req, res) => {
+    // One person's history, so no shared cache keeps it.
+    res.set('Cache-Control', 'no-store');
+    res.status(200).json(await getRequestsReviewedByMe({ callerId: req.user.id, client }));
+  });
+
+  router.use(errorMiddleware);
+  return router;
+}
+
+/** The instance src/app.js mounts. */
+export default createEquipmentQueueRouter();

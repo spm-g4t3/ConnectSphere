@@ -1,0 +1,396 @@
+import react from '@vitejs/plugin-react'
+import { defineConfig } from 'vitest/config'
+
+// SCRUM-17, SCRUM-186, SCRUM-178, SCRUM-137, SCRUM-491 and SCRUM-495 files are gated at 100%
+// lines/branches/functions/statements each.
+// There is deliberately no global threshold: a file is gated once it reaches
+// 100%, so an ungated file can still be reported without failing CI.
+const FULL = { lines: 100, branches: 100, functions: 100, statements: 100 }
+
+// SCRUM-583: the expiry and idle files are new or rewritten and owned outright.
+const SCRUM583_FILES = [
+  'src/auth/AuthContext.jsx',
+  'src/auth/SessionTimeout.jsx',
+  'src/auth/sessionExpiry.js',
+  'src/services/apiClient.js',
+]
+
+const SCRUM17_FILES = [
+  'src/components/VenueBlocksPanel.jsx',
+  'src/components/VenueBlockForm.jsx',
+  'src/components/BlockConflictList.jsx',
+  'src/components/BlockHistory.jsx',
+  'src/components/NotificationInbox.jsx',
+  'src/services/venueBlockValidation.js',
+  'src/services/venueBlockReasons.js',
+  'src/services/venueBlockErrors.js',
+  'src/services/venueBlockDisplay.js',
+  'src/services/venueBlockHistoryDisplay.js',
+  'src/services/venueSearchValidation.js',
+  'src/services/notificationDisplay.js',
+  'src/services/notificationService.js',
+  'src/services/displayFormat.js',
+]
+
+// SCRUM-186 owns one new file outright. VenueForm.jsx and VenueDetail.jsx
+// are SCRUM-15's and shared, so, like venueService.js, they are not gated.
+const SCRUM186_FILES = ['src/services/turnaroundOptions.js']
+
+// SCRUM-137 (SCRUM-20) likewise owns one new file outright; its VenueForm.jsx
+// and VenueDetail.jsx edits sit in shared files and are not gated.
+const SCRUM137_FILES = ['src/services/setupOptions.js']
+
+// SCRUM-141 (SCRUM-20) owns the inline event venue search outright.
+// CoordinatorRequestDetail.jsx and venueService.js are shared, so not gated.
+const SCRUM141_FILES = [
+  'src/services/eventVenueSearchForm.js',
+  'src/components/EventVenueFinder.jsx',
+]
+
+// SCRUM-178 (the calendar, built in SCRUM-180) owns these three outright.
+// venueService.js gains getVenueCalendar but is shared, so it is not gated,
+// and neither is App.jsx for the route.
+const SCRUM178_FILES = [
+  'src/services/calendarRange.js',
+  'src/services/calendarEntryDisplay.js',
+  'src/components/VenueCalendar.jsx',
+]
+
+// SCRUM-254 owns these outright. VenueSearch.jsx and CoordinatorRequestDetail.jsx
+// gain the request button and the richer handoff but are shared (SCRUM-45,
+// SCRUM-130, SCRUM-185, SCRUM-334), so, like venueService.js, they are not gated.
+const SCRUM254_FILES = [
+  'src/components/BookingRequestPanel.jsx',
+  'src/services/bookingRequestService.js',
+  'src/services/bookingRequestEligibility.js',
+  'src/services/bookingRequestErrors.js',
+  'src/components/MyBookingRequests.jsx',
+  'src/services/bookingRequestStatusDisplay.js',
+]
+
+// SCRUM-485 (SCRUM-509) owns the two new dashboards outright. Dashboard.jsx
+// gains their map entries but is shared by every role, so, like App.jsx, it
+// is not gated.
+const SCRUM485_FILES = [
+  'src/components/EventCoordinatorLeadDashboard.jsx',
+  'src/components/SafetyOfficerDashboard.jsx',
+]
+
+// SCRUM-491 owns the tentative-hold panel, form and their two services
+// outright. The edits it makes to shared files are gated where those files
+// already are (calendarEntryDisplay.js, calendarRange.js, VenueCalendar.jsx,
+// bookingRequestErrors.js, BookingRequestPanel.jsx, notificationDisplay.js,
+// eventVenueSearchForm.js, EventVenueFinder.jsx); VenueCatalogue.jsx and
+// venueService.js stay ungated, as above.
+const SCRUM491_FILES = [
+  'src/components/VenueHoldsPanel.jsx',
+  'src/components/VenueHoldForm.jsx',
+  'src/services/venueHoldErrors.js',
+  'src/services/venueHoldValidation.js',
+]
+
+// SCRUM-486 (SCRUM-519) owns the Lead's unassigned queue, the assignment
+// picker and the waiting-time helper outright. EventCoordinatorLeadDashboard.jsx,
+// which now mounts the queue, is already gated above under SCRUM-485. The
+// edits it makes to shared files (eventRequestService.js, ReassignEventPanel.jsx,
+// CoordinatorRequestDetail.jsx, Navigation.jsx, App.jsx) stay ungated, as
+// those files always have been.
+const SCRUM486_FILES = [
+  'src/components/UnassignedQueue.jsx',
+  'src/components/AssignCoordinatorPanel.jsx',
+  'src/services/waitingTime.js',
+  // SCRUM-521: an event's coordinator screen by its address.
+  'src/components/EventRequestReviewPage.jsx',
+  // AC6: the Lead's list of assigned events, the way to that screen.
+  'src/components/AssignedEvents.jsx',
+]
+
+// SCRUM-487: the Lead's coordinator overview. New files only this story owns,
+// gated outright. AssignedEvents.jsx, which it extends, stays in
+// SCRUM486_FILES, so its 100% gate holds over both stories' code.
+const SCRUM487_FILES = [
+  // SCRUM-543 (AC4): the unassigned count at the top.
+  'src/components/UnassignedCount.jsx',
+  // SCRUM-544 (AC2, AC3): the coordinators' table and the list's filters.
+  'src/components/CoordinatorWorkloadTable.jsx',
+  'src/components/AssignedEventsFilters.jsx',
+]
+
+// SCRUM-284 (SCRUM-287) owns the equipment request queue and the dashboard that
+// mounts it, gated at 100%.
+const SCRUM284_FILES = [
+  'src/components/EquipmentRequestQueue.jsx',
+  'src/components/TechnicalSupportDashboard.jsx',
+  'src/services/equipmentQueueService.js',
+  'src/services/equipmentRequestStatus.js',
+  'src/services/eventPeriodFormat.js',
+]
+
+// SCRUM-582 adds the "Reviewed by me" list beside the queue. The service it
+// calls is gated above under SCRUM-284.
+const SCRUM582_FILES = [
+  'src/components/EquipmentReviewedByMe.jsx',
+]
+
+// SCRUM-258 owns the Venue Staff queue and its decision card outright.
+// VenueStaffDashboard.jsx, which mounts the queue, and the shared services
+// it calls (bookingRequestService.js, already gated under SCRUM-254) are not
+// added here.
+const SCRUM258_FILES = [
+  'src/components/PendingBookingRequests.jsx',
+  'src/components/PendingBookingRequestCard.jsx',
+]
+
+// SCRUM-266 owns Venue Staff's flagged bookings list and its card, and the
+// services behind them. flaggedBookingDisplay.js, shared with the venue
+// catalogue and the coordinator's list, is gated here too: its older tests
+// already cover every line, and this story adds flagReasons and its tests.
+// The coordinator's side adds the event's flagged bookings section, the reason
+// form both screens share, and the Needs attention badge; the screens they
+// sit on (CoordinatorRequestDetail.jsx, MyAssignedEvents.jsx,
+// MyEventRequests.jsx, EventOrganiserDashboard.jsx) are shared, so not gated.
+const SCRUM266_FILES = [
+  'src/components/FlaggedBookings.jsx',
+  'src/components/FlaggedBookingCard.jsx',
+  'src/components/FlaggedBookingReasonForm.jsx',
+  'src/components/EventFlaggedBookings.jsx',
+  'src/components/FlaggedBookingFlagDetail.jsx',
+  'src/components/NeedsAttentionBadge.jsx',
+  'src/services/flaggedBookingService.js',
+  'src/services/flaggedBookingErrors.js',
+  'src/services/flaggedBookingDisplay.js',
+]
+
+// SCRUM-495: the Attendee's browse pages. New files only this story owns.
+const SCRUM495_FILES = [
+  'src/components/BrowseOpenEvents.jsx',
+  'src/components/BrowseEventDetails.jsx',
+  'src/components/useOpenEventRead.js',
+  'src/components/OpenEventAvailability.jsx',
+  'src/services/openEventDisplay.js',
+  'src/services/openEventRoutes.js',
+  'src/services/openEventService.js',
+]
+
+const SCRUM24_FILES = [
+  'src/components/RegisteredEvents.jsx',
+  'src/components/AttendeeEventInformation.jsx',
+  'src/services/attendeeEventService.js',
+  'src/services/attendeeEventRoutes.js',
+]
+
+const SCRUM22_FILES = [
+  'src/services/registrationService.js',
+  'src/services/registrationErrors.js',
+]
+const SCRUM363_FILES = ['src/components/EventConfirmationPanel.jsx', 'src/components/ReadinessChecklist.jsx', 'src/components/ConfirmedArrangements.jsx']
+
+// SCRUM-489: the coordinator's safety check submission. Its one new file is
+// gated outright; the shared files it touches stay ungated.
+const SCRUM489_FILES = [
+  // SCRUM-557 (AC3 to AC6): the checklist, the confirmation, the note and Submit.
+  'src/components/SafetyCheckSubmissionPanel.jsx',
+]
+
+// SCRUM-492: the event screen's Venue bookings section, gated outright. Its
+// error messages join bookingRequestErrors.js, already gated in SCRUM254_FILES;
+// bookingRequestService.js and CoordinatorRequestDetail.jsx stay as they were.
+const SCRUM492_FILES = [
+  // SCRUM-567 (AC1, AC2, AC4, AC6): the list and the Release action.
+  'src/components/EventVenueBookings.jsx',
+]
+
+// SCRUM-539: the Lead's cancel panel, gated outright. UnassignedQueue.jsx, which
+// opens it, stays in SCRUM486_FILES, whose 100% covers the new row button.
+const SCRUM539_FILES = [
+  'src/components/UnassignedRequestCancelPanel.jsx',
+]
+
+// SCRUM-172: the shared unread count behind the nav badge and the inbox
+// heading. NotificationInbox.jsx and notificationService.js stay in
+// SCRUM17_FILES, where their 100% gate already holds.
+const SCRUM172_FILES = [
+  'src/notifications/UnreadCountContext.jsx',
+  // AC4: the re-read on returning to the tab, shared with the inbox.
+  'src/notifications/useRefetchOnReturn.js',
+  // AC7: where each role lands when it opens a notification.
+  'src/services/notificationLink.js',
+]
+
+// SCRUM-355: past decisions, a new file only this story owns. Its edits to
+// MyEventRequests.jsx and CoordinatorRequestDetail.jsx stay ungated.
+const SCRUM355_FILES = [
+  'src/components/DecisionHistory.jsx',
+]
+
+// SCRUM-387: the coordinator's edit form, the change history and the field
+// list they share, new files only this story owns. Its edits to
+// CoordinatorRequestDetail.jsx, MyEventRequests.jsx and eventRequestService.js
+// stay ungated; notificationDisplay.js and notificationLink.js keep the 100%
+// of SCRUM17_FILES and SCRUM172_FILES.
+// SCRUM-402: the coordinator's review panel and the display helper it shares
+// with the Organiser's list and the notices, new files only this story owns.
+// Its edits to ChangeRequestForm.jsx, ChangeRequestStatusList.jsx,
+// CoordinatorRequestDetail.jsx and MyAssignedEvents.jsx stay ungated, and
+// notificationDisplay.js keeps SCRUM17_FILES' 100%.
+const SCRUM402_FILES = [
+  'src/components/ChangeRequestReviewPanel.jsx',
+  'src/services/changeRequestDisplay.js',
+]
+
+const SCRUM387_FILES = [
+  'src/components/EventDetailsEditPanel.jsx',
+  'src/components/EventChangeHistory.jsx',
+  'src/services/eventDetailFields.js',
+]
+
+// SCRUM-347: the rejection page, a new file only this story owns. Its edits to
+// CoordinatorRequestDetail.jsx and MyEventRequests.jsx stay ungated.
+const SCRUM347_FILES = [
+  'src/components/EventRejectionPanel.jsx',
+]
+
+// SCRUM-478: the registration list page is new and owned outright. Its links in
+// MyEventRequests.jsx and CoordinatorRequestDetail.jsx stay ungated.
+const SCRUM478_FILES = [
+  'src/components/EventRegistrationList.jsx',
+]
+
+// SCRUM-584: the shared ui components, new files only this story owns.
+const SCRUM584_FILES = [
+  'src/components/ui/Button.jsx',
+  'src/components/ui/StatusBadge.jsx',
+  'src/components/ui/LoadingText.jsx',
+  'src/components/ui/EmptyState.jsx',
+  'src/components/ui/ErrorNotice.jsx',
+  'src/components/ui/ConfirmDialog.jsx',
+]
+
+// SCRUM-591: the Safety Officer screens' shared labels and focus-return hook,
+// plus the review pane, which gained the response choices and reject confirm.
+// SafetyReviewHistory.jsx stays ungated: its SCRUM-490 fallbacks are untested.
+const SCRUM591_FILES = [
+  'src/components/safetyReviewLabels.js',
+  'src/components/SafetyReviewDetail.jsx',
+  'src/components/useReturnFocus.js',
+]
+
+// SCRUM-586: the shared Tabs component, a new file this story owns.
+const SCRUM586_FILES = [
+  'src/components/ui/Tabs.jsx',
+]
+
+// Shared service files brought to 100% by the coverage push; gating them
+// stops a later change from silently dropping a request path.
+const COVERAGE_SERVICE_FILES = [
+  'src/services/eventRequestService.js',
+  'src/services/venueService.js',
+  'src/services/datetimeFormat.js',
+  'src/services/equipmentReviewService.js',
+  'src/services/venueLookups.js',
+  'src/services/safetyReviewService.js',
+  'src/services/eventRequestStatusDisplay.js',
+  'src/services/eventRegistrationService.js',
+  'src/services/changeRequestService.js',
+  'src/services/venueSuitabilityDisplay.js',
+  'src/services/equipmentReviewErrors.js',
+]
+
+// Components brought to 100% by the coverage push, gated for the same reason.
+const COVERAGE_COMPONENT_FILES = [
+  'src/App.jsx',
+  'src/components/ClarificationReplyForm.jsx',
+  'src/components/ClarificationHistory.jsx',
+  'src/components/MyEventRequests.jsx',
+  'src/components/ReviewQueue.jsx',
+  'src/components/EventOrganiserDashboard.jsx',
+  'src/components/VenueForm.jsx',
+  'src/components/VenueDetail.jsx',
+  'src/components/ReassignEventPanel.jsx',
+  'src/components/SignificantEventChangePanel.jsx',
+  'src/components/EquipmentReview.jsx',
+  'src/components/EventCancellationPanel.jsx',
+  'src/components/EventRequestForm.jsx',
+  'src/components/CoordinatorRequestDetail.jsx',
+  'src/components/AssignmentHistory.jsx',
+  'src/components/BookingSuitabilitySummary.jsx',
+  'src/components/ClarificationHistoryDialog.jsx',
+  'src/components/DecisionOutcome.jsx',
+  'src/components/EquipmentAvailabilityCheck.jsx',
+  'src/components/EquipmentCatalogue.jsx',
+  'src/components/EquipmentHistory.jsx',
+  'src/components/EventCompletionPanel.jsx',
+  'src/components/EventEquipmentSection.jsx',
+  'src/components/EventRegistrationSettings.jsx',
+  'src/components/EventVenueSuitability.jsx',
+  'src/components/LoginForm.jsx',
+  'src/components/MyAssignedEvents.jsx',
+  'src/components/RegistrationCounts.jsx',
+  'src/components/RegistrationEventsList.jsx',
+  'src/components/SafetyReviewHistory.jsx',
+  'src/components/VenueCatalogue.jsx',
+  'src/components/VenueSuitabilityPanel.jsx',
+  'src/components/VenueSuitabilityResult.jsx',
+  'src/components/WaitingListPlaces.jsx',
+  'src/components/WithdrawRegistration.jsx',
+]
+
+// https://vite.dev/config/
+//
+// defineConfig comes from vitest/config rather than vite so the `test` block
+// below is typed and validated. Vite itself ignores `test`.
+export default defineConfig({
+  plugins: [react()],
+  test: {
+    environment: 'jsdom',
+    setupFiles: ['./tests/setup.js'],
+    include: ['tests/**/*.test.{js,jsx}'],
+    testTimeout: 15000,
+    // Explicit imports (describe/it/expect from 'vitest') rather than globals,
+    // matching the backend suite and keeping ESLint's no-undef honest.
+    globals: false,
+    coverage: {
+      provider: 'v8',
+      include: ['src/**/*.{js,jsx}'],
+      // main.jsx only mounts <App /> with createRoot; App itself is tested.
+      exclude: ['src/main.jsx'],
+      reporter: ['text', 'json-summary'],
+      reportOnFailure: true,
+      thresholds: Object.fromEntries([
+        ...SCRUM17_FILES.map((file) => [file, FULL]),
+        ...SCRUM186_FILES.map((file) => [file, FULL]),
+        ...SCRUM583_FILES.map((file) => [file, FULL]),
+        ...SCRUM178_FILES.map((file) => [file, FULL]),
+        ...SCRUM137_FILES.map((file) => [file, FULL]),
+        ...SCRUM141_FILES.map((file) => [file, FULL]),
+        ...SCRUM254_FILES.map((file) => [file, FULL]),
+        ...SCRUM485_FILES.map((file) => [file, FULL]),
+        ...SCRUM491_FILES.map((file) => [file, FULL]),
+        ...SCRUM486_FILES.map((file) => [file, FULL]),
+        ...SCRUM487_FILES.map((file) => [file, FULL]),
+        ...SCRUM284_FILES.map((file) => [file, FULL]),
+        ...SCRUM582_FILES.map((file) => [file, FULL]),
+        ...SCRUM258_FILES.map((file) => [file, FULL]),
+        ...SCRUM266_FILES.map((file) => [file, FULL]),
+        ...SCRUM495_FILES.map((file) => [file, FULL]),
+        ...SCRUM24_FILES.map((file) => [file, FULL]),
+        ...SCRUM22_FILES.map((file) => [file, FULL]),
+        ...SCRUM489_FILES.map((file) => [file, FULL]),
+        ...SCRUM363_FILES.map((file) => [file, FULL]),
+        ...SCRUM492_FILES.map((file) => [file, FULL]),
+        ...SCRUM539_FILES.map((file) => [file, FULL]),
+        ...SCRUM172_FILES.map((file) => [file, FULL]),
+        ...SCRUM355_FILES.map((file) => [file, FULL]),
+        ...SCRUM387_FILES.map((file) => [file, FULL]),
+        ...SCRUM402_FILES.map((file) => [file, FULL]),
+        ...SCRUM347_FILES.map((file) => [file, FULL]),
+        ...SCRUM478_FILES.map((file) => [file, FULL]),
+        ...SCRUM584_FILES.map((file) => [file, FULL]),
+        ...SCRUM591_FILES.map((file) => [file, FULL]),
+        ...SCRUM586_FILES.map((file) => [file, FULL]),
+        ...COVERAGE_SERVICE_FILES.map((file) => [file, FULL]),
+        ...COVERAGE_COMPONENT_FILES.map((file) => [file, FULL]),
+      ]),
+    },
+  },
+})

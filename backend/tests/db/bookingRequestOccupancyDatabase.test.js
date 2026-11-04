@@ -1,0 +1,349 @@
+/**
+ * SCRUM-484 (Phase 1): create_booking_request checks the period through the
+ * shared occupied period, run against a real Postgres.
+ *
+ * Step 7 is one call to venue_occupancy_conflicts(p_venue_id, start, end,
+ * true), run here against the final schema. So:
+ *   - the requested event is padded with the venue's setup and turnaround, as
+ *     is every booking it is compared with (decision 1);
+ *   - flagged_for_review bookings occupy, as well as approved ones
+ *     (decision 2); pending and cancelled ones do not;
+ *   - blocks stay raw, but the request's own setup or turnaround reaching
+ *     into one is a conflict;
+ *   - each conflict item gains occupied_starts_at, occupied_ends_at,
+ *     setup_minutes and turnaround_minutes (AC7).
+ *
+ * Common fixture (the test-case doc's): venue V at 30/45, an approved booking
+ * A on D 10:00-12:00, which occupies 09:30-12:45. The earliest a next event
+ * may start is 13:15. Each test makes its own venue.
+ *
+ * Dates: D is the Singapore date 10 days from when the test runs, never
+ * hard-coded. Instants are compared with getTime().
+ */
+
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { createSchemaDb, seedBlock, seedBooking, seedEvent, seedUser, seedVenue } from './helpers/schemaDb.js';
+import { queriesFor } from './helpers/queries.js';
+import { at } from '../fixtures/time.js';
+import { toSuitabilityRecord } from '../../src/domain/suitabilityRecord.js';
+
+const ms = (value) => new Date(value).getTime();
+
+const SUITABLE = { suitable: true, criteria: [{ criterion: 'capacity', met: true }] };
+const OCCUPIED_KEYS = ['occupied_starts_at', 'occupied_ends_at', 'setup_minutes', 'turnaround_minutes'];
+
+describe('SCRUM-484: create_booking_request uses the occupied period', () => {
+  let db;
+  let organiser;
+  let coordinator;
+  let counter = 0;
+
+  const { one } = queriesFor(() => db);
+
+  const makeVenue = (setup = 30, turnaround = 45) => seedVenue(db, { name: `Harbour Room ${++counter}`, setup, turnaround });
+
+  function makeEvent(startsAt, endsAt) {
+    counter += 1;
+    return seedEvent(db, {
+      status: 'approved',
+      organiser_id: organiser,
+      assigned_coordinator_id: coordinator,
+      event_name: `Event ${counter}`,
+      proposed_start: startsAt,
+      proposed_end: endsAt,
+      expected_attendance: 150,
+    });
+  }
+
+  const makeBlock = (venueId, startsAt, endsAt, removed = false) =>
+    seedBlock(db, { venueId, start: startsAt, end: endsAt, removed });
+
+  /**
+   * A booking on its own event. A flagged_for_review one needs a block and a
+   * flag time (bookings_review_flag_paired); it points at a removed
+   * block late on D, which occupies nothing.
+   */
+  async function makeBooking(venueId, status, startsAt, endsAt) {
+    const eventId = await makeEvent(startsAt, endsAt);
+    const reviewBlockId = status === 'flagged_for_review' ? await makeBlock(venueId, at('22:00'), at('23:00'), true) : null;
+    return seedBooking(db, { venueId, eventId, status, start: startsAt, end: endsAt, reviewBlockId });
+  }
+
+  /** create_booking_request for a new event on startsAt-endsAt at venueId. */
+  async function requestFor(venueId, startsAt, endsAt) {
+    const eventId = await makeEvent(startsAt, endsAt);
+    const row = await one(
+      'select create_booking_request($1, $2, $3, null, null, $4::jsonb, false, $5) as result',
+      [eventId, venueId, coordinator, JSON.stringify(SUITABLE), 150],
+    );
+    return { eventId, result: row.result };
+  }
+
+  async function fixtureA(setup = 30, turnaround = 45) {
+    const venueId = await makeVenue(setup, turnaround);
+    const bookingId = await makeBooking(venueId, 'approved', at('10:00'), at('12:00'));
+    return { venueId, bookingId };
+  }
+
+  const ids = (result) => (result.conflicts ?? []).map((c) => c.booking_id ?? c.block_id);
+
+  beforeAll(async () => {
+    db = await createSchemaDb();
+    organiser = await seedUser(db, { email: 'o@x' });
+    coordinator = await seedUser(db, { email: 'c1@x' });
+  }, 60_000);
+
+  afterAll(async () => {
+    await db?.close();
+  });
+
+  describe('AC4/AC5: both periods padded, touching is clear', () => {
+    it('SCRUM484_AC4_booking_request_worked_example_1314_refused_1315_created', async () => {
+      const { venueId, bookingId } = await fixtureA();
+
+      const eb = await requestFor(venueId, at('13:14'), at('14:00'));
+      const ec = await requestFor(venueId, at('13:15'), at('14:00'));
+
+      expect(eb.result.outcome).toBe('conflict');
+      expect(ids(eb.result)).toEqual([bookingId]);
+      expect(ec.result.outcome).toBe('created');
+      expect(ec.result.booking.status).toBe('pending');
+      expect(ec.result.booking.venue_id).toBe(venueId);
+    });
+
+    it('SCRUM484_AC5_booking_request_touching_setup_start_is_created', async () => {
+      const { venueId } = await fixtureA();
+
+      // 07:30-08:45 occupies 07:00-09:30, touching A's 09:30.
+      const { result } = await requestFor(venueId, at('07:30'), at('08:45'));
+
+      expect(result.outcome).toBe('created');
+    });
+
+    it('SCRUM484_AC5_booking_request_one_minute_into_setup_conflicts', async () => {
+      const { venueId, bookingId } = await fixtureA();
+
+      const { result } = await requestFor(venueId, at('07:30'), at('08:46'));
+
+      expect(result.outcome).toBe('conflict');
+      expect(ids(result)).toEqual([bookingId]);
+    });
+
+    it('SCRUM484_AC5_booking_request_at_zero_minutes_uses_the_plain_edge', async () => {
+      const { venueId, bookingId } = await fixtureA(0, 0);
+
+      const clear = await requestFor(venueId, at('12:00'), at('13:00'));
+      const clash = await requestFor(venueId, at('11:59'), at('13:00'));
+
+      expect(clear.result.outcome).toBe('created');
+      expect(clash.result.outcome).toBe('conflict');
+      expect(ids(clash.result)).toEqual([bookingId]);
+    });
+  });
+
+  describe('decision 2: which bookings occupy', () => {
+    it('SCRUM484_AC4_booking_request_counts_flagged_bookings', async () => {
+      const venueId = await makeVenue(30, 45);
+      const flaggedId = await makeBooking(venueId, 'flagged_for_review', at('10:00'), at('12:00'));
+
+      const { result } = await requestFor(venueId, at('13:00'), at('14:00'));
+
+      expect(result.outcome).toBe('conflict');
+      expect(ids(result)).toEqual([flaggedId]);
+      expect(result.conflicts[0].kind).toBe('booking');
+    });
+
+    it('SCRUM484_AC4_booking_request_ignores_pending_and_cancelled_bookings', async () => {
+      const venueId = await makeVenue(30, 45);
+      await makeBooking(venueId, 'pending', at('10:00'), at('12:00'));
+      await makeBooking(venueId, 'cancelled', at('10:00'), at('12:00'));
+
+      const { result } = await requestFor(venueId, at('11:00'), at('11:30'));
+
+      expect(result.outcome).toBe('created');
+    });
+  });
+
+  describe('blocks stay raw, but the request own padding counts', () => {
+    it('SCRUM484_AC4_booking_request_setup_reaching_into_a_block_conflicts', async () => {
+      const venueId = await makeVenue(30, 45);
+      const blockId = await makeBlock(venueId, at('13:00'), at('14:00'));
+
+      // 14:29 starts setting up at 13:59, a minute inside the block.
+      const clash = await requestFor(venueId, at('14:29'), at('15:00'));
+      // 14:30 starts setting up at 14:00, exactly when the block ends.
+      const clear = await requestFor(venueId, at('14:30'), at('15:00'));
+
+      expect(clash.result.outcome).toBe('conflict');
+      expect(ids(clash.result)).toEqual([blockId]);
+      expect(clash.result.conflicts[0].kind).toBe('block');
+      expect(clear.result.outcome).toBe('created');
+    });
+
+    it('SCRUM484_AC4_booking_request_turnaround_reaching_into_a_block_conflicts', async () => {
+      const venueId = await makeVenue(30, 45);
+      const blockId = await makeBlock(venueId, at('13:00'), at('14:00'));
+
+      // 12:15 + 45 = 13:00 touches; 12:16 + 45 = 13:01 overlaps.
+      const clear = await requestFor(venueId, at('11:00'), at('12:15'));
+      const clash = await requestFor(venueId, at('11:00'), at('12:16'));
+
+      expect(clear.result.outcome).toBe('created');
+      expect(clash.result.outcome).toBe('conflict');
+      expect(ids(clash.result)).toEqual([blockId]);
+    });
+
+    it('SCRUM484_AC4_booking_request_ignores_a_removed_block', async () => {
+      const venueId = await makeVenue(30, 45);
+      await makeBlock(venueId, at('13:00'), at('14:00'), true);
+
+      const { result } = await requestFor(venueId, at('13:00'), at('14:00'));
+
+      expect(result.outcome).toBe('created');
+    });
+  });
+
+  describe('AC7: conflict items carry the occupied period', () => {
+    it('SCRUM484_AC7_booking_request_conflict_items_carry_the_four_occupied_fields', async () => {
+      const { venueId, bookingId } = await fixtureA();
+      const blockId = await makeBlock(venueId, at('13:00'), at('14:00'));
+
+      // 12:30-13:30 occupies 12:00-14:15, which meets A's 09:30-12:45 and
+      // the block 13:00-14:00.
+      const { result } = await requestFor(venueId, at('12:30'), at('13:30'));
+
+      expect(result.outcome).toBe('conflict');
+      // 030's order is kept: blocks first, then bookings.
+      expect(result.conflicts.map((c) => c.kind)).toEqual(['block', 'booking']);
+      expect(ids(result)).toEqual([blockId, bookingId]);
+
+      const [block, booking] = result.conflicts;
+      for (const item of result.conflicts) {
+        expect(Object.keys(item)).toEqual(expect.arrayContaining(OCCUPIED_KEYS));
+      }
+
+      // The booking: its own period, and its occupied period padded 30/45.
+      expect(ms(booking.starts_at)).toBe(ms(at('10:00')));
+      expect(ms(booking.ends_at)).toBe(ms(at('12:00')));
+      expect(ms(booking.occupied_starts_at)).toBe(ms(at('09:30')));
+      expect(ms(booking.occupied_ends_at)).toBe(ms(at('12:45')));
+      expect(booking.setup_minutes).toBe(30);
+      expect(booking.turnaround_minutes).toBe(45);
+
+      // The block: never padded, so occupied equals its own period; the
+      // minutes are the venue's, for the request's own padding.
+      expect(ms(block.occupied_starts_at)).toBe(ms(at('13:00')));
+      expect(ms(block.occupied_ends_at)).toBe(ms(at('14:00')));
+      expect(ms(block.starts_at)).toBe(ms(at('13:00')));
+      expect(ms(block.ends_at)).toBe(ms(at('14:00')));
+      expect(block.setup_minutes).toBe(30);
+      expect(block.turnaround_minutes).toBe(45);
+    });
+
+    it('SCRUM484_AC7_booking_request_conflict_writes_nothing', async () => {
+      const { venueId } = await fixtureA();
+
+      const { eventId, result } = await requestFor(venueId, at('13:14'), at('14:00'));
+
+      expect(result.outcome).toBe('conflict');
+      const row = await one('select count(*)::int as n from bookings where event_request_id = $1', [eventId]);
+      expect(row.n).toBe(0);
+    });
+  });
+
+  describe('SCRUM-491: another event\'s active hold conflicts like a booking', () => {
+    it('SCRUM491_AC5_booking_request_over_another_events_hold_conflicts_with_its_period', async () => {
+      const venueId = await makeVenue(30, 45);
+      const holderId = await makeEvent(at('10:00'), at('12:00'));
+      const holdId = (
+        await one(
+          `insert into venue_holds (event_request_id, venue_id, placed_by, expires_at)
+           values ($1, $2, $3, now() + interval '1 hour') returning id`,
+          [holderId, venueId, coordinator],
+        )
+      ).id;
+
+      const clash = await requestFor(venueId, at('13:14'), at('14:00'));
+      const clear = await requestFor(venueId, at('13:15'), at('14:00'));
+
+      expect(clash.result.outcome).toBe('conflict');
+      expect(clash.result.conflicts).toHaveLength(1);
+      const [hold] = clash.result.conflicts;
+      expect(hold.kind).toBe('hold');
+      expect(hold.hold_id).toBe(holdId);
+      expect(hold.event_request_id).toBe(holderId);
+      expect(ms(hold.occupied_starts_at)).toBe(ms(at('09:30')));
+      expect(ms(hold.occupied_ends_at)).toBe(ms(at('12:45')));
+      expect(Object.keys(hold)).toEqual(expect.arrayContaining(OCCUPIED_KEYS));
+      expect(clear.result.outcome).toBe('created');
+    });
+  });
+
+  // SCRUM-188 AC7 (SCRUM-193/194): the request-time result at the latest
+  // definition of create_booking_request (051, which keeps 040's storing of
+  // it), which createBookingRequestMigration (stopping at 030) does not reach,
+  // with a full result as the service builds it -- six criteria and `checked`.
+  describe('SCRUM-188 AC7: the suitability result is stored with the request', () => {
+    const CHECKED = {
+      startsAt: at('10:00'),
+      endsAt: at('12:00'),
+      expectedAttendance: 150,
+      layout: 'theatre',
+      accessibility: ['wheelchair_access'],
+      facilities: [],
+    };
+    const UNSUITABLE_FULL = {
+      suitable: false,
+      criteria: [
+        { criterion: 'Capacity', met: false, detail: 'Capacity 80 < expected attendance 150' },
+        { criterion: 'Operating hours', met: true, detail: 'Event runs 10:00–12:00 on Wednesday; venue open 08:00–22:00' },
+        { criterion: 'Layout', met: true, detail: 'Layout theatre offered', layout: 'theatre', offers: ['theatre'] },
+        { criterion: 'Accessibility', met: true, detail: 'All 1 requested provided', missing: [], requested: ['wheelchair_access'] },
+        { criterion: 'Facilities', met: true, detail: 'None requested', missing: [], requested: [] },
+        { criterion: 'Availability', met: true, detail: 'Free 09:30–12:45 (incl. 30 min setup, 45 min turnaround)', conflicts: [] },
+      ],
+      checked: CHECKED,
+    };
+
+    const request = async (eventId, venueId, confirm) =>
+      (
+        await one(
+          'select create_booking_request($1, $2, $3, null, null, $4::jsonb, $5, $6) as result',
+          [eventId, venueId, coordinator, JSON.stringify(UNSUITABLE_FULL), confirm, 150],
+        )
+      ).result;
+
+    it('SCRUM188_AC7_the_latest_create_booking_request_stores_checked_and_the_override', async () => {
+      const venueId = await makeVenue();
+      const eventId = await makeEvent(at('10:00'), at('12:00'));
+
+      const result = await request(eventId, venueId, true);
+
+      expect(result.outcome).toBe('created');
+      const row = await one(
+        'select status, suitability_result, suitability_overridden from bookings where id = $1',
+        [result.booking.id],
+      );
+      expect(row.status).toBe('pending');
+      expect(row.suitability_result).toEqual(UNSUITABLE_FULL);
+      expect(row.suitability_overridden).toBe(true);
+
+      // B-AC7-03: what Venue Staff are then shown from that stored row.
+      const record = toSuitabilityRecord(row);
+      expect(record.overriddenCriteria).toEqual(['Capacity']);
+      expect(record.suitabilityOverridden).toBe(true);
+      expect(record.suitability.checked).toEqual(CHECKED);
+    });
+
+    it('SCRUM188_AC7_without_confirmation_the_latest_definition_writes_nothing', async () => {
+      const venueId = await makeVenue();
+      const eventId = await makeEvent(at('10:00'), at('12:00'));
+
+      const result = await request(eventId, venueId, false);
+
+      expect(result.outcome).toBe('suitability_confirmation_required');
+      const { n } = await one('select count(*)::int as n from bookings where event_request_id = $1', [eventId]);
+      expect(n).toBe(0);
+    });
+  });
+});

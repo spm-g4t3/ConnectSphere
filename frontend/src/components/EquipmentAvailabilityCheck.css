@@ -1,0 +1,63 @@
+/* SCRUM-70. The availability screen's own styling.
+ *
+ * Every selector starts from .availability-check so it outranks the app's
+ * `.dashboard h2` and `.dashboard section` rules without !important. A bare
+ * .availability-result--partially is weaker than `.dashboard section` and
+ * loses, which left the result box untinted and its heading the default teal.
+ *
+ * Fully available is success, Partially available is warning and Unavailable
+ * is danger, in the border, the tint, the heading and the final "Available"
+ * figure, so the result reads at a glance. The label is always written out as
+ * well, so the colour is never the only signal. */
+
+.availability-check form { display: grid; gap: 14px; max-width: 520px; }
+.availability-check .availability-check__field { display: grid; gap: var(--space-1); min-width: 0; }
+/* max-width: a long type name would otherwise widen the select past a phone screen. */
+.availability-check .availability-check__field select, .availability-check .availability-check__field input { font: inherit; max-width: 100%; min-width: 0; padding: var(--space-2); }
+.availability-check .availability-check__hint { color: var(--color-muted); font-size: var(--font-size-sm); margin: 0; }
+.availability-check .availability-check__errors { color: var(--color-danger); margin: 0; }
+.availability-check .availability-check__errors li { border-top: 0; padding: 2px 0; }
+
+/* ---- the result box ---- */
+.availability-check .availability-result { border-left: 6px solid var(--color-line); border-radius: var(--radius-card); margin-top: 22px; padding: 14px 18px; }
+.availability-check .availability-result h2 { font-size: 1.35rem; margin: 0 0 var(--space-1); }
+.availability-check .availability-result p { margin: 0; }
+
+.availability-check .availability-result--fully { background: var(--color-success-soft); border-left-color: var(--color-success); }
+
+.availability-check .availability-result--partially { background: var(--color-warning-soft); border-left-color: var(--color-warning); }
+.availability-check .availability-result--partially h2 { color: var(--color-warning); }
+.availability-check .availability-result--partially .availability-breakdown tr:last-child th,
+.availability-check .availability-result--partially .availability-breakdown tr:last-child td { color: var(--color-warning); }
+
+.availability-check .availability-result--unavailable { background: var(--color-danger-soft); border-left-color: var(--color-danger); }
+.availability-check .availability-result--unavailable h2 { color: var(--color-danger); }
+.availability-check .availability-result--unavailable .availability-breakdown tr:last-child th,
+.availability-check .availability-result--unavailable .availability-breakdown tr:last-child td { color: var(--color-danger); }
+
+/* ---- the breakdown and the reservations ---- */
+.availability-check h3 { font-size: var(--font-size-base); margin: 22px 0 var(--space-2); }
+.availability-check .availability-breakdown, .availability-check .availability-reservations { border-collapse: collapse; width: 100%; }
+.availability-check .availability-breakdown { max-width: 520px; }
+.availability-check .availability-breakdown th, .availability-check .availability-breakdown td,
+.availability-check .availability-reservations th, .availability-check .availability-reservations td { border-top: 1px solid var(--color-line); padding: 9px 10px; text-align: left; }
+.availability-check .availability-breakdown td { font-variant-numeric: tabular-nums; text-align: right; }
+.availability-check .availability-breakdown tr:last-child th, .availability-check .availability-breakdown tr:last-child td { color: var(--color-accent-dark); font-weight: 800; }
+.availability-check .availability-reservations thead th { border-bottom: 2px solid var(--color-line); color: var(--color-muted); font-size: var(--font-size-xs); letter-spacing: 0.05em; text-transform: uppercase; }
+.availability-check .availability-reservations td.availability-reservations__number { font-variant-numeric: tabular-nums; text-align: right; }
+
+/* The empty state's catalogue link is drawn as a primary button. */
+.availability-check a.ui-button { display: inline-block; text-decoration: none; }
+
+/* One clear ring on every control, the catalogue link included, and on the heading
+   that takes focus after Try again. Names can be one long word, so they wrap. */
+.availability-check :is(a, button, input, select, [tabindex="-1"]):focus-visible { outline: 3px solid var(--color-accent); outline-offset: 2px; }
+.availability-check { overflow-wrap: anywhere; }
+/* `anywhere` also lets a table column shrink to one letter (Quantity became QUANTI/TY, 10 became 1/0, the badges broke
+   letter by letter). In the tables only the event name may break mid-word; every other cell wraps at spaces. */
+.availability-check :is(.availability-breakdown, .availability-reservations) :is(th, td) { overflow-wrap: break-word; }
+.availability-check .availability-reservations td:first-child { min-width: 8em; overflow-wrap: anywhere; }
+.availability-check .availability-reservations td:nth-child(2) { min-width: 11em; }
+/* Four columns do not fit a phone, so the table scrolls sideways inside its card and the page does not. */
+.availability-check .availability-reservations__scroll { overflow-x: auto; }
+.availability-check .availability-reservations__scroll:focus-visible { outline: 3px solid var(--color-accent); outline-offset: 2px; }

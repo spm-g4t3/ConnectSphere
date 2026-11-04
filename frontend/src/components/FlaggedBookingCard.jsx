@@ -1,0 +1,176 @@
+// FlaggedBookingCard.jsx
+//
+// One booking in Venue Staff's flagged list. Collapsed, a single row (event,
+// venue, period, why it was flagged); expanded, the detail and the reinstate
+// and cancel forms.
+//
+// The two forms hold their own drafts. Whether it is expanded, whether a
+// resolution is in flight and what went wrong belong to FlaggedBookings, which
+// owns the list and refetches it after every resolution.
+
+import BookingSuitabilitySummary from "./BookingSuitabilitySummary";
+import FlaggedBookingFlagDetail from "./FlaggedBookingFlagDetail";
+import FlaggedBookingReasonForm from "./FlaggedBookingReasonForm";
+import ErrorNotice from "./ui/ErrorNotice";
+import { formatDateTime } from "../services/displayFormat";
+import { formatVenuePeriod } from "../services/datetimeFormat";
+import { conflictText } from "../services/flaggedBookingErrors";
+import {
+  bookingStatusText,
+  capitalise,
+  flagReasons,
+  movesToEventPeriod,
+  newTimesSuitabilityConcern,
+  replacementRequests,
+  venueText,
+} from "../services/flaggedBookingDisplay";
+
+export default function FlaggedBookingCard({
+  item,
+  expanded,
+  onToggle,
+  toggleRef,
+  busy,
+  resolving,
+  error,
+  conflicts,
+  onReinstate,
+  onCancel,
+}) {
+  const reasons = flagReasons(item);
+  const clashes = Array.isArray(conflicts) ? conflicts : [];
+  const replacements = replacementRequests(item);
+  const eventName = item.eventName || "Unnamed event";
+  const venueName = item.venueName || "Unknown venue";
+  const regionId = `flagged-booking-${item.id}`;
+  // A safety flag is never reinstated, so only a reinstatable booking moves.
+  const moves = item.reinstatable && movesToEventPeriod(item);
+  // Re-run by the server at the event's new times; null when it could not run.
+  const newTimesSuitability = moves ? item.suitabilityAtNewTimes ?? null : null;
+  const newTimesConcern = newTimesSuitabilityConcern(newTimesSuitability);
+
+  return (
+    <li className="pending-bookings__card">
+      {/* Locked while any resolution is in flight, so the resolving card stays
+          open and a refusal shown inside it is not lost to another card.
+          A native button: it is a disclosure row, not an action, so Button would restyle it. */}
+      <button
+        type="button"
+        ref={toggleRef}
+        className="pending-bookings__toggle"
+        aria-expanded={expanded}
+        aria-controls={regionId}
+        disabled={busy}
+        onClick={() => onToggle(item.id)}
+      >
+        <strong>{eventName}</strong>
+        <span>{venueName}</span>
+        <span>{formatVenuePeriod(item.startsAt, item.endsAt)}</span>
+        <span>{reasons.map((r) => r.text).join("; ")}</span>
+      </button>
+
+      {expanded && (
+        <div id={regionId} role="region" aria-label={`${eventName} at ${venueName}`} className="pending-bookings__detail">
+          <dl>
+            <dt>Event status</dt>
+            <dd>{bookingStatusText(item.eventStatus)}</dd>
+            <dt>Venue</dt>
+            <dd>{venueText(item)}</dd>
+            <dt>Booking period</dt>
+            <dd>
+              {formatVenuePeriod(item.startsAt, item.endsAt)}
+              {moves && (
+                <span className="pending-bookings__breakdown">
+                  Moves to {formatVenuePeriod(item.eventStartsAt, item.eventEndsAt)}
+                </span>
+              )}
+            </dd>
+            <dt>Event&apos;s current period</dt>
+            <dd>{formatVenuePeriod(item.eventStartsAt, item.eventEndsAt)}</dd>
+            <dt>Flagged</dt>
+            <dd>{formatDateTime(item.flaggedAt, "at an unknown time")}</dd>
+          </dl>
+
+          <FlaggedBookingFlagDetail item={item} headingLevel={3} />
+
+          {newTimesSuitability && (
+            <BookingSuitabilitySummary
+              suitability={newTimesSuitability}
+              suitabilityOverridden={false}
+              overriddenCriteria={[]}
+              label="Suitability at the event's new times"
+            />
+          )}
+          {moves && !newTimesSuitability && (
+            <p className="pending-bookings__event-status">
+              This booking&apos;s suitability was checked for its original times, not the event&apos;s new times.
+            </p>
+          )}
+
+          {/* Both resolutions are reason forms, so submitting again is the retry. */}
+          {error && <ErrorNotice message={error} />}
+          {clashes.length > 0 && (
+            <>
+              <h3>What is in the way</h3>
+              <ul className="pending-bookings__overlapping">
+                {clashes.map((clash, i) => (
+                  <li key={`${clash.kind}-${i}`}>
+                    <strong>{capitalise(conflictText(clash))}</strong>
+                    <span>Occupies {formatVenuePeriod(clash.occupiedStartsAt, clash.occupiedEndsAt)}</span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+
+          {item.reinstatable && replacements.length > 0 && (
+            <p className="pending-bookings__event-status">
+              Reinstating keeps the replacement request open; approve or reject it separately under Pending
+              booking requests.
+            </p>
+          )}
+          {/* Suitability is advisory, so this warns but never withholds approval. */}
+          {newTimesConcern === "advisory" && (
+            <p className="pending-bookings__event-status">
+              This venue doesn&apos;t meet the event&apos;s needs at the new times. Suitability is advisory, so the
+              booking can still be approved.
+            </p>
+          )}
+          {/* A clash is a refusal, not advice: the server answers BOOKING_PERIOD_CONFLICT. */}
+          {newTimesConcern === "unavailable" && (
+            <p className="pending-bookings__event-status">
+              This venue isn&apos;t free at the event&apos;s new times, so approving at the new times will be refused
+              while it is taken.
+            </p>
+          )}
+          {item.reinstatable ? (
+            <FlaggedBookingReasonForm
+              id={`${regionId}-reinstate`}
+              label={moves ? "Reason for approving (required)" : "Reason for reinstating (required)"}
+              verb={moves ? "approving" : "reinstating"}
+              busy={busy}
+              buttonLabel={moves ? "Approve at new times" : "Reinstate"}
+              sendingLabel={resolving === "reinstate" ? (moves ? "Approving..." : "Reinstating...") : null}
+              onSubmit={(reason) => onReinstate(item, reason)}
+            />
+          ) : (
+            <p className="pending-bookings__event-status">
+              Resolve by cancelling; a safety flag can&apos;t be reinstated.
+            </p>
+          )}
+
+          <FlaggedBookingReasonForm
+            id={`${regionId}-cancel`}
+            label="Reason for cancelling (required)"
+            verb="cancelling"
+            busy={busy}
+            buttonLabel="Cancel booking"
+            buttonVariant="danger"
+            sendingLabel={resolving === "cancel" ? "Cancelling..." : null}
+            onSubmit={(reason) => onCancel(item, reason)}
+          />
+        </div>
+      )}
+    </li>
+  );
+}

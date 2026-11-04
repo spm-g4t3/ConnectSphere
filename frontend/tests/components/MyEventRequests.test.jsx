@@ -1,0 +1,634 @@
+// MyEventRequests.test.jsx
+//
+// SCRUM-133, for SCRUM-19 AC10: once a request is decided, the Organiser sees
+// the outcome, the reason or note, and the coordinator who decided, on the
+// request's own row.
+//
+// Only the decision block is covered here. The rest of this screen (create,
+// edit, respond, request a change) predates the frontend test setup and is
+// out of this ticket's scope.
+//
+// The services and the signed-in user are mocked, so nothing touches the
+// network. As in CoordinatorRequestDetail.test.jsx, every eventRequestService
+// function the screen's component tree reaches when modules load is on the
+// mock, because a vi.mock factory is strict.
+
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { act, render, screen, within, fireEvent, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { MemoryRouter, useLocation } from "react-router-dom";
+
+import MyEventRequests from "../../src/components/MyEventRequests.jsx";
+import { useAuth } from "../../src/auth/AuthContext";
+import {
+  getAssignmentHistory,
+  getEventClarificationHistory,
+  getMyEventRequests,
+  getConfirmedArrangements,
+} from "../../src/services/eventRequestService";
+
+vi.mock("../../src/auth/AuthContext", () => ({
+  useAuth: vi.fn(),
+}));
+
+vi.mock("../../src/services/eventRequestService", () => ({
+  createEventRequest: vi.fn(),
+  getAssignmentHistory: vi.fn(),
+  getAssignmentHistoryForReview: vi.fn(),
+  getMyEventRequests: vi.fn(),
+  getConfirmedArrangements: vi.fn(),
+  getEventClarificationHistory: vi.fn(),
+  // SCRUM-347: a rejected row reads its earlier decisions.
+  getEventDecisionHistory: vi.fn(() => Promise.resolve([])),
+  getEventCancellationImpact: vi.fn(),
+  cancelEventRequest: vi.fn(),
+  respondToEventClarification: vi.fn(),
+  submitEventRequest: vi.fn(),
+  updateEventRequest: vi.fn(),
+}));
+
+const ORGANISER = "11111111-1111-4111-8111-111111111111";
+const COORDINATOR = "44444444-4444-4444-8444-444444444444";
+
+function eventRequest(overrides = {}) {
+  return {
+    id: "22222222-2222-4222-8222-222222222222",
+    organiserId: ORGANISER,
+    eventName: "IS212 Industry Night",
+    purpose: "Connect students with industry.",
+    status: "submitted",
+    clarificationNote: null,
+    assignedCoordinatorId: COORDINATOR,
+    decision: null,
+    decisionNote: null,
+    decidedBy: null,
+    decidedAt: null,
+    statusDisplay: { status: "submitted", label: "Submitted", group: "AWAITING_REVIEW", description: "Waiting." },
+    ...overrides,
+  };
+}
+
+function renderList(requests) {
+  vi.mocked(getMyEventRequests).mockResolvedValue(requests);
+  return render(
+    <MemoryRouter>
+      <MyEventRequests />
+    </MemoryRouter>,
+  );
+}
+
+beforeEach(() => {
+  vi.mocked(useAuth).mockReset();
+  vi.mocked(useAuth).mockReturnValue({ user: { id: ORGANISER, role: "event_organiser" } });
+  vi.mocked(getMyEventRequests).mockReset();
+  vi.mocked(getConfirmedArrangements).mockReset();
+  vi.mocked(getAssignmentHistory).mockReset();
+  vi.mocked(getAssignmentHistory).mockResolvedValue([
+    { id: "h1", previousCoordinatorId: null, newCoordinatorId: COORDINATOR, newCoordinatorName: "Priya Nair", automatic: true },
+  ]);
+});
+
+
+describe("SCRUM363 confirmed arrangements on the organiser request screen", () => {
+  it.each(["draft", "approved", "safety_review", "safety_approved", "cancelled"])(
+    "SCRUM363_AC7_status_%s_does_not_present_previous_arrangements_as_confirmed", async (status) => {
+      renderList([eventRequest({ status })]);
+      await screen.findByText("IS212 Industry Night");
+      expect(screen.queryByText("Confirmed arrangements")).not.toBeInTheDocument();
+      expect(getConfirmedArrangements).not.toHaveBeenCalled();
+    },
+  );
+
+  it("SCRUM379_AC5_a_completed_event_offers_its_arrangements_and_the_status_Completed", async () => {
+    const completedDisplay = { status: "completed", label: "Completed", group: "COMPLETED", description: "The event has finished." };
+    vi.mocked(getConfirmedArrangements).mockResolvedValue({
+      eventRequestId: "22222222-2222-4222-8222-222222222222", status: "completed", statusDisplay: completedDisplay,
+      startsAt: "2026-11-01T16:00:00Z", endsAt: "2026-11-01T18:00:00Z",
+      venues: [{ bookingId: "b1", name: "Hall A", location: "Level 1" }],
+      equipment: [{ lineId: "l1", name: "Microphone", quantity: 2 }],
+    });
+    renderList([eventRequest({ status: "completed", statusDisplay: completedDisplay })]);
+    expect(await screen.findByText("The event has finished.")).toBeInTheDocument();
+    await userEvent.click(await screen.findByText("Confirmed arrangements"));
+    expect(await screen.findByText("Hall A — Level 1")).toBeInTheDocument();
+    expect(screen.getByText("Microphone: 2")).toBeInTheDocument();
+    expect(getConfirmedArrangements).toHaveBeenCalledWith("22222222-2222-4222-8222-222222222222");
+  });
+
+  it("SCRUM379_AC3_a_completed_event_offers_no_request_a_change_action", async () => {
+    const completedDisplay = { status: "completed", label: "Completed", group: "COMPLETED", description: "The event has finished." };
+    vi.mocked(getConfirmedArrangements).mockResolvedValue({ eventRequestId: "22222222-2222-4222-8222-222222222222", status: "completed", statusDisplay: completedDisplay, startsAt: null, endsAt: null, venues: [], equipment: [] });
+    renderList([eventRequest({ status: "completed", decision: "approved", statusDisplay: completedDisplay })]);
+
+    const item = (await screen.findByText("The event has finished.")).closest("li");
+    expect(within(item).queryByRole("button", { name: "Request a change" })).not.toBeInTheDocument();
+    expect(within(item).queryByRole("button", { name: "Continue editing" })).not.toBeInTheDocument();
+    expect(within(item).queryByRole("button", { name: "Revise and resubmit" })).not.toBeInTheDocument();
+    expect(within(item).queryByRole("button", { name: "Respond to clarification" })).not.toBeInTheDocument();
+  });
+
+  it.each(["confirmed", "approved"])("SCRUM379_AC3_a_%s_event_still_offers_request_a_change", async (status) => {
+    renderList([eventRequest({ status, decision: "approved", statusDisplay: { status, label: status, group: "APPROVED", description: `Event is ${status}.` } })]);
+
+    const item = (await screen.findByText(`Event is ${status}.`)).closest("li");
+    expect(within(item).getByRole("button", { name: "Request a change" })).toBeInTheDocument();
+  });
+
+  it("SCRUM363_AC7_normal_request_navigation_hides_planning_arrangements_and_loads_the_reconfirmed_records", async () => {
+    const record = eventRequest({ status: "confirmed", statusDisplay: { label: "Confirmed", group: "CONFIRMED", description: "Going ahead." } });
+    let current = record;
+    let detail = {
+      eventRequestId: record.id, status: "confirmed", statusDisplay: record.statusDisplay,
+      startsAt: "2026-11-01T16:00:00Z", endsAt: "2026-11-01T18:00:00Z",
+      venues: [{ bookingId: "b1", name: "Original venue", location: "Level 1" }],
+      equipment: [{ lineId: "l1", name: "Microphone", quantity: 2 }],
+    };
+    vi.mocked(getMyEventRequests).mockImplementation(async () => [current]);
+    vi.mocked(getConfirmedArrangements).mockImplementation(async () => detail);
+    render(<MemoryRouter><MyEventRequests /></MemoryRouter>);
+    await userEvent.click(await screen.findByText("Confirmed arrangements"));
+    expect(await screen.findByText("Original venue — Level 1")).toBeInTheDocument();
+    expect(screen.getByText("Microphone: 2")).toBeInTheDocument();
+
+    current = { ...record, status: "approved", statusDisplay: { label: "Planning", group: "APPROVED", description: "Planning again." } };
+    detail = { ...detail, status: "approved", statusDisplay: current.statusDisplay, venues: [], equipment: [] };
+    fireEvent.focus(window);
+    expect(await screen.findByText("Planning again.")).toBeInTheDocument();
+    expect(screen.queryByText("Confirmed arrangements")).not.toBeInTheDocument();
+    expect(screen.queryByText("Original venue — Level 1")).not.toBeInTheDocument();
+
+    current = { ...record };
+    detail = { ...detail, status: "confirmed", statusDisplay: record.statusDisplay,
+      startsAt: "2026-12-01T01:00:00Z", endsAt: "2026-12-01T03:00:00Z",
+      venues: [{ bookingId: "b2", name: "Replacement venue", location: "Level 2" }],
+      equipment: [{ lineId: "l2", name: "Microphone", quantity: 5 }],
+    };
+    fireEvent.focus(window);
+    await userEvent.click(await screen.findByText("Confirmed arrangements"));
+    expect(await screen.findByText("Replacement venue — Level 2")).toBeInTheDocument();
+    expect(screen.getByText("Microphone: 5")).toBeInTheDocument();
+    expect(screen.getByText("2026-12-01 09:00 – 11:00 (Singapore time)")).toBeInTheDocument();
+    expect(screen.queryByText("Original venue — Level 1")).not.toBeInTheDocument();
+  });
+});
+
+describe("SCRUM19_AC10 the Organiser's view of a decision", () => {
+  it("SCRUM478_AC1_links_a_confirmed_event_to_its_registration_list", async () => {
+    renderList([eventRequest({ status: "confirmed" })]);
+    const record = (await screen.findByText("IS212 Industry Night")).closest("li");
+    expect(within(record).getByRole("link", { name: "View registrations" }))
+      .toHaveAttribute("href", `/events/${eventRequest().id}/registrations`);
+  });
+
+  it("SCRUM478_AC6_offers_no_registration_list_for_a_draft", async () => {
+    renderList([eventRequest({ status: "draft" })]);
+    const record = (await screen.findByText("IS212 Industry Night")).closest("li");
+    expect(within(record).queryByRole("link", { name: "View registrations" })).not.toBeInTheDocument();
+  });
+
+  it("SCRUM494_AC6_links_an_event_to_its_registration_settings_page", async () => {
+    renderList([eventRequest({ status: "approved" })]);
+
+    const record = (await screen.findByText("IS212 Industry Night")).closest("li");
+    expect(within(record).getByRole("link", { name: "Registration settings" }))
+      .toHaveAttribute("href", "/events/22222222-2222-4222-8222-222222222222/registration");
+  });
+
+  it("shows the cancellation reason and recorded date without offering further changes", async () => {
+    renderList([
+      eventRequest({
+        status: "cancelled",
+        cancellationReason: "Organiser withdrew",
+        cancelledAt: "2026-06-01T09:00:00Z",
+        statusDisplay: { status: "cancelled", label: "Cancelled", group: "CANCELLED", description: "This event will not go ahead." },
+      }),
+    ]);
+
+    const row = await screen.findByText("IS212 Industry Night");
+    const item = row.closest("li");
+    expect(within(item).getByText("Event cancelled")).toBeInTheDocument();
+    expect(within(item).getByText("Organiser withdrew")).toBeInTheDocument();
+    expect(within(item).getByText("1 Jun 2026, 5:00 pm")).toBeInTheDocument();
+    expect(within(item).queryByRole("button", { name: "Request a change" })).not.toBeInTheDocument();
+  });
+
+  it("SCRUM19_AC10_the_organiser_sees_the_outcome_the_reason_and_who_decided", async () => {
+    renderList([
+      eventRequest({
+        status: "rejected",
+        decision: "rejected",
+        decisionNote: "The venue is unavailable that week.",
+        decidedBy: COORDINATOR,
+        decidedAt: "2026-01-15T09:00:00+08:00",
+        statusDisplay: { status: "rejected", label: "Rejected", group: "REJECTED", description: "See the Coordinator notes for the reason." },
+      }),
+    ]);
+
+    const record = (await screen.findByText("Outcome")).closest("dl");
+    expect(within(record).getByText("Rejected")).toBeInTheDocument();
+    expect(within(record).getByText("Reason")).toBeInTheDocument();
+    expect(within(record).getByText("The venue is unavailable that week.")).toBeInTheDocument();
+    // The name comes from the Organiser's assignment history, matched on
+    // decidedBy; the event itself carries only the id.
+    expect(await within(record).findByText("Priya Nair")).toBeInTheDocument();
+    expect(getAssignmentHistory).toHaveBeenCalledWith("22222222-2222-4222-8222-222222222222");
+    expect(within(record).getByText("15 Jan 2026, 9:00 am")).toBeInTheDocument();
+  });
+
+  it("SCRUM19_AC10_an_approval_shows_its_note_and_who_decided", async () => {
+    renderList([
+      eventRequest({
+        status: "approved",
+        decision: "approved",
+        decisionNote: "Approved as submitted.",
+        decidedBy: COORDINATOR,
+        decidedAt: "2026-01-15T09:00:00+08:00",
+        statusDisplay: { status: "approved", label: "Approved", group: "APPROVED", description: "Accepted." },
+      }),
+    ]);
+
+    const record = (await screen.findByText("Outcome")).closest("dl");
+    expect(within(record).getByText("Note")).toBeInTheDocument();
+    expect(within(record).getByText("Approved as submitted.")).toBeInTheDocument();
+    expect(await within(record).findByText("Priya Nair")).toBeInTheDocument();
+  });
+
+  it("SCRUM19_AC10_an_undecided_request_shows_no_outcome_and_reads_no_history", async () => {
+    // Nothing decided, nothing to show, and no request made for a name: the
+    // history is read only for decided rows.
+    renderList([eventRequest()]);
+
+    expect(await screen.findByText("IS212 Industry Night")).toBeInTheDocument();
+    expect(screen.queryByText("Outcome")).not.toBeInTheDocument();
+    expect(getAssignmentHistory).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM19_AC10_a_decider_missing_from_the_history_is_named_honestly", async () => {
+    // Should not happen (the decider must have held the event), but if the
+    // history does not name them the line says so rather than showing an id.
+    vi.mocked(getAssignmentHistory).mockResolvedValue([]);
+    renderList([
+      eventRequest({
+        status: "rejected",
+        decision: "rejected",
+        decisionNote: "No.",
+        decidedBy: COORDINATOR,
+        decidedAt: "2026-01-15T09:00:00+08:00",
+      }),
+    ]);
+
+    const record = (await screen.findByText("Outcome")).closest("dl");
+    expect(await within(record).findByText("A coordinator with no name on record")).toBeInTheDocument();
+    expect(within(record).queryByText(COORDINATOR)).not.toBeInTheDocument();
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-486 (SCRUM-520), AC1-05: the Organiser can tell "waiting to be
+// assigned" from "assigned, waiting for review", on the row itself.
+// ---------------------------------------------------------------------------
+describe("SCRUM486_AC1 where a submitted request stands with its coordinator", () => {
+  const WAITING_FOR_LEAD = "Waiting for the Event Coordinator Lead to assign a coordinator to your request.";
+  // The unnamed form, for a row whose coordinator has no name on record (these
+  // fixtures carry no assignedCoordinatorName). Was "A coordinator has been
+  // assigned. Your request is ..." until the line gained the coordinator's
+  // name (AC1-06), when the sentence became "<who> has been assigned; your
+  // request is ...". Right when written: the list carried no name then.
+  const WAITING_FOR_REVIEW = "A coordinator has been assigned; your request is waiting for them to start the review.";
+
+  /** The request's own list item, found by its name. */
+  const rowOf = async (name) => (await screen.findByText(name)).closest("li");
+
+  it("SCRUM486_AC1_a_submitted_request_with_no_coordinator_says_it_is_waiting_for_the_lead", async () => {
+    // AC1-05. On the row, not inside a collapsed section: nothing is opened.
+    renderList([eventRequest({ assignedCoordinatorId: null })]);
+
+    const line = await screen.findByText(WAITING_FOR_LEAD);
+    expect(line.closest("details")).toBeNull();
+    expect(screen.queryByText(WAITING_FOR_REVIEW)).not.toBeInTheDocument();
+  });
+
+  it("SCRUM486_AC1_a_submitted_request_with_a_coordinator_says_it_is_waiting_for_review", async () => {
+    renderList([eventRequest({ assignedCoordinatorId: COORDINATOR })]);
+
+    const line = await screen.findByText(WAITING_FOR_REVIEW);
+    expect(line.closest("details")).toBeNull();
+    expect(screen.queryByText(WAITING_FOR_LEAD)).not.toBeInTheDocument();
+  });
+
+  it("SCRUM486_AC1_a_submitted_request_names_the_coordinator_it_was_assigned_to", async () => {
+    // AC1-06. The name comes with the list (listEventRequestsForOrganiser
+    // reads it in one profiles read), so the row says who without a click.
+    renderList([eventRequest({ assignedCoordinatorId: COORDINATOR, assignedCoordinatorName: "Priya Nair" })]);
+
+    const line = await screen.findByText(
+      "Priya Nair has been assigned; your request is waiting for them to start the review.",
+    );
+    expect(line.closest("details")).toBeNull();
+    expect(screen.queryByText(WAITING_FOR_REVIEW)).not.toBeInTheDocument();
+    expect(screen.queryByText(WAITING_FOR_LEAD)).not.toBeInTheDocument();
+  });
+
+  it("SCRUM486_AC1_the_two_are_visibly_different_on_rows_that_share_a_status", async () => {
+    // Same status, same badge, same shared description from the API: the
+    // line is the only difference, and it is there on both rows.
+    renderList([
+      eventRequest({ id: "a", eventName: "Unassigned Night", assignedCoordinatorId: null }),
+      eventRequest({ id: "b", eventName: "Assigned Night", assignedCoordinatorId: COORDINATOR }),
+    ]);
+
+    const unassigned = await rowOf("Unassigned Night");
+    const assigned = await rowOf("Assigned Night");
+    expect(within(unassigned).getByText("Submitted")).toBeInTheDocument();
+    expect(within(assigned).getByText("Submitted")).toBeInTheDocument();
+    expect(within(unassigned).getByText(WAITING_FOR_LEAD)).toBeInTheDocument();
+    expect(within(assigned).getByText(WAITING_FOR_REVIEW)).toBeInTheDocument();
+    expect(within(unassigned).queryByText(WAITING_FOR_REVIEW)).not.toBeInTheDocument();
+    expect(within(assigned).queryByText(WAITING_FOR_LEAD)).not.toBeInTheDocument();
+  });
+
+  it("SCRUM486_AC1_a_draft_is_unchanged", async () => {
+    // No line, and the status description from the API as it was.
+    renderList([
+      eventRequest({
+        status: "draft",
+        assignedCoordinatorId: null,
+        statusDisplay: { status: "draft", label: "Draft", group: "DRAFT", description: "Not yet submitted to ConnectSphere. You can keep editing it." },
+      }),
+    ]);
+
+    const row = await rowOf("IS212 Industry Night");
+    expect(within(row).getByText("Not yet submitted to ConnectSphere. You can keep editing it.")).toBeInTheDocument();
+    expect(within(row).queryByText(WAITING_FOR_LEAD)).not.toBeInTheDocument();
+    expect(within(row).queryByText(WAITING_FOR_REVIEW)).not.toBeInTheDocument();
+  });
+
+  it("SCRUM486_AC1_past_submission_the_status_speaks_for_itself", async () => {
+    renderList([
+      eventRequest({
+        status: "under_review",
+        statusDisplay: { status: "under_review", label: "Under review", group: "UNDER_REVIEW", description: "A Coordinator is assessing your request." },
+      }),
+    ]);
+
+    const row = await rowOf("IS212 Industry Night");
+    expect(within(row).getByText("A Coordinator is assessing your request.")).toBeInTheDocument();
+    expect(within(row).queryByText(WAITING_FOR_LEAD)).not.toBeInTheDocument();
+    expect(within(row).queryByText(WAITING_FOR_REVIEW)).not.toBeInTheDocument();
+  });
+});
+
+
+describe("SCRUM488_AC5 the Organiser's list shows the safety statuses", () => {
+  // The words come from the server's statusDisplay (SCRUM-42). These are what
+  // it sends for each status, written out; the labels are provisional until
+  // SCRUM-549's decision is confirmed.
+  const SAFETY = [
+    ["safety_review", "Safety check", "UNDER_REVIEW", "ui-status-badge--info", "A Safety Officer is checking the arrangements for your event before it can be confirmed."],
+    ["safety_approved", "Safety approved", "APPROVED", "ui-status-badge--success", "The safety check is complete. Your Coordinator can now confirm your event."],
+  ];
+
+  const safetyEvent = (status, label, group, description, overrides = {}) =>
+    eventRequest({
+      status,
+      eventName: `Event in ${status}`,
+      decision: "approved",
+      decisionNote: null,
+      decidedBy: COORDINATOR,
+      decidedAt: "2026-01-15T09:00:00+08:00",
+      statusDisplay: { status, label, group, description },
+      ...overrides,
+    });
+
+  it.each(SAFETY)("SCRUM488_AC5_shows_%s_as_%s_with_its_badge_and_description", async (status, label, group, cssClass, description) => {
+    renderList([safetyEvent(status, label, group, description)]);
+
+    const item = (await screen.findByText(`Event in ${status}`)).closest("li");
+    expect(within(item).getByText(label)).toHaveClass("ui-status-badge", cssClass);
+    expect(within(item).getByText(description)).toBeInTheDocument();
+  });
+
+  it.each(SAFETY)("SCRUM488_AC5_never_shows_the_internal_name_or_an_unknown_status_for_%s", async (status, label, group, _cssClass, description) => {
+    const { container } = renderList([safetyEvent(status, label, group, description)]);
+
+    await screen.findByText(`Event in ${status}`);
+    const shown = container.textContent.replace(`Event in ${status}`, "");
+    expect(shown).not.toContain(status);
+    expect(shown).not.toMatch(/Unknown Status|Status Unavailable/);
+  });
+
+  it.each(SAFETY)("SCRUM488_AC5_keeps_the_approval_and_the_request_a_change_action_for_%s", async (status, label, group, _cssClass, description) => {
+    renderList([safetyEvent(status, label, group, description)]);
+
+    const item = (await screen.findByText(`Event in ${status}`)).closest("li");
+    expect(within(item).getByText("Decision")).toBeInTheDocument();
+    expect(await within(item).findByText("Approved")).toBeInTheDocument();
+    expect(within(item).getByRole("button", { name: "Request a change" })).toBeInTheDocument();
+    expect(within(item).queryByRole("button", { name: "Respond to clarification" })).not.toBeInTheDocument();
+    expect(within(item).queryByRole("button", { name: "Continue editing" })).not.toBeInTheDocument();
+  });
+
+  it("SCRUM488_AC5_labels_each_status_in_a_mixed_list_by_its_own_words", async () => {
+    renderList([
+      eventRequest({ id: "a", eventName: "A", statusDisplay: { status: "submitted", label: "Requested", group: "AWAITING_REVIEW", description: "Waiting." } }),
+      safetyEvent("safety_review", "Safety check", "UNDER_REVIEW", "Checking.", { id: "b", eventName: "B" }),
+      safetyEvent("safety_approved", "Safety approved", "APPROVED", "Done.", { id: "c", eventName: "C" }),
+      eventRequest({ id: "d", eventName: "D", status: "confirmed", statusDisplay: { status: "confirmed", label: "Confirmed", group: "CONFIRMED", description: "Going ahead." } }),
+    ]);
+
+    await screen.findByText("A");
+    const badge = (name) => within(screen.getByText(name).closest("li")).getByText(/^(Requested|Safety check|Safety approved|Confirmed)$/);
+    expect(["A", "B", "C", "D"].map((name) => badge(name).textContent))
+      .toEqual(["Requested", "Safety check", "Safety approved", "Confirmed"]);
+    expect(within(screen.getByText("C").closest("li")).getByRole("status"))
+      .toHaveTextContent("Safety approval complete");
+    expect(within(screen.getByText("B").closest("li")).queryByText("Safety approval complete"))
+      .not.toBeInTheDocument();
+    expect(badge("A")).toHaveClass("ui-status-badge--warning");
+    expect(badge("D")).toHaveClass("ui-status-badge--accent");
+  });
+});
+
+describe("SCRUM172_AC7 a notification opens the Organiser's list on its event", () => {
+  const FIRST = eventRequest({ id: "aaaaaaaa-0000-4000-8000-000000000001", eventName: "Career Fair" });
+  const SECOND = eventRequest({ id: "aaaaaaaa-0000-4000-8000-000000000002", eventName: "Tech Talk" });
+  const original = Element.prototype.scrollIntoView;
+  let scrollIntoView;
+
+  beforeEach(() => {
+    scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+  });
+
+  afterEach(() => {
+    if (original === undefined) delete Element.prototype.scrollIntoView;
+    else Element.prototype.scrollIntoView = original;
+  });
+
+  // Shows the router state the list leaves behind, so a test can see it cleared.
+  function StateProbe() {
+    const { state } = useLocation();
+    return <p data-testid="router-state">{JSON.stringify(state)}</p>;
+  }
+
+  function renderWithState(requests, state) {
+    vi.mocked(getMyEventRequests).mockResolvedValue(requests);
+    return render(
+      <MemoryRouter initialEntries={[{ pathname: "/events", state }]}>
+        <MyEventRequests />
+        <StateProbe />
+      </MemoryRouter>,
+    );
+  }
+
+  const rowOf = (name) => screen.getByText(name).closest("li");
+
+  it("SCRUM172_AC7_focuses_and_scrolls_to_the_named_event_only", async () => {
+    renderWithState([FIRST, SECOND], { focusEventRequestId: SECOND.id });
+    await screen.findByText("Tech Talk");
+
+    expect(rowOf("Tech Talk")).toHaveClass("my-event-requests__item--focused");
+    expect(rowOf("Career Fair")).not.toHaveClass("my-event-requests__item--focused");
+    // Scrolling runs in an effect after the matching row has rendered.
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(1));
+    expect(scrollIntoView.mock.contexts[0]).toBe(rowOf("Tech Talk"));
+    expect(screen.queryByText("That event is no longer in your list.")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM172_AC7_an_event_not_in_the_list_says_so_and_focuses_nothing", async () => {
+    renderWithState([FIRST, SECOND], { focusEventRequestId: "bbbbbbbb-0000-4000-8000-000000000009" });
+
+    expect(await screen.findByText("That event is no longer in your list.")).toHaveAttribute("role", "status");
+    expect(document.querySelector(".my-event-requests__item--focused")).toBeNull();
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM172_AC7_without_a_focus_id_nothing_is_focused_or_announced", async () => {
+    renderWithState([FIRST, SECOND], null);
+    await screen.findByText("Tech Talk");
+
+    expect(document.querySelector(".my-event-requests__item--focused")).toBeNull();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM172_AC7_clears_the_router_state_but_keeps_the_focus", async () => {
+    // Cleared so a reload or Back does not re-run the jump.
+    renderWithState([FIRST, SECOND], { focusEventRequestId: SECOND.id });
+    await screen.findByText("Tech Talk");
+
+    expect(screen.getByTestId("router-state")).toHaveTextContent("null");
+    expect(rowOf("Tech Talk")).toHaveClass("my-event-requests__item--focused");
+  });
+
+  it("SCRUM172_AC7_glides_to_the_event_and_lets_the_highlight_fade", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      renderWithState([FIRST, SECOND], { focusEventRequestId: SECOND.id });
+      await screen.findByText("Tech Talk");
+
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "center" }));
+      expect(rowOf("Tech Talk")).toHaveClass("my-event-requests__item--focused");
+
+      await act(() => vi.advanceTimersByTimeAsync(4000));
+      expect(rowOf("Tech Talk")).not.toHaveClass("my-event-requests__item--focused");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("SCRUM172_AC7_reduced_motion_jumps_instead_of_gliding", async () => {
+    const originalMatchMedia = window.matchMedia;
+    window.matchMedia = vi.fn(() => ({ matches: true }));
+    try {
+      renderWithState([FIRST, SECOND], { focusEventRequestId: SECOND.id });
+
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "auto", block: "center" }));
+      expect(window.matchMedia).toHaveBeenCalledWith("(prefers-reduced-motion: reduce)");
+    } finally {
+      window.matchMedia = originalMatchMedia;
+    }
+  });
+
+  it("SCRUM172_AC7_focuses_without_scrollIntoView", async () => {
+    delete Element.prototype.scrollIntoView;
+    renderWithState([FIRST, SECOND], { focusEventRequestId: SECOND.id });
+    await screen.findByText("Tech Talk");
+
+    expect(rowOf("Tech Talk")).toHaveClass("my-event-requests__item--focused");
+  });
+
+  it("SCRUM172_AC7_a_clarification_notification_opens_the_reply_form", async () => {
+    vi.mocked(getEventClarificationHistory).mockResolvedValue([]);
+    const waiting = eventRequest({ status: "pending_clarification", clarificationNote: "Which hall?" });
+    renderWithState([waiting], { openClarificationRequestId: waiting.id });
+
+    expect(await screen.findByRole("heading", { name: "Reply to the Coordinator" })).toBeInTheDocument();
+    expect(screen.getByTestId("router-state")).toHaveTextContent("null");
+  });
+});
+
+// SCRUM-266: the Organiser sees which confirmed events have a flagged booking.
+describe("SCRUM266_AC4 Needs attention on the Organiser's list", () => {
+  const confirmed = (id, eventName, needsAttention) =>
+    eventRequest({
+      id,
+      eventName,
+      status: "confirmed",
+      needsAttention,
+      statusDisplay: { status: "confirmed", label: "Confirmed", group: "CONFIRMED", description: "Going ahead." },
+    });
+
+  it("SCRUM266_AC4_marks_only_the_rows_the_server_says_need_attention", async () => {
+    renderList([
+      confirmed("e1", "Flagged event", true),
+      confirmed("e2", "Fine event", false),
+      confirmed("e3", "Older payload", undefined),
+    ]);
+
+    const row = (name) => screen.getByText(name).closest("li");
+    await screen.findByText("Flagged event");
+    expect(within(row("Flagged event")).getByText("Needs attention")).toHaveClass("ui-status-badge", "ui-status-badge--danger");
+    expect(within(row("Fine event")).queryByText("Needs attention")).not.toBeInTheDocument();
+    expect(within(row("Older payload")).queryByText("Needs attention")).not.toBeInTheDocument();
+  });
+});
+
+describe("SCRUM486_AC1 the Organiser's coordinator and assignment history", () => {
+  it("SCRUM486_AC1_the_history_is_read_only_when_first_opened_and_kept_when_reopened", async () => {
+    const user = userEvent.setup();
+    renderList([eventRequest()]);
+    const summary = await screen.findByText("Your coordinator and assignment history");
+    expect(getAssignmentHistory).not.toHaveBeenCalled();
+
+    await user.click(summary);
+    const details = summary.closest("details");
+    expect(await within(details).findByRole("heading", { name: "Assignment history" })).toBeInTheDocument();
+    expect(within(details).getAllByText("Priya Nair", { exact: false }).length).toBeGreaterThan(0);
+
+    await user.click(summary);
+    await waitFor(() => expect(details).not.toHaveAttribute("open"));
+    await user.click(summary);
+    await waitFor(() => expect(details).toHaveAttribute("open"));
+
+    expect(within(details).getByRole("heading", { name: "Assignment history" })).toBeInTheDocument();
+    expect(getAssignmentHistory).toHaveBeenCalledTimes(1);
+    expect(getAssignmentHistory).toHaveBeenCalledWith(eventRequest().id);
+  });
+});
+
+describe("SCRUM10_AC1 creating a request from the dashboard", () => {
+  it("SCRUM10_AC1_arriving_with_the_create_shortcut_opens_the_new_request_form", async () => {
+    vi.mocked(getMyEventRequests).mockResolvedValue([eventRequest()]);
+    render(
+      <MemoryRouter initialEntries={[{ pathname: "/events", state: { openNewEventRequest: true } }]}>
+        <MyEventRequests />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("heading", { level: 1, name: "Create event request" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Back to my requests/ })).toBeInTheDocument();
+    expect(screen.getByLabelText("Event name")).toHaveValue("");
+  });
+});

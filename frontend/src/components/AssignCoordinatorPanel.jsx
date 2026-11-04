@@ -1,0 +1,263 @@
+// AssignCoordinatorPanel.jsx
+//
+// SCRUM-486 (SCRUM-519), AC3 and AC4: the Event Coordinator Lead chooses the
+// Event Coordinator for one unassigned request, with an optional note.
+//
+// A full-page panel opened from UnassignedQueue, like ReassignEventPanel is
+// from the event screen. There is no modal anywhere in this frontend.
+//
+// What AC3 rules out, and how this screen keeps to it:
+//
+//   * No default. Nothing is checked when the list arrives, and Confirm stays
+//     disabled until the Lead picks someone. A preselected first row would be
+//     the system's suggestion, made silently.
+//   * No ordering by workload, no "recommended" mark. The list is shown in
+//     the server's order, by name, and never re-sorted here. Each name carries
+//     its active-event count as a fact to weigh, not a ranking.
+//   * Only Event Coordinators. The server's list has no Lead in it; this
+//     screen adds nobody and filters nobody.
+//
+// Radio buttons rather than ReassignEventPanel's <select>: a select shows one
+// name until opened, so the counts the Lead is meant to compare would be
+// hidden behind a click. A list of radios shows every name and count at once.
+//
+// This screen decides nothing about who may assign. The server's
+// assign_event_request (052) checks the caller is a Lead, the request is still
+// unassigned, and the person chosen is an Event Coordinator, under a lock.
+
+import { useCallback, useEffect, useState } from "react";
+import { assignEventRequest, listCoordinatorWorkload } from "../services/eventRequestService";
+import { activeEventsText, coordinatorName } from "../services/coordinatorDisplay";
+import { canRetryRead } from "../services/apiErrors";
+import { formatDateTimeRange } from "../services/displayFormat";
+import { describeWaiting } from "../services/waitingTime";
+import Button from "./ui/Button";
+import EmptyState from "./ui/EmptyState";
+import ErrorNotice from "./ui/ErrorNotice";
+import LoadingText from "./ui/LoadingText";
+import useFocusAfterRetry from "./useFocusAfterRetry";
+
+const LOAD_ERROR_MESSAGES = {
+  403: "Only the Event Coordinator Lead can assign event requests.",
+  500: "The list of coordinators could not be loaded.",
+};
+
+// Keyed by status, as ReassignEventPanel's table is, and for the same reason:
+// the server's messages name ids and are written by the database. 409 is the
+// one with two meanings, and unlike ReassignEventPanel's they are told apart,
+// by the response's code, never by its text (see assignErrorMessage).
+const ASSIGN_ERROR_MESSAGES = {
+  400: "That person cannot be assigned this request. They may no longer be an Event Coordinator. Choose someone else.",
+  403: "Only the Event Coordinator Lead can assign event requests.",
+  404: "This request no longer exists.",
+  409: "This request can no longer be assigned. It may have been withdrawn or cancelled. Go back to the queue to see what is still waiting.",
+  500: "The request could not be assigned. Please try again.",
+};
+
+/**
+ * AC4: a lost race names who won it. The name comes from the response's
+ * conflicts, which the backend reads for this purpose (code ALREADY_ASSIGNED),
+ * so nothing here parses a message that could be reworded.
+ */
+function assignErrorMessage(err) {
+  const status = err.response?.status;
+  const data = err.response?.data;
+
+  if (status === 409 && data?.code === "ALREADY_ASSIGNED") {
+    const name = data.conflicts?.[0]?.assignedCoordinatorName ?? "another coordinator";
+    return `This request has already been assigned to ${name}, by another Event Coordinator Lead. Go back to the queue; it is no longer waiting.`;
+  }
+
+  return ASSIGN_ERROR_MESSAGES[status] || "The request could not be assigned. Please try again.";
+}
+
+/**
+ * @param {object} props
+ * @param {object} props.request        the unassigned request, as the queue row has it
+ * @param {Function} props.onCancel     back to the queue, nothing changed
+ * @param {Function} props.onAssigned   called with (updatedRequest, chosenCoordinator)
+ * @param {Function} [props.now]        the clock "waiting" is measured against, as the queue's
+ */
+export default function AssignCoordinatorPanel({ request, onCancel, onAssigned, now = () => new Date() }) {
+  const [coordinators, setCoordinators] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null); // { message, retryable }
+  const [coordinatorId, setCoordinatorId] = useState("");
+  const [note, setNote] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState(null);
+  // After a 404 or 409 nothing on this form can succeed: the request is gone,
+  // taken, or no longer waiting. The form gives way to a way back.
+  const [finished, setFinished] = useState(false);
+
+  // State is set only in the callbacks, and only while isActive() holds, so an
+  // answer arriving after the panel has closed is dropped.
+  const loadCoordinators = useCallback((isActive = () => true) =>
+    listCoordinatorWorkload()
+      .then((data) => {
+        if (isActive()) setCoordinators(data);
+      })
+      .catch((err) => {
+        if (isActive()) {
+          setLoadError({
+            message: LOAD_ERROR_MESSAGES[err.response?.status] || "The list of coordinators could not be loaded.",
+            retryable: canRetryRead(err),
+          });
+        }
+      })
+      .finally(() => {
+        if (isActive()) setLoading(false);
+      }), []);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadCoordinators(() => !cancelled);
+    return () => {
+      cancelled = true;
+    };
+  }, [loadCoordinators]);
+
+  // Loading starts true, so only a retry needs to raise it.
+  function reloadCoordinators() {
+    setLoading(true);
+    setLoadError(null);
+    return loadCoordinators();
+  }
+  const { headingRef, retry: retryLoad } = useFocusAfterRetry(reloadCoordinators);
+
+  // The button that opened this panel has gone, so focus starts on its title.
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, [headingRef]);
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+
+    setSubmitting(true);
+    setSubmitError(null);
+
+    try {
+      // The note is sent as typed; the server stores a blank one as no note.
+      const updated = await assignEventRequest(request.id, { coordinatorId, note });
+      // Always found: the only ids that can be chosen are this list's.
+      const chosen = coordinators.find((coordinator) => coordinator.id === coordinatorId);
+      onAssigned?.(updated, chosen);
+    } catch (err) {
+      const status = err.response?.status;
+      setSubmitError(assignErrorMessage(err));
+      if (status === 404 || status === 409) setFinished(true);
+      setSubmitting(false);
+    }
+  }
+
+  const showForm = !loading && !loadError && coordinators.length > 0 && !finished;
+
+  return (
+    <div className="assign-coordinator">
+      <h2 ref={headingRef} tabIndex={-1}>Assign {request.eventName}</h2>
+      <p>
+        The coordinator you choose becomes responsible for this request and is
+        told it is theirs. The Organiser is told who their coordinator is.
+      </p>
+
+      {/* The queue row's facts, in its words, so the Lead need not remember
+          them while choosing who should take the request. */}
+      <dl className="assign-coordinator__request">
+        <dt>Organiser</dt>
+        <dd>{request.organiserName ?? "No name on record"}</dd>
+        <dt>When</dt>
+        <dd>{formatDateTimeRange(request.proposedStart, request.proposedEnd, "not set")}</dd>
+        <dt>Expected attendance</dt>
+        <dd>{request.expectedAttendance ?? "not given"}</dd>
+        <dt>In the queue</dt>
+        <dd>{describeWaiting(request.submittedAt, now())}</dd>
+        {request.accessibilityRequirements?.trim() && (
+          <>
+            <dt>Accessibility needs</dt>
+            <dd>{request.accessibilityRequirements}</dd>
+          </>
+        )}
+      </dl>
+
+      {loading && <LoadingText />}
+      {loadError && (
+        <ErrorNotice
+          message={loadError.message}
+          onRetry={loadError.retryable ? retryLoad : undefined}
+        />
+      )}
+      {!loading && !loadError && coordinators.length === 0 && (
+        <EmptyState
+          message="There is no Event Coordinator to assign this request to."
+          nextStep="An Event Coordinator account must be set up outside ConnectSphere before this request can be assigned."
+        />
+      )}
+
+      {/* Form errors have no Try again: submitting again is the retry. */}
+      {finished && submitError && <ErrorNotice message={submitError} />}
+
+      {/* With no form there is no form Cancel, so the way back is offered on
+          its own: after a failed load, an empty list, or a refusal nothing
+          on the form can fix. */}
+      {!loading && !showForm && (
+        <div className="assign-coordinator__actions">
+          <Button variant="secondary" onClick={onCancel}>
+            Back to the queue
+          </Button>
+        </div>
+      )}
+
+      {showForm && (
+        <form className="assign-coordinator__form" onSubmit={handleSubmit}>
+          <fieldset>
+            <legend>Assign to</legend>
+            {/* In the server's order, by name. Not re-sorted, and nothing
+                checked until the Lead chooses (AC3). */}
+            {coordinators.map((coordinator) => (
+              <label key={coordinator.id} className="assign-coordinator__choice">
+                <input
+                  type="radio"
+                  name="coordinator"
+                  value={coordinator.id}
+                  checked={coordinatorId === coordinator.id}
+                  onChange={() => {
+                    setCoordinatorId(coordinator.id);
+                    setSubmitError(null);
+                  }}
+                />
+                {/* The server always sends a count, 0 included. */}
+                {coordinatorName(coordinator)}, {activeEventsText(coordinator.activeEvents)}
+              </label>
+            ))}
+          </fieldset>
+
+          <label>
+            Note for the coordinator (optional)
+            <textarea
+              value={note}
+              onChange={(event) => setNote(event.target.value)}
+              rows={4}
+              placeholder="Anything they should know before they start."
+            />
+          </label>
+          {/* AC9: the note is the assignment history's handover note. The
+              Organiser's notice and history leave it out. */}
+          <p className="assign-coordinator__hint">
+            Coordinators can read this note. The Organiser cannot.
+          </p>
+
+          {submitError && <ErrorNotice message={submitError} />}
+
+          <div className="assign-coordinator__actions">
+            <Button type="submit" disabled={submitting || !coordinatorId}>
+              {submitting ? "Assigning..." : "Confirm assignment"}
+            </Button>
+            <Button variant="secondary" onClick={onCancel} disabled={submitting}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      )}
+    </div>
+  );
+}

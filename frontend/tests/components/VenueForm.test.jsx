@@ -1,0 +1,1373 @@
+// VenueForm.test.jsx
+//
+// SCRUM-186. The turnaround select on the venue form: what it offers, what it
+// prefills, and what create and edit send. The venue service is mocked, so
+// nothing touches the network.
+
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+
+import VenueForm from "../../src/components/VenueForm.jsx";
+import { createVenue, getVenueDetails, updateVenue } from "../../src/services/venueService";
+import { UNKNOWN_CODE_TITLE } from "../../src/services/venueLookups";
+import { stubDialogElement } from "../helpers/dialog.js";
+
+vi.mock("../../src/services/venueService", () => ({
+  createVenue: vi.fn(),
+  getVenueDetails: vi.fn(),
+  updateVenue: vi.fn(),
+}));
+
+const VENUE_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+
+// Hours in the server's "HH:MM:SS" shape so a name-only edit does not re-send
+// them.
+function savedVenue(overrides = {}) {
+  return {
+    id: VENUE_ID,
+    name: "Hall A",
+    location: "Level 2",
+    maxCapacity: 100,
+    layouts: ["theatre"],
+    accessibility: [],
+    facilities: ["wifi"],
+    hours: [{ day_of_week: 1, opens_at: "09:00:00", closes_at: "18:00:00" }],
+    turnaroundMinutes: 90,
+    ...overrides,
+  };
+}
+
+function turnaroundSelect() {
+  return screen.getByLabelText("Turnaround between events");
+}
+
+function selectedLabel(select) {
+  return select.options[select.selectedIndex].textContent;
+}
+
+beforeEach(() => {
+  vi.mocked(createVenue).mockReset();
+  vi.mocked(getVenueDetails).mockReset();
+  vi.mocked(updateVenue).mockReset();
+  vi.mocked(createVenue).mockResolvedValue({ id: VENUE_ID });
+  vi.mocked(updateVenue).mockResolvedValue({ id: VENUE_ID });
+});
+
+stubDialogElement();
+
+describe("SCRUM186 VenueForm turnaround on create", () => {
+  it("SCRUM186_create_offers_seven_options_with_none_selected", () => {
+    render(<VenueForm />);
+
+    const select = turnaroundSelect();
+    expect(select.tagName).toBe("SELECT");
+    const options = within(select).getAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual([
+      "None",
+      "15 minutes",
+      "30 minutes",
+      "45 minutes",
+      "1 hour",
+      "1 hour 30 minutes",
+      "2 hours",
+    ]);
+    expect(options.map((o) => o.value)).toEqual(["0", "15", "30", "45", "60", "90", "120"]);
+    expect(select).toHaveValue("0");
+    expect(selectedLabel(select)).toBe("None");
+  });
+
+  it("SCRUM186_the_help_text_describes_the_select", () => {
+    render(<VenueForm />);
+
+    // SCRUM-137 reworded this when setup got its own field: turnaround is now
+    // only the reset after an event, not "set-up and clear-down".
+    expect(turnaroundSelect()).toHaveAccessibleDescription(
+      "Time Venue Staff need to reset the room after an event ends.",
+    );
+  });
+
+  it("SCRUM186_create_sends_the_chosen_turnaround_as_a_number", async () => {
+    const user = userEvent.setup();
+    const onSaved = vi.fn();
+    render(<VenueForm onSaved={onSaved} />);
+
+    await user.selectOptions(turnaroundSelect(), "1 hour");
+    expect(turnaroundSelect()).toHaveValue("60");
+    await user.click(screen.getByRole("button", { name: "Create venue" }));
+
+    expect(createVenue).toHaveBeenCalledTimes(1);
+    const payload = vi.mocked(createVenue).mock.calls[0][0];
+    expect(payload.turnaroundMinutes).toBe(60);
+    expect(typeof payload.turnaroundMinutes).toBe("number");
+    expect(onSaved).toHaveBeenCalledWith({ id: VENUE_ID });
+  });
+
+  it("SCRUM186_create_untouched_sends_zero", async () => {
+    const user = userEvent.setup();
+    render(<VenueForm />);
+
+    await user.click(screen.getByRole("button", { name: "Create venue" }));
+
+    expect(createVenue).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(createVenue).mock.calls[0][0].turnaroundMinutes).toBe(0);
+  });
+
+  it("SCRUM186_server_400_turnaround_detail_is_displayed", async () => {
+    const user = userEvent.setup();
+    vi.mocked(createVenue).mockRejectedValue({
+      response: {
+        status: 400,
+        data: {
+          error: "Validation failed",
+          details: [
+            {
+              field: "turnaroundMinutes",
+              message: "must be one of 0, 15, 30, 45, 60, 90, 120",
+            },
+          ],
+        },
+      },
+    });
+    render(<VenueForm />);
+
+    await user.click(screen.getByRole("button", { name: "Create venue" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("This venue can't be saved yet:");
+    expect(
+      within(alert).getByText("turnaroundMinutes: must be one of 0, 15, 30, 45, 60, 90, 120"),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("SCRUM186 VenueForm turnaround on edit", () => {
+  it("SCRUM186_edit_prefills_the_saved_turnaround", async () => {
+    vi.mocked(getVenueDetails).mockResolvedValue(savedVenue({ turnaroundMinutes: 90 }));
+    render(<VenueForm venueId={VENUE_ID} />);
+
+    await screen.findByRole("heading", { name: "Edit venue" });
+    expect(getVenueDetails).toHaveBeenCalledWith(VENUE_ID);
+    const select = turnaroundSelect();
+    expect(select).toHaveValue("90");
+    expect(selectedLabel(select)).toBe("1 hour 30 minutes");
+    expect(within(select).getAllByRole("option")).toHaveLength(7);
+  });
+
+  it("SCRUM186_edit_changing_only_turnaround_sends_only_turnaround", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getVenueDetails).mockResolvedValue(savedVenue({ turnaroundMinutes: 90 }));
+    render(<VenueForm venueId={VENUE_ID} />);
+    await screen.findByRole("heading", { name: "Edit venue" });
+
+    await user.selectOptions(turnaroundSelect(), "2 hours");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(updateVenue).toHaveBeenCalledTimes(1);
+    expect(updateVenue).toHaveBeenCalledWith(VENUE_ID, { turnaroundMinutes: 120 });
+  });
+
+  it("SCRUM186_edit_setting_turnaround_back_to_none_sends_zero", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getVenueDetails).mockResolvedValue(savedVenue({ turnaroundMinutes: 90 }));
+    render(<VenueForm venueId={VENUE_ID} />);
+    await screen.findByRole("heading", { name: "Edit venue" });
+
+    await user.selectOptions(turnaroundSelect(), "None");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(updateVenue).toHaveBeenCalledWith(VENUE_ID, { turnaroundMinutes: 0 });
+  });
+
+  it("SCRUM186_edit_changing_only_name_sends_no_turnaround", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getVenueDetails).mockResolvedValue(savedVenue({ turnaroundMinutes: 90 }));
+    render(<VenueForm venueId={VENUE_ID} />);
+    await screen.findByRole("heading", { name: "Edit venue" });
+
+    const name = screen.getByLabelText("Name");
+    await user.clear(name);
+    await user.type(name, "Hall B");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(updateVenue).toHaveBeenCalledTimes(1);
+    expect(updateVenue).toHaveBeenCalledWith(VENUE_ID, { name: "Hall B" });
+  });
+
+  it("SCRUM186_edit_changing_turnaround_and_back_is_nothing_changed", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getVenueDetails).mockResolvedValue(savedVenue({ turnaroundMinutes: 90 }));
+    render(<VenueForm venueId={VENUE_ID} />);
+    await screen.findByRole("heading", { name: "Edit venue" });
+
+    await user.selectOptions(turnaroundSelect(), "15 minutes");
+    await user.selectOptions(turnaroundSelect(), "1 hour 30 minutes");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Nothing has changed, so there is nothing to save.",
+    );
+    expect(updateVenue).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM186_edit_saved_unlisted_value_is_shown_and_untouched_save_sends_nothing", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getVenueDetails).mockResolvedValue(savedVenue({ turnaroundMinutes: 75 }));
+    render(<VenueForm venueId={VENUE_ID} />);
+    await screen.findByRole("heading", { name: "Edit venue" });
+
+    const select = turnaroundSelect();
+    expect(within(select).getAllByRole("option")).toHaveLength(8);
+    expect(select).toHaveValue("75");
+    expect(selectedLabel(select)).toBe("1 hour 15 minutes (not in this form's list)");
+
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Nothing has changed");
+    expect(updateVenue).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM186_edit_unlisted_value_keeps_its_option_after_choosing_a_listed_one", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getVenueDetails).mockResolvedValue(savedVenue({ turnaroundMinutes: 75 }));
+    render(<VenueForm venueId={VENUE_ID} />);
+    await screen.findByRole("heading", { name: "Edit venue" });
+
+    await user.selectOptions(turnaroundSelect(), "1 hour");
+    expect(within(turnaroundSelect()).getAllByRole("option")).toHaveLength(8);
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(updateVenue).toHaveBeenCalledWith(VENUE_ID, { turnaroundMinutes: 60 });
+  });
+
+  it("SCRUM186_edit_field_missing_from_server_shows_none_and_name_save_sends_no_turnaround", async () => {
+    const user = userEvent.setup();
+    const venue = savedVenue();
+    delete venue.turnaroundMinutes;
+    vi.mocked(getVenueDetails).mockResolvedValue(venue);
+    render(<VenueForm venueId={VENUE_ID} />);
+    await screen.findByRole("heading", { name: "Edit venue" });
+
+    const select = turnaroundSelect();
+    expect(select).toHaveValue("0");
+    expect(selectedLabel(select)).toBe("None");
+    expect(within(select).getAllByRole("option")).toHaveLength(7);
+
+    const name = screen.getByLabelText("Name");
+    await user.clear(name);
+    await user.type(name, "Hall B");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(updateVenue).toHaveBeenCalledTimes(1);
+    const payload = vi.mocked(updateVenue).mock.calls[0][1];
+    expect(payload).toEqual({ name: "Hall B" });
+    expect(payload).not.toHaveProperty("turnaroundMinutes");
+  });
+
+  it("SCRUM186_edit_saved_zero_prefills_none", async () => {
+    vi.mocked(getVenueDetails).mockResolvedValue(savedVenue({ turnaroundMinutes: 0 }));
+    render(<VenueForm venueId={VENUE_ID} />);
+    await screen.findByRole("heading", { name: "Edit venue" });
+
+    expect(turnaroundSelect()).toHaveValue("0");
+    expect(selectedLabel(turnaroundSelect())).toBe("None");
+  });
+
+  it("SCRUM186_edit_server_400_turnaround_detail_is_displayed", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getVenueDetails).mockResolvedValue(savedVenue({ turnaroundMinutes: 90 }));
+    vi.mocked(updateVenue).mockRejectedValue({
+      response: {
+        status: 400,
+        data: {
+          details: [{ field: "turnaroundMinutes", message: "must be one of the allowed values" }],
+        },
+      },
+    });
+    render(<VenueForm venueId={VENUE_ID} />);
+    await screen.findByRole("heading", { name: "Edit venue" });
+
+    await user.selectOptions(turnaroundSelect(), "2 hours");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(
+      within(alert).getByText("turnaroundMinutes: must be one of the allowed values"),
+    ).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SCRUM-137 (SCRUM-20): the setup time before an event, a select of its own
+// beside turnaround.
+// ---------------------------------------------------------------------------
+function setupSelect() {
+  return screen.getByLabelText("Setup before events");
+}
+
+describe("SCRUM20_SCRUM137 VenueForm setup on create", () => {
+  it("SCRUM20_SCRUM137_create_offers_seven_options_with_none_selected", () => {
+    render(<VenueForm />);
+
+    const select = setupSelect();
+    expect(select.tagName).toBe("SELECT");
+    const options = within(select).getAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual([
+      "None",
+      "15 minutes",
+      "30 minutes",
+      "45 minutes",
+      "1 hour",
+      "1 hour 30 minutes",
+      "2 hours",
+    ]);
+    expect(options.map((o) => o.value)).toEqual(["0", "15", "30", "45", "60", "90", "120"]);
+    expect(select).toHaveValue("0");
+    expect(selectedLabel(select)).toBe("None");
+  });
+
+  it("SCRUM20_SCRUM137_setup_is_a_different_control_from_turnaround_and_comes_first", () => {
+    render(<VenueForm />);
+
+    const setup = setupSelect();
+    const turnaround = turnaroundSelect();
+    expect(setup).not.toBe(turnaround);
+    // Before the event, then after it.
+    expect(
+      setup.compareDocumentPosition(turnaround) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("SCRUM20_SCRUM137_the_help_text_describes_the_select", () => {
+    render(<VenueForm />);
+
+    const select = setupSelect();
+    const helpId = select.getAttribute("aria-describedby");
+    expect(helpId).toBeTruthy();
+    expect(document.getElementById(helpId)).toHaveTextContent(
+      "Time Venue Staff need to prepare the room before an event starts.",
+    );
+    expect(select).toHaveAccessibleDescription(
+      "Time Venue Staff need to prepare the room before an event starts.",
+    );
+    // Its own help, not turnaround's.
+    expect(helpId).not.toBe(turnaroundSelect().getAttribute("aria-describedby"));
+  });
+
+  it("SCRUM20_SCRUM137_create_sends_the_chosen_setup_as_a_number", async () => {
+    const user = userEvent.setup();
+    const onSaved = vi.fn();
+    render(<VenueForm onSaved={onSaved} />);
+
+    await user.selectOptions(setupSelect(), "30 minutes");
+    expect(setupSelect()).toHaveValue("30");
+    await user.click(screen.getByRole("button", { name: "Create venue" }));
+
+    expect(createVenue).toHaveBeenCalledTimes(1);
+    const payload = vi.mocked(createVenue).mock.calls[0][0];
+    expect(payload.setupMinutes).toBe(30);
+    expect(typeof payload.setupMinutes).toBe("number");
+    // Choosing setup leaves turnaround at its own default.
+    expect(payload.turnaroundMinutes).toBe(0);
+    expect(onSaved).toHaveBeenCalledWith({ id: VENUE_ID });
+  });
+
+  it("SCRUM20_SCRUM137_create_sends_setup_and_turnaround_independently", async () => {
+    const user = userEvent.setup();
+    render(<VenueForm />);
+
+    await user.selectOptions(setupSelect(), "15 minutes");
+    await user.selectOptions(turnaroundSelect(), "2 hours");
+    await user.click(screen.getByRole("button", { name: "Create venue" }));
+
+    const payload = vi.mocked(createVenue).mock.calls[0][0];
+    expect(payload.setupMinutes).toBe(15);
+    expect(payload.turnaroundMinutes).toBe(120);
+  });
+
+  it("SCRUM20_SCRUM137_create_untouched_sends_zero", async () => {
+    const user = userEvent.setup();
+    render(<VenueForm />);
+
+    await user.click(screen.getByRole("button", { name: "Create venue" }));
+
+    expect(createVenue).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(createVenue).mock.calls[0][0].setupMinutes).toBe(0);
+  });
+
+  it("SCRUM20_SCRUM137_the_select_is_disabled_while_saving", async () => {
+    const user = userEvent.setup();
+    let finish;
+    vi.mocked(createVenue).mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    render(<VenueForm />);
+
+    expect(setupSelect()).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "Create venue" }));
+
+    expect(setupSelect()).toBeDisabled();
+    finish({ id: VENUE_ID });
+    await vi.waitFor(() => expect(setupSelect()).toBeEnabled());
+  });
+
+  it("SCRUM20_SCRUM137_server_400_setup_detail_is_displayed", async () => {
+    const user = userEvent.setup();
+    vi.mocked(createVenue).mockRejectedValue({
+      response: {
+        status: 400,
+        data: {
+          error: "Validation failed",
+          details: [
+            { field: "setupMinutes", message: "must be one of 0, 15, 30, 45, 60, 90, 120 minutes" },
+          ],
+        },
+      },
+    });
+    render(<VenueForm />);
+
+    await user.click(screen.getByRole("button", { name: "Create venue" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(
+      within(alert).getByText("setupMinutes: must be one of 0, 15, 30, 45, 60, 90, 120 minutes"),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("SCRUM20_SCRUM137 VenueForm setup on edit", () => {
+  it("SCRUM20_SCRUM137_edit_prefills_the_saved_setup", async () => {
+    vi.mocked(getVenueDetails).mockResolvedValue(savedVenue({ setupMinutes: 45 }));
+    render(<VenueForm venueId={VENUE_ID} />);
+
+    await screen.findByRole("heading", { name: "Edit venue" });
+    const select = setupSelect();
+    expect(select).toHaveValue("45");
+    expect(selectedLabel(select)).toBe("45 minutes");
+    expect(within(select).getAllByRole("option")).toHaveLength(7);
+    // Turnaround still prefills from its own field.
+    expect(turnaroundSelect()).toHaveValue("90");
+  });
+
+  it("SCRUM20_SCRUM137_edit_saved_zero_prefills_none", async () => {
+    vi.mocked(getVenueDetails).mockResolvedValue(savedVenue({ setupMinutes: 0 }));
+    render(<VenueForm venueId={VENUE_ID} />);
+    await screen.findByRole("heading", { name: "Edit venue" });
+
+    expect(setupSelect()).toHaveValue("0");
+    expect(selectedLabel(setupSelect())).toBe("None");
+  });
+
+  it("SCRUM20_SCRUM137_edit_changing_only_setup_sends_only_setup", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getVenueDetails).mockResolvedValue(savedVenue({ setupMinutes: 0 }));
+    render(<VenueForm venueId={VENUE_ID} />);
+    await screen.findByRole("heading", { name: "Edit venue" });
+
+    await user.selectOptions(setupSelect(), "1 hour");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(updateVenue).toHaveBeenCalledTimes(1);
+    expect(updateVenue).toHaveBeenCalledWith(VENUE_ID, { setupMinutes: 60 });
+  });
+
+  it("SCRUM20_SCRUM137_edit_setting_setup_back_to_none_sends_zero", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getVenueDetails).mockResolvedValue(savedVenue({ setupMinutes: 30 }));
+    render(<VenueForm venueId={VENUE_ID} />);
+    await screen.findByRole("heading", { name: "Edit venue" });
+
+    await user.selectOptions(setupSelect(), "None");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(updateVenue).toHaveBeenCalledWith(VENUE_ID, { setupMinutes: 0 });
+  });
+
+  it("SCRUM20_SCRUM137_edit_changing_only_name_sends_no_setup", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getVenueDetails).mockResolvedValue(savedVenue({ setupMinutes: 30 }));
+    render(<VenueForm venueId={VENUE_ID} />);
+    await screen.findByRole("heading", { name: "Edit venue" });
+
+    const name = screen.getByLabelText("Name");
+    await user.clear(name);
+    await user.type(name, "Hall B");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(updateVenue).toHaveBeenCalledWith(VENUE_ID, { name: "Hall B" });
+  });
+
+  it("SCRUM20_SCRUM137_edit_changing_setup_and_back_is_nothing_changed", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getVenueDetails).mockResolvedValue(savedVenue({ setupMinutes: 30 }));
+    render(<VenueForm venueId={VENUE_ID} />);
+    await screen.findByRole("heading", { name: "Edit venue" });
+
+    await user.selectOptions(setupSelect(), "2 hours");
+    await user.selectOptions(setupSelect(), "30 minutes");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Nothing has changed, so there is nothing to save.",
+    );
+    expect(updateVenue).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM20_SCRUM137_edit_changing_setup_and_turnaround_sends_both", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getVenueDetails).mockResolvedValue(savedVenue({ setupMinutes: 0 }));
+    render(<VenueForm venueId={VENUE_ID} />);
+    await screen.findByRole("heading", { name: "Edit venue" });
+
+    await user.selectOptions(setupSelect(), "15 minutes");
+    await user.selectOptions(turnaroundSelect(), "None");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(updateVenue).toHaveBeenCalledWith(VENUE_ID, {
+      setupMinutes: 15,
+      turnaroundMinutes: 0,
+    });
+  });
+
+  it("SCRUM20_SCRUM137_edit_saved_unlisted_value_is_shown_and_untouched_save_sends_nothing", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getVenueDetails).mockResolvedValue(savedVenue({ setupMinutes: 20 }));
+    render(<VenueForm venueId={VENUE_ID} />);
+    await screen.findByRole("heading", { name: "Edit venue" });
+
+    const select = setupSelect();
+    expect(within(select).getAllByRole("option")).toHaveLength(8);
+    expect(select).toHaveValue("20");
+    expect(selectedLabel(select)).toBe("20 minutes (not in this form's list)");
+
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Nothing has changed");
+    expect(updateVenue).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM20_SCRUM137_edit_unlisted_value_keeps_its_option_after_choosing_a_listed_one", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getVenueDetails).mockResolvedValue(savedVenue({ setupMinutes: 20 }));
+    render(<VenueForm venueId={VENUE_ID} />);
+    await screen.findByRole("heading", { name: "Edit venue" });
+
+    await user.selectOptions(setupSelect(), "15 minutes");
+    expect(within(setupSelect()).getAllByRole("option")).toHaveLength(8);
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(updateVenue).toHaveBeenCalledWith(VENUE_ID, { setupMinutes: 15 });
+  });
+
+  it("SCRUM20_SCRUM137_edit_field_missing_from_server_shows_none_and_name_save_sends_no_setup", async () => {
+    // A backend from before 023 omits setupMinutes. savedVenue() has none.
+    const user = userEvent.setup();
+    vi.mocked(getVenueDetails).mockResolvedValue(savedVenue());
+    render(<VenueForm venueId={VENUE_ID} />);
+    await screen.findByRole("heading", { name: "Edit venue" });
+
+    const select = setupSelect();
+    expect(select).toHaveValue("0");
+    expect(selectedLabel(select)).toBe("None");
+    expect(within(select).getAllByRole("option")).toHaveLength(7);
+
+    const name = screen.getByLabelText("Name");
+    await user.clear(name);
+    await user.type(name, "Hall B");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    const payload = vi.mocked(updateVenue).mock.calls[0][1];
+    expect(payload).toEqual({ name: "Hall B" });
+    expect(payload).not.toHaveProperty("setupMinutes");
+  });
+
+  it("SCRUM20_SCRUM137_edit_the_select_is_disabled_while_saving", async () => {
+    const user = userEvent.setup();
+    let finish;
+    vi.mocked(getVenueDetails).mockResolvedValue(savedVenue({ setupMinutes: 0 }));
+    vi.mocked(updateVenue).mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    render(<VenueForm venueId={VENUE_ID} />);
+    await screen.findByRole("heading", { name: "Edit venue" });
+
+    await user.selectOptions(setupSelect(), "30 minutes");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(setupSelect()).toBeDisabled();
+    finish({ id: VENUE_ID });
+    await vi.waitFor(() => expect(setupSelect()).toBeEnabled());
+  });
+});
+
+// SCRUM-493. Emergency access and known restrictions: two optional textareas
+// with a code-point counter. Create leaves empty boxes out; edit sends only a
+// changed field, and null to clear a recorded one.
+describe("SCRUM493 VenueForm safety facts", () => {
+  const emergencyBox = () => screen.getByRole("textbox", { name: "Emergency access" });
+  const restrictionsBox = () => screen.getByRole("textbox", { name: "Known restrictions" });
+
+  /** The help line (and so the counter) the textarea is described by. */
+  function helpLineFor(textarea) {
+    const id = textarea.getAttribute("aria-describedby");
+    return document.getElementById(id);
+  }
+
+  async function renderEdit(overrides = {}) {
+    vi.mocked(getVenueDetails).mockResolvedValue(savedVenue(overrides));
+    render(<VenueForm venueId={VENUE_ID} />);
+    await screen.findByRole("heading", { name: "Edit venue" });
+  }
+
+  it("SCRUM493_AC1_create_sends_trimmed_text_for_both_fields", async () => {
+    const user = userEvent.setup();
+    render(<VenueForm />);
+
+    await user.type(emergencyBox(), "  Exit A via the east stairwell  ");
+    await user.type(restrictionsBox(), " No open flames ");
+    await user.click(screen.getByRole("button", { name: "Create venue" }));
+
+    expect(createVenue).toHaveBeenCalledTimes(1);
+    const payload = vi.mocked(createVenue).mock.calls[0][0];
+    expect(payload.emergencyAccess).toBe("Exit A via the east stairwell");
+    expect(payload.knownRestrictions).toBe("No open flames");
+  });
+
+  it("SCRUM493_AC1_create_leaves_out_empty_and_whitespace_boxes", async () => {
+    const user = userEvent.setup();
+    render(<VenueForm />);
+
+    await user.type(restrictionsBox(), "   ");
+    await user.click(screen.getByRole("button", { name: "Create venue" }));
+
+    const payload = vi.mocked(createVenue).mock.calls[0][0];
+    expect(payload.emergencyAccess).toBeUndefined();
+    expect(payload.knownRestrictions).toBeUndefined();
+    // Gone from the wire, not sent as "".
+    expect(JSON.parse(JSON.stringify(payload))).not.toHaveProperty("emergencyAccess");
+    expect(JSON.parse(JSON.stringify(payload))).not.toHaveProperty("knownRestrictions");
+  });
+
+  it("SCRUM493_AC1_edit_prefills_both_fields", async () => {
+    await renderEdit({
+      emergencyAccess: "Exit A\nExit B",
+      knownRestrictions: "No confetti",
+    });
+
+    expect(emergencyBox()).toHaveValue("Exit A\nExit B");
+    expect(restrictionsBox()).toHaveValue("No confetti");
+  });
+
+  it("SCRUM493_AC1_edit_prefills_empty_from_null_and_from_an_older_payload", async () => {
+    await renderEdit({ emergencyAccess: null });
+    expect(emergencyBox()).toHaveValue("");
+    // savedVenue() has no knownRestrictions key at all.
+    expect(restrictionsBox()).toHaveValue("");
+  });
+
+  it("SCRUM493_AC4_changing_only_emergency_access_sends_only_that_field", async () => {
+    const user = userEvent.setup();
+    await renderEdit({ emergencyAccess: "Exit A", knownRestrictions: "No confetti" });
+
+    await user.clear(emergencyBox());
+    await user.type(emergencyBox(), "  Exit B via the car park  ");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(updateVenue).toHaveBeenCalledTimes(1);
+    expect(updateVenue).toHaveBeenCalledWith(VENUE_ID, {
+      emergencyAccess: "Exit B via the car park",
+    });
+  });
+
+  it("SCRUM493_AC4_clearing_a_recorded_field_sends_null", async () => {
+    const user = userEvent.setup();
+    await renderEdit({ emergencyAccess: "Exit A", knownRestrictions: "No confetti" });
+
+    await user.clear(restrictionsBox());
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(updateVenue).toHaveBeenCalledTimes(1);
+    expect(updateVenue).toHaveBeenCalledWith(VENUE_ID, { knownRestrictions: null });
+  });
+
+  it("SCRUM493_AC4_whitespace_in_an_unrecorded_field_is_nothing_changed", async () => {
+    const user = userEvent.setup();
+    await renderEdit({ emergencyAccess: null, knownRestrictions: null });
+
+    await user.type(emergencyBox(), "   ");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Nothing has changed, so there is nothing to save.",
+    );
+    expect(updateVenue).not.toHaveBeenCalled();
+  });
+
+  // G-03 (F-AC4-05). The older name-only tests start from a savedVenue() with
+  // no safety facts; this one starts from both recorded, so it proves a
+  // recorded fact is not re-sent when another field changes.
+  it("SCRUM493_AC4_changing_only_the_name_sends_neither_safety_field", async () => {
+    const user = userEvent.setup();
+    await renderEdit({ emergencyAccess: "Exit A", knownRestrictions: "No confetti" });
+
+    const name = screen.getByLabelText("Name");
+    await user.clear(name);
+    await user.type(name, "Hall B");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(updateVenue).toHaveBeenCalledTimes(1);
+    expect(updateVenue).toHaveBeenCalledWith(VENUE_ID, { name: "Hall B" });
+    const [, changes] = vi.mocked(updateVenue).mock.calls[0];
+    expect(Object.keys(changes)).toEqual(["name"]);
+  });
+
+  // G-04 (F-AC4-04). The trimmed comparison against a recorded baseline, not
+  // just an empty one: surrounding spaces and a trailing newline are no change.
+  it("SCRUM493_AC4_recorded_text_with_added_surrounding_space_is_nothing_changed", async () => {
+    const user = userEvent.setup();
+    await renderEdit({ emergencyAccess: "Exit A", knownRestrictions: "No confetti" });
+
+    await user.clear(emergencyBox());
+    await user.type(emergencyBox(), "  Exit A  {Enter}");
+    await user.type(restrictionsBox(), "{Enter}");
+    expect(emergencyBox()).toHaveValue("  Exit A  \n");
+    expect(restrictionsBox()).toHaveValue("No confetti\n");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Nothing has changed, so there is nothing to save.",
+    );
+    expect(updateVenue).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM493_AC1_the_counter_counts_code_points", async () => {
+    const user = userEvent.setup();
+    render(<VenueForm />);
+
+    const counter = () => helpLineFor(emergencyBox()).querySelector(".venue-form__counter");
+    expect(counter()).toHaveTextContent("0/2000");
+
+    await user.type(emergencyBox(), "Exit 🚪");
+    expect(emergencyBox().value.length).toBe(7);
+    expect(counter()).toHaveTextContent("6/2000");
+    expect(counter()).not.toHaveClass("venue-form__counter--over");
+  });
+
+  it("SCRUM493_AC1_the_counter_turns_over_only_above_2000", () => {
+    render(<VenueForm />);
+    const counter = () => helpLineFor(restrictionsBox()).querySelector(".venue-form__counter");
+
+    // 2,000 emoji: 4,000 UTF-16 units but exactly at the limit in code points.
+    fireEvent.change(restrictionsBox(), { target: { value: "🚪".repeat(2000) } });
+    expect(counter()).toHaveTextContent("2000/2000");
+    expect(counter()).not.toHaveClass("venue-form__counter--over");
+
+    fireEvent.change(restrictionsBox(), { target: { value: "a".repeat(2001) } });
+    expect(counter()).toHaveTextContent("2001/2000");
+    expect(counter()).toHaveClass("venue-form__counter", "venue-form__counter--over");
+  });
+
+  it("SCRUM493_AC1_server_400_emergency_access_detail_is_listed", async () => {
+    const user = userEvent.setup();
+    vi.mocked(createVenue).mockRejectedValue({
+      response: {
+        status: 400,
+        data: {
+          error: "Validation failed",
+          details: [{ field: "emergencyAccess", message: "must be 2000 characters or fewer" }],
+        },
+      },
+    });
+    render(<VenueForm />);
+
+    fireEvent.change(emergencyBox(), { target: { value: "a".repeat(2001) } });
+    await user.click(screen.getByRole("button", { name: "Create venue" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("This venue can't be saved yet:");
+    expect(
+      within(alert).getByText("Emergency access: must be 2000 characters or fewer"),
+    ).toBeInTheDocument();
+  });
+
+  it("SCRUM493_AC1_each_textarea_is_described_by_its_help_line", () => {
+    render(<VenueForm />);
+
+    const emergency = emergencyBox();
+    const restrictions = restrictionsBox();
+    expect(emergency.tagName).toBe("TEXTAREA");
+    expect(restrictions.tagName).toBe("TEXTAREA");
+    expect(emergency.getAttribute("aria-describedby")).not.toBe(
+      restrictions.getAttribute("aria-describedby"),
+    );
+
+    const emergencyHelp = helpLineFor(emergency);
+    expect(emergencyHelp).toHaveClass("venue-form__help");
+    expect(emergencyHelp).toHaveTextContent("Exits, routes and assembly points.");
+    expect(emergency).toHaveAccessibleDescription("Exits, routes and assembly points. 0/2000");
+
+    const restrictionsHelp = helpLineFor(restrictions);
+    expect(restrictionsHelp).toHaveTextContent(
+      "Anything that limits how the venue can be used, such as limits on equipment, noise or structures.",
+    );
+  });
+
+  // Review fix: the baseline is trimmed too, not trusted to be. A row stored
+  // with padding (before the server trimmed, or a hand edit) is no change
+  // when the box is left alone.
+  it("SCRUM493_AC4_stored_value_with_surrounding_whitespace_untouched_is_nothing_changed", async () => {
+    const user = userEvent.setup();
+    await renderEdit({ emergencyAccess: "  Exit A  \n", knownRestrictions: "\tNo confetti " });
+
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Nothing has changed, so there is nothing to save.",
+    );
+    expect(updateVenue).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM493_AC4_stored_padded_values_are_not_resent_on_a_name_only_edit", async () => {
+    const user = userEvent.setup();
+    await renderEdit({ emergencyAccess: "  Exit A  \n", knownRestrictions: "\tNo confetti " });
+
+    const name = screen.getByLabelText("Name");
+    await user.clear(name);
+    await user.type(name, "Hall B");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(updateVenue).toHaveBeenCalledTimes(1);
+    const [, changes] = vi.mocked(updateVenue).mock.calls[0];
+    expect(changes).toEqual({ name: "Hall B" });
+  });
+
+  // Review fix: the textarea reports LF after an edit while the stored text
+  // may hold CRLF, so an edit reverted to the same lines is no change.
+  it("SCRUM493_AC4_stored_crlf_value_edited_then_reverted_sends_nothing", async () => {
+    const user = userEvent.setup();
+    await renderEdit({ emergencyAccess: "Exit A\r\nExit B", knownRestrictions: "No confetti" });
+
+    fireEvent.change(emergencyBox(), { target: { value: "Exit A\nExit C" } });
+    fireEvent.change(emergencyBox(), { target: { value: "Exit A\nExit B" } });
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Nothing has changed, so there is nothing to save.",
+    );
+    expect(updateVenue).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM493_AC4_stored_crlf_value_with_a_real_edit_sends_the_new_text", async () => {
+    const user = userEvent.setup();
+    await renderEdit({ emergencyAccess: "Exit A\r\nExit B", knownRestrictions: "No confetti" });
+
+    fireEvent.change(emergencyBox(), { target: { value: "Exit A\nExit C" } });
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(updateVenue).toHaveBeenCalledWith(VENUE_ID, { emergencyAccess: "Exit A\nExit C" });
+  });
+
+  // Review fix: a box with nothing visible in it counts as empty.
+  it("SCRUM493_AC4_invisible_only_box_clears_a_recorded_field", async () => {
+    const user = userEvent.setup();
+    await renderEdit({ emergencyAccess: "Exit A", knownRestrictions: "No confetti" });
+
+    fireEvent.change(emergencyBox(), { target: { value: " ​⁠ ﻿ " } });
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(updateVenue).toHaveBeenCalledTimes(1);
+    expect(updateVenue).toHaveBeenCalledWith(VENUE_ID, { emergencyAccess: null });
+  });
+
+  it("SCRUM493_AC4_invisible_only_box_in_an_unrecorded_field_is_nothing_changed", async () => {
+    const user = userEvent.setup();
+    await renderEdit({ emergencyAccess: "Exit A", knownRestrictions: null });
+
+    fireEvent.change(restrictionsBox(), { target: { value: "ㅤ ⠀" } });
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Nothing has changed, so there is nothing to save.",
+    );
+    expect(updateVenue).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM493_AC1_create_leaves_out_invisible_only_boxes", async () => {
+    const user = userEvent.setup();
+    render(<VenueForm />);
+
+    fireEvent.change(emergencyBox(), { target: { value: "​​" } });
+    fireEvent.change(restrictionsBox(), { target: { value: " ­\nᅟᅠﾠ " } });
+    await user.click(screen.getByRole("button", { name: "Create venue" }));
+
+    expect(createVenue).toHaveBeenCalledTimes(1);
+    const payload = JSON.parse(JSON.stringify(vi.mocked(createVenue).mock.calls[0][0]));
+    expect(payload).not.toHaveProperty("emergencyAccess");
+    expect(payload).not.toHaveProperty("knownRestrictions");
+  });
+
+  // Review fix: the counter counts what the server checks (trimmed), so
+  // trailing whitespace cannot turn it red for text that will be accepted.
+  it("SCRUM493_AC1_the_counter_ignores_trailing_whitespace", () => {
+    render(<VenueForm />);
+    const counter = () => helpLineFor(emergencyBox()).querySelector(".venue-form__counter");
+
+    fireEvent.change(emergencyBox(), { target: { value: "a".repeat(1995) + "\n".repeat(10) } });
+    expect(emergencyBox().value).toHaveLength(2005);
+    expect(counter()).toHaveTextContent("1995/2000");
+    expect(counter()).not.toHaveClass("venue-form__counter--over");
+  });
+
+  it("SCRUM493_AC1_server_400_marks_the_named_textarea_aria_invalid_only", async () => {
+    const user = userEvent.setup();
+    vi.mocked(createVenue).mockRejectedValue({
+      response: {
+        status: 400,
+        data: {
+          error: "Validation failed",
+          details: [{ field: "emergencyAccess", message: "must be 2000 characters or fewer" }],
+        },
+      },
+    });
+    render(<VenueForm />);
+
+    expect(emergencyBox()).not.toHaveAttribute("aria-invalid");
+    fireEvent.change(emergencyBox(), { target: { value: "a".repeat(2001) } });
+    await user.click(screen.getByRole("button", { name: "Create venue" }));
+
+    await screen.findByRole("alert");
+    expect(emergencyBox()).toHaveAttribute("aria-invalid", "true");
+    expect(restrictionsBox()).not.toHaveAttribute("aria-invalid");
+  });
+
+  it("SCRUM493_AC1_server_400_other_fields_keep_their_raw_name", async () => {
+    const user = userEvent.setup();
+    vi.mocked(createVenue).mockRejectedValue({
+      response: {
+        status: 400,
+        data: {
+          error: "Validation failed",
+          details: [
+            { field: "maxCapacity", message: "must be a positive integer" },
+            { field: "knownRestrictions", message: "must be a string" },
+          ],
+        },
+      },
+    });
+    render(<VenueForm />);
+
+    await user.click(screen.getByRole("button", { name: "Create venue" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(within(alert).getByText("maxCapacity: must be a positive integer")).toBeInTheDocument();
+    expect(within(alert).getByText("Known restrictions: must be a string")).toBeInTheDocument();
+    expect(restrictionsBox()).toHaveAttribute("aria-invalid", "true");
+    expect(emergencyBox()).not.toHaveAttribute("aria-invalid");
+  });
+});
+
+describe("SCRUM575 VenueForm overnight opening hours", () => {
+  const friday = () => screen.getByRole("checkbox", { name: "Friday" });
+  const fridayOpens = () => screen.getByLabelText("Friday opens at");
+  const fridayCloses = () => screen.getByLabelText("Friday closes at");
+
+  function setTimes(opens, closes) {
+    fireEvent.change(fridayOpens(), { target: { value: opens } });
+    fireEvent.change(fridayCloses(), { target: { value: closes } });
+  }
+
+  it("SCRUM575_AC1_an_earlier_closing_time_is_described_as_the_next_day", async () => {
+    const user = userEvent.setup();
+    render(<VenueForm />);
+    await user.click(friday());
+    setTimes("18:00", "02:00");
+
+    expect(screen.getByText("Closes Saturday 02:00 (next day)")).toBeInTheDocument();
+    // The note is the closing input's description, so it is heard with it.
+    expect(fridayCloses()).toHaveAccessibleDescription("Closes Saturday 02:00 (next day)");
+  });
+
+  it("SCRUM575_AC2_a_00_00_close_is_described_as_midnight", async () => {
+    const user = userEvent.setup();
+    render(<VenueForm />);
+    await user.click(friday());
+    setTimes("18:00", "00:00");
+
+    expect(fridayCloses()).toHaveAccessibleDescription("Closes at midnight");
+  });
+
+  it("SCRUM575_AC1_same_day_hours_and_unticked_days_have_no_note", async () => {
+    const user = userEvent.setup();
+    render(<VenueForm />);
+    await user.click(friday());
+    setTimes("18:00", "02:00");
+    setTimes("09:00", "18:00");
+
+    expect(screen.queryByText(/next day|midnight/, { selector: "p.venue-form__closing" })).toBeNull();
+    expect(fridayCloses()).not.toHaveAttribute("aria-describedby");
+
+    setTimes("18:00", "02:00");
+    await user.click(friday());
+    expect(screen.queryByText("Closes Saturday 02:00 (next day)")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM575_AC1_create_sends_the_overnight_hours_on_the_opening_day", async () => {
+    const user = userEvent.setup();
+    render(<VenueForm />);
+    await user.click(friday());
+    setTimes("18:00", "02:00");
+    await user.click(screen.getByRole("button", { name: "Create venue" }));
+
+    expect(vi.mocked(createVenue).mock.calls[0][0].hours).toEqual([
+      { day_of_week: 5, opens_at: "18:00", closes_at: "02:00" },
+    ]);
+  });
+});
+
+describe("SCRUM575 VenueForm confirming shorter hours", () => {
+  const NIGHT_MARKET = {
+    bookingId: "b0000000-0000-4000-8000-000000000001",
+    eventRequestId: "e0000000-0000-4000-8000-000000000001",
+    eventName: "Night Market",
+    startsAt: "2026-11-02T19:00:00+08:00",
+    endsAt: "2026-11-02T22:00:00+08:00",
+  };
+  const LATE_TALK = {
+    bookingId: "b0000000-0000-4000-8000-000000000002",
+    eventRequestId: "e0000000-0000-4000-8000-000000000002",
+    eventName: "Late Talk",
+    startsAt: "2026-11-09T17:00:00+08:00",
+    endsAt: "2026-11-09T19:00:00+08:00",
+  };
+
+  function hoursConflict(conflicts) {
+    return Object.assign(new Error("conflict"), {
+      response: {
+        status: 409,
+        data: { error: "New hours leave out bookings", code: "VENUE_HOURS_BOOKING_CONFLICT", conflicts },
+      },
+    });
+  }
+
+  const mondayCloses = () => screen.getByLabelText("Monday closes at");
+
+  /** Edit the saved venue (Monday 09:00-18:00), shorten Monday to 17:00 and save. */
+  async function shortenAndSave(onSaved) {
+    const user = userEvent.setup();
+    vi.mocked(getVenueDetails).mockResolvedValue(savedVenue());
+    render(<VenueForm venueId={VENUE_ID} onSaved={onSaved} />);
+    await screen.findByRole("heading", { name: "Edit venue" });
+    fireEvent.change(mondayCloses(), { target: { value: "17:00" } });
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    return user;
+  }
+
+  it("SCRUM575_AC7_conflict_lists_the_bookings_and_confirming_resends_with_their_ids", async () => {
+    const onSaved = vi.fn();
+    const saved = { ...savedVenue(), flaggedBookings: [NIGHT_MARKET] };
+    vi.mocked(updateVenue)
+      .mockRejectedValueOnce(hoursConflict([NIGHT_MARKET]))
+      .mockResolvedValueOnce(saved);
+    const user = await shortenAndSave(onSaved);
+
+    expect(
+      await screen.findByRole("heading", { name: "1 approved booking falls outside the new opening hours" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Night Market")).toBeInTheDocument();
+    expect(screen.getByText("2026-11-02 19:00 – 22:00 (Singapore time)")).toBeInTheDocument();
+    expect(screen.getByText(/They will not be cancelled\./)).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(onSaved).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Confirm new hours" }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Save and flag" }));
+
+    expect(updateVenue).toHaveBeenCalledTimes(2);
+    const hours = [{ day_of_week: 1, opens_at: "09:00", closes_at: "17:00" }];
+    expect(vi.mocked(updateVenue).mock.calls[0][1]).toEqual({ hours });
+    expect(vi.mocked(updateVenue).mock.calls[1][1]).toEqual({
+      hours,
+      confirmHoursChange: [NIGHT_MARKET.bookingId],
+    });
+    expect(onSaved).toHaveBeenCalledWith(saved, { confirmedHoursChange: [NIGHT_MARKET.bookingId] });
+  });
+
+  it("SCRUM575_AC7_change_hours_hides_the_list_and_keeps_the_edits", async () => {
+    vi.mocked(updateVenue).mockRejectedValueOnce(hoursConflict([NIGHT_MARKET]));
+    const user = await shortenAndSave();
+    await screen.findByText("Night Market");
+
+    await user.click(screen.getByRole("button", { name: "Change hours" }));
+
+    expect(screen.queryByText("Night Market")).not.toBeInTheDocument();
+    expect(mondayCloses()).toHaveValue("17:00");
+    expect(screen.getByRole("group", { name: "Opening hours" })).toHaveFocus();
+    expect(updateVenue).toHaveBeenCalledTimes(1);
+  });
+
+  it("SCRUM575_AC7_editing_the_hours_clears_a_listed_conflict", async () => {
+    vi.mocked(updateVenue).mockRejectedValueOnce(hoursConflict([NIGHT_MARKET]));
+    await shortenAndSave();
+    await screen.findByText("Night Market");
+
+    fireEvent.change(mondayCloses(), { target: { value: "16:00" } });
+
+    expect(screen.queryByText("Night Market")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM575_AC7_a_second_conflict_replaces_the_list_and_closes_the_confirm", async () => {
+    const onSaved = vi.fn();
+    vi.mocked(updateVenue)
+      .mockRejectedValueOnce(hoursConflict([NIGHT_MARKET]))
+      .mockRejectedValueOnce(hoursConflict([NIGHT_MARKET, LATE_TALK]));
+    const user = await shortenAndSave(onSaved);
+    await screen.findByText("Night Market");
+
+    await user.click(screen.getByRole("button", { name: "Confirm new hours" }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Save and flag" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "2 approved bookings fall outside the new opening hours" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Late Talk")).toBeInTheDocument();
+    // The new booking has not been seen, so the confirm must be opened again.
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(onSaved).not.toHaveBeenCalled();
+  });
+});
+
+describe("SCRUM15 VenueForm attribute codes", () => {
+  async function renderEdit(overrides = {}) {
+    vi.mocked(getVenueDetails).mockResolvedValue(savedVenue(overrides));
+    render(<VenueForm venueId={VENUE_ID} />);
+    await screen.findByRole("heading", { name: "Edit venue" });
+  }
+
+  it("SCRUM15_AC1_create_sends_the_ticked_layouts_accessibility_and_facilities", async () => {
+    const user = userEvent.setup();
+    render(<VenueForm />);
+
+    await user.click(screen.getByRole("checkbox", { name: "Classroom" }));
+    await user.click(screen.getByRole("checkbox", { name: "Boardroom" }));
+    await user.click(screen.getByRole("checkbox", { name: "Step-free entrance" }));
+    await user.click(screen.getByRole("checkbox", { name: "Projector" }));
+    await user.click(screen.getByRole("checkbox", { name: "Wi-Fi" }));
+    // Unticking takes a code back out.
+    await user.click(screen.getByRole("checkbox", { name: "Boardroom" }));
+    expect(screen.getByRole("checkbox", { name: "Boardroom" })).not.toBeChecked();
+    await user.click(screen.getByRole("button", { name: "Create venue" }));
+
+    const payload = vi.mocked(createVenue).mock.calls[0][0];
+    expect(payload.layouts).toEqual(["classroom"]);
+    expect(payload.accessibility).toEqual(["step_free_entrance"]);
+    expect(payload.facilities).toEqual(["projector", "wifi"]);
+  });
+
+  it("SCRUM15_AC2_ticking_and_unticking_codes_sends_only_the_vocabularies_that_moved", async () => {
+    const user = userEvent.setup();
+    await renderEdit();
+
+    await user.click(screen.getByRole("checkbox", { name: "Hearing loop" }));
+    await user.click(screen.getByRole("checkbox", { name: "Wi-Fi" }));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    // Layouts did not move, so they are not mentioned and cannot be replaced.
+    expect(updateVenue).toHaveBeenCalledWith(VENUE_ID, {
+      accessibility: ["hearing_loop"],
+      facilities: [],
+    });
+  });
+
+  it("SCRUM15_AC2_an_unrecognised_saved_code_is_shown_and_can_be_removed", async () => {
+    const user = userEvent.setup();
+    await renderEdit({ layouts: ["theatre", "mezzanine"] });
+
+    const unknown = screen.getByRole("checkbox", { name: "mezzanine (unrecognised code)" });
+    expect(unknown).toBeChecked();
+    expect(unknown.closest("label")).toHaveAttribute("title", UNKNOWN_CODE_TITLE);
+    expect(screen.getByRole("checkbox", { name: "Theatre" }).closest("label")).not.toHaveAttribute("title");
+
+    await user.click(unknown);
+    // Still on screen, so the removal can be undone before saving.
+    expect(screen.getByRole("checkbox", { name: "mezzanine (unrecognised code)" })).not.toBeChecked();
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(updateVenue).toHaveBeenCalledWith(VENUE_ID, { layouts: ["theatre"] });
+  });
+});
+
+describe("SCRUM15 VenueForm edit sends only what changed", () => {
+  async function renderEdit(overrides = {}) {
+    vi.mocked(getVenueDetails).mockResolvedValue(savedVenue(overrides));
+    render(<VenueForm venueId={VENUE_ID} />);
+    await screen.findByRole("heading", { name: "Edit venue" });
+  }
+
+  it("SCRUM15_AC2_changing_only_the_location_sends_only_the_location", async () => {
+    const user = userEvent.setup();
+    await renderEdit();
+
+    const location = screen.getByLabelText("Location");
+    await user.clear(location);
+    await user.type(location, "Level 3");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(updateVenue).toHaveBeenCalledWith(VENUE_ID, { location: "Level 3" });
+  });
+
+  it("SCRUM15_AC2_changing_the_capacity_sends_it_as_a_number", async () => {
+    const user = userEvent.setup();
+    await renderEdit();
+
+    const capacity = screen.getByLabelText("Maximum capacity");
+    await user.clear(capacity);
+    await user.type(capacity, "150");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(updateVenue).toHaveBeenCalledWith(VENUE_ID, { maxCapacity: 150 });
+  });
+
+  it("SCRUM15_AC2_clearing_the_capacity_sends_null_so_the_server_can_say_it_is_required", async () => {
+    const user = userEvent.setup();
+    await renderEdit();
+
+    await user.clear(screen.getByLabelText("Maximum capacity"));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(updateVenue).toHaveBeenCalledWith(VENUE_ID, { maxCapacity: null });
+  });
+
+  it("SCRUM15_AC2_hours_saved_out_of_day_order_are_not_resent_on_a_name_only_edit", async () => {
+    const user = userEvent.setup();
+    await renderEdit({
+      hours: [
+        { day_of_week: 3, opens_at: "10:00:00", closes_at: "16:00:00" },
+        { day_of_week: 1, opens_at: "09:00:00", closes_at: "18:00:00" },
+      ],
+    });
+
+    const name = screen.getByLabelText("Name");
+    await user.clear(name);
+    await user.type(name, "Hall B");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(updateVenue).toHaveBeenCalledWith(VENUE_ID, { name: "Hall B" });
+  });
+
+  it("SCRUM15_AC2_a_venue_missing_name_location_and_capacity_prefills_empty_boxes", async () => {
+    await renderEdit({ name: null, location: undefined, maxCapacity: null });
+
+    expect(screen.getByLabelText("Name")).toHaveValue("");
+    expect(screen.getByLabelText("Location")).toHaveValue("");
+    expect(screen.getByLabelText("Maximum capacity")).toHaveValue(null);
+  });
+});
+
+describe("SCRUM15 VenueForm save failures", () => {
+  async function editNameAndSave() {
+    const user = userEvent.setup();
+    vi.mocked(getVenueDetails).mockResolvedValue(savedVenue());
+    render(<VenueForm venueId={VENUE_ID} />);
+    await screen.findByRole("heading", { name: "Edit venue" });
+    const name = screen.getByLabelText("Name");
+    await user.clear(name);
+    await user.type(name, "Hall B");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+  }
+
+  it("SCRUM15_AC1_a_second_submit_while_saving_sends_only_one_request", async () => {
+    let finish;
+    vi.mocked(createVenue).mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    render(<VenueForm />);
+    const form = screen.getByRole("button", { name: "Create venue" }).closest("form");
+
+    fireEvent.submit(form);
+    expect(screen.getByRole("button", { name: "Saving..." })).toBeDisabled();
+    fireEvent.submit(form);
+
+    expect(createVenue).toHaveBeenCalledTimes(1);
+    finish({ id: VENUE_ID });
+    await vi.waitFor(() => expect(screen.getByRole("button", { name: "Create venue" })).toBeEnabled());
+  });
+
+  it.each([
+    [403, "Only Venue Staff can add or change a venue."],
+    [404, "That venue no longer exists. Go back and refresh the catalogue."],
+    [500, "The server could not save this venue. Please try again."],
+  ])("SCRUM15_AC2_a_%s_refusal_shows_its_own_message", async (status, message) => {
+    vi.mocked(updateVenue).mockRejectedValue({
+      response: { status, data: { error: "venue 3f2504e0 raw database text" } },
+    });
+
+    await editNameAndSave();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(message);
+    expect(alert).not.toHaveTextContent("raw database text");
+  });
+
+  it("SCRUM15_AC1_a_400_without_details_shows_the_servers_error", async () => {
+    vi.mocked(createVenue).mockRejectedValue({
+      response: { status: 400, data: { error: "Request body must be a JSON object" } },
+    });
+    const user = userEvent.setup();
+    render(<VenueForm />);
+
+    await user.click(screen.getByRole("button", { name: "Create venue" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Request body must be a JSON object");
+  });
+
+  it("SCRUM15_AC1_a_failure_with_no_server_answer_shows_the_generic_message", async () => {
+    vi.mocked(createVenue).mockRejectedValue(new Error("Network Error"));
+    const user = userEvent.setup();
+    render(<VenueForm />);
+
+    await user.click(screen.getByRole("button", { name: "Create venue" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not save this venue. Please try again.");
+  });
+
+  it("SCRUM15_AC1_a_detail_with_no_field_shows_only_its_message", async () => {
+    vi.mocked(createVenue).mockRejectedValue({
+      response: {
+        status: 400,
+        data: { error: "Validation failed", details: [{ message: "At least one field is required" }] },
+      },
+    });
+    const user = userEvent.setup();
+    render(<VenueForm />);
+
+    await user.click(screen.getByRole("button", { name: "Create venue" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(within(alert).getByRole("listitem")).toHaveTextContent(/^At least one field is required$/);
+  });
+
+  it("SCRUM575_AC7_an_hours_conflict_with_no_list_saves_nothing_and_lists_nothing", async () => {
+    const onSaved = vi.fn();
+    vi.mocked(updateVenue).mockRejectedValue({
+      response: { status: 409, data: { code: "VENUE_HOURS_BOOKING_CONFLICT" } },
+    });
+    const user = userEvent.setup();
+    vi.mocked(getVenueDetails).mockResolvedValue(savedVenue());
+    render(<VenueForm venueId={VENUE_ID} onSaved={onSaved} />);
+    await screen.findByRole("heading", { name: "Edit venue" });
+
+    fireEvent.change(screen.getByLabelText("Monday closes at"), { target: { value: "17:00" } });
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await vi.waitFor(() => expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled());
+    expect(screen.queryByRole("heading", { name: /fall|falls outside the new opening hours/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Confirm new hours" })).not.toBeInTheDocument();
+    expect(onSaved).not.toHaveBeenCalled();
+  });
+});
