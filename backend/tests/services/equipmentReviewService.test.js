@@ -250,6 +250,32 @@ describe('AC4: the review data', () => {
 
     expect(JSON.stringify(state)).not.toMatch(/"[a-z]+_[a-z_]+":/);
   });
+
+  it('SCRUM290_AC4_a_line_with_nothing_reserved_is_short_by_its_whole_quantity', async () => {
+    const client = fakeClient({
+      equipment_review_for_event: ok(reviewRow({ lines: [lineRow({ quantity: 5, reserved: undefined })] })),
+    });
+
+    const state = await getEquipmentReview(EVENT_ID, { client });
+
+    expect(state.request.lines[0]).toMatchObject({ reserved: 0, shortBy: 5 });
+  });
+
+  it('SCRUM290_AC4_missing_event_fields_and_lines_read_as_null_and_empty', async () => {
+    // equipment_review_for_event always sends the event and a lines array; this is the fallback.
+    const state = toReviewState({
+      request: { id: REQUEST_ID, status: 'pending_review', created_at: 'c', updated_at: 'u' },
+    });
+
+    expect(state.event).toEqual({
+      id: undefined,
+      name: undefined,
+      proposedStart: null,
+      proposedEnd: null,
+      assignedCoordinatorId: null,
+    });
+    expect(state.request.lines).toEqual([]);
+  });
 });
 
 
@@ -356,6 +382,17 @@ describe('AC2 and AC3: starting and taking over', () => {
 
     expect(err).toBeInstanceOf(Error);
     expect(err).not.toBeInstanceOf(AppError);
+  });
+
+  it('SCRUM290_AC2_a_22023_that_names_no_input_is_a_400_with_no_field', async () => {
+    const message = 'The period must end after it starts';
+    const client = fakeClient({ start_equipment_review: dbError('22023', message) });
+
+    const err = await errorFrom(startEquipmentReview(EVENT_ID, REVIEWER_ID, { client }));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toBe(message);
+    expect(err.details).toEqual([]);
   });
 });
 
@@ -491,6 +528,27 @@ describe('AC7: marking a line and completing', () => {
     expect(err).toBeInstanceOf(ValidationError);
     expect(err.message).toMatch(/^A value was rejected by the database:/);
   });
+
+  it('SCRUM290_AC7_mark_a_note_the_database_refuses_is_a_400_on_note', async () => {
+    const message = 'A note is required: say what is missing';
+    const client = fakeClient({ mark_equipment_line_unavailable: dbError('22023', message) });
+
+    const err = await errorFrom(markEquipmentLineUnavailable(EVENT_ID, LINE_ID, { note: 'a' }, REVIEWER_ID, { client }));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([{ field: 'note', message }]);
+  });
+
+  it('SCRUM290_AC7_complete_missing_notes_without_a_list_of_lines_is_one_400_on_lines', async () => {
+    // The function always lists the lines; this keeps the 400 if the list is ever empty.
+    const message = 'Add a note to each line that cannot be provided.';
+    const client = fakeClient({ complete_equipment_review: dbError('22023', message) });
+
+    const err = await errorFrom(completeEquipmentReview(EVENT_ID, REVIEWER_ID, { client }));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([{ field: 'lines', message }]);
+  });
 });
 
 
@@ -574,5 +632,33 @@ describe('AC3 and AC4: the names on the screen', () => {
 
     expect(err).toBeInstanceOf(Error);
     expect(err).not.toBeInstanceOf(AppError);
+  });
+
+  it('SCRUM290_AC4_a_failed_booking_read_is_a_500_not_a_screen_without_a_venue', async () => {
+    const client = fakeClient({}, { bookings: dbError('XX000', 'bookings is broken') });
+
+    const err = await errorFrom(getEquipmentReview(EVENT_ID, { client }));
+
+    expect(err.message).toBe('bookings is broken');
+    expect(err).not.toBeInstanceOf(AppError);
+    expect(client.fromCalls).not.toContain('venues');
+  });
+
+  it('SCRUM290_AC4_a_failed_venue_read_is_a_500_not_a_screen_without_a_venue', async () => {
+    const client = fakeClient({}, { venues: dbError('XX000', 'venues is broken') });
+
+    const err = await errorFrom(getEquipmentReview(EVENT_ID, { client }));
+
+    expect(err.message).toBe('venues is broken');
+    expect(err).not.toBeInstanceOf(AppError);
+  });
+
+  it('SCRUM290_AC4_a_booking_whose_venue_cannot_be_read_has_no_venue', async () => {
+    const client = fakeClient({}, { venues: ok([]) });
+
+    const state = await getEquipmentReview(EVENT_ID, { client });
+
+    expect(state.event.venue).toBeNull();
+    expect(client.fromCalls).toContain('venues');
   });
 });

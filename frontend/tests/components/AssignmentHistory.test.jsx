@@ -13,7 +13,7 @@
 // was exercised only inside the screens that mount it.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 
 import AssignmentHistory from "../../src/components/AssignmentHistory.jsx";
 import { useAuth } from "../../src/auth/AuthContext";
@@ -136,5 +136,51 @@ describe("SCRUM486_TR03 the current coordinator comes from the request, not the 
     renderHistory([automatic], { currentCoordinatorId: OMAR });
 
     expect(await current()).toHaveTextContent(`No name on record ${OMAR}`);
+  });
+});
+
+
+describe("SCRUM327_AC9 handover notes in the coordinator's view", () => {
+  it("SCRUM327_AC9_a_handover_with_no_note_says_none_was_left_but_an_automatic_row_does_not", async () => {
+    // The coordinator's endpoint always sends the key: null when nobody wrote one.
+    renderHistory(
+      [{ ...automatic, handoverNote: null }, { ...leadHandover, handoverNote: null }],
+      { view: "coordinator", currentCoordinatorId: OMAR },
+    );
+
+    const [first, second] = await entryRows();
+    expect(getAssignmentHistoryForReview).toHaveBeenCalledWith(REQUEST_ID);
+    expect(first).not.toHaveTextContent("No handover note was left.");
+    expect(second).toHaveTextContent("No handover note was left.");
+  });
+});
+
+
+describe("SCRUM327_AC9 the history failing to load", () => {
+  it("SCRUM327_AC9_a_failure_with_no_response_falls_back_to_the_general_message", async () => {
+    vi.mocked(getAssignmentHistory).mockRejectedValue(new Error("Network Error"));
+    render(<AssignmentHistory eventRequestId={REQUEST_ID} view="organiser" />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("The coordinator history could not be loaded.");
+  });
+
+  it("SCRUM327_AC9_a_failure_for_an_event_already_left_is_not_shown", async () => {
+    // The first event's request is still out when the panel moves to another.
+    let failFirst;
+    vi.mocked(getAssignmentHistory)
+      .mockReturnValueOnce(new Promise((_, reject) => { failFirst = reject; }))
+      .mockResolvedValueOnce([leadFirst]);
+    const { rerender } = render(<AssignmentHistory eventRequestId={REQUEST_ID} view="organiser" />);
+
+    rerender(<AssignmentHistory eventRequestId="other-event" view="organiser" />);
+    expect(getAssignmentHistory).toHaveBeenLastCalledWith("other-event");
+    expect((await entryRows())[0]).toHaveTextContent("Assigned to Omar Okafor");
+
+    failFirst({ response: { status: 500 } });
+    // Lets the settled request's catch and finally run.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect((await entryRows())[0]).toHaveTextContent("Assigned to Omar Okafor");
   });
 });

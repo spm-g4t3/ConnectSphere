@@ -217,3 +217,57 @@ describe("SCRUM-334: the detail panel survives the event leaving My events", () 
     expect(screen.getByRole("heading", { name: "Handed over event" })).toBeInTheDocument();
   });
 });
+
+// SCRUM-327 AC11: My events, grouped by status.
+describe("SCRUM-327 AC11: the status groups", () => {
+  it("SCRUM327_AC11_a_group_this_screen_does_not_name_is_shown_under_the_servers_label_before_the_finished_ones", async () => {
+    // What the server sends for a status this build does not know.
+    const unknown = { status: "postponed", label: "Unknown Status", group: "UNKNOWN", description: "At a stage this page does not recognise." };
+    renderList([
+      event("e1", "confirmed", "Going ahead"),
+      { ...event("e2", "confirmed", "A newer status"), status: "postponed", statusDisplay: unknown },
+      event("e3", "cancelled", "Called off"),
+    ]);
+
+    const heading = await screen.findByRole("heading", { name: /^Unknown Status/ });
+    expect(within(heading.closest("div")).getByText("A newer status")).toBeInTheDocument();
+    // Not collapsed out of sight like a finished group, and listed after the open ones.
+    expect(heading.closest("details")).toBeNull();
+    const order = [screen.getByRole("heading", { name: /^Confirmed/ }), heading, screen.getByText(/^Cancelled/, { selector: "summary" })];
+    expect(order[0].compareDocumentPosition(order[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(order[1].compareDocumentPosition(order[2]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("SCRUM327_AC11_a_finished_group_opened_can_be_collapsed_again", async () => {
+    renderList([event("e1", "cancelled", "Called off")]);
+    const summary = await screen.findByText(/^Cancelled/, { selector: "summary" });
+    const details = summary.closest("details");
+
+    fireEvent.click(summary);
+    await waitFor(() => expect(details).toHaveAttribute("open"));
+    fireEvent.click(summary);
+
+    await waitFor(() => expect(details).not.toHaveAttribute("open"));
+  });
+});
+
+// SCRUM-162 AC11: a clarification past its reply-by date is in Needs attention.
+describe("SCRUM-162 AC11: overdue clarifications in Needs attention", () => {
+  it("SCRUM162_AC11_overdue_clarifications_are_listed_earliest_reply_by_date_first", async () => {
+    const awaiting = { status: "pending_clarification", label: "Action Needed", group: "ACTION_REQUIRED", description: "Waiting." };
+    const pending = (id, eventName, clarificationReplyByDate) => ({
+      ...event(id, "pending_clarification", eventName),
+      statusDisplay: awaiting,
+      clarificationReplyByDate,
+    });
+    // The server's order is by event date, not by reply-by date.
+    renderList([
+      pending("e1", "Later deadline", "2020-03-10"),
+      pending("e2", "Earlier deadline", "2020-01-10"),
+    ]);
+
+    const attention = await screen.findByRole("region", { name: "Needs attention" });
+    expect(within(attention).getAllByRole("listitem").map((row) => row.querySelector("strong").textContent))
+      .toEqual(["Earlier deadline", "Later deadline"]);
+  });
+});

@@ -297,6 +297,17 @@ describe('SCRUM-382: the final-event guard on the real schema', () => {
       expect(error.message).toContain('connection lost');
     });
 
+    it('SCRUM379_AC3_a_read_error_with_no_message_is_reported_by_its_code', async () => {
+      const codeOnly = { from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: { code: '08006' } }) }) }) }) };
+      const { nexted, error } = await run(
+        createFinalEventGuard({ client: codeOnly })(eventIdFromParam('id')),
+        { params: { id: eventByStatus.approved } },
+      );
+      expect(nexted).toBe(0);
+      expect(error.message).toBe('The final-event guard could not read the event: 08006');
+      expect(error.cause).toEqual({ code: '08006' });
+    });
+
     it('SCRUM379_AC3_a_thrown_driver_error_is_not_swallowed', async () => {
       const throwing = { from: () => { throw new Error('socket closed'); } };
       const { nexted, error } = await run(
@@ -442,6 +453,22 @@ describe('SCRUM-382: the final-event guard on the real schema', () => {
       it('SCRUM379_AC3_a_registration_id_that_is_not_an_id_is_left_to_the_handler', async () => {
         const { nexted, error } = await run(mine(), asUser(attendee, { params: { registrationId: 'not-an-id' } }));
 
+        expect(error).toBeNull();
+        expect(nexted).toBe(1);
+      });
+
+      it('SCRUM379_AC3_an_unusable_registration_id_is_not_entitled_and_reads_nothing', async () => {
+        // The event comes from another parameter, so the entitlement check sees the bad id itself.
+        const noReads = { from: () => { throw new Error('should not read'); } };
+        const entitled = await ownsRegistration('registrationId')(
+          asUser(attendee, { params: { registrationId: 'not-an-id' } }), noReads,
+        );
+        expect(entitled).toBe(false);
+
+        const guarded = guard(eventIdFromParam('id'), { entitled: ownsRegistration('registrationId') });
+        const { nexted, error } = await run(
+          guarded, asUser(attendee, { params: { id: eventByStatus.completed, registrationId: 'not-an-id' } }),
+        );
         expect(error).toBeNull();
         expect(nexted).toBe(1);
       });

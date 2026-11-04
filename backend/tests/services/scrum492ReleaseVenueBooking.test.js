@@ -119,6 +119,19 @@ describe('SCRUM-492: releaseVenueBooking', () => {
     expect((await call(client)).returnedToPending).toEqual([]);
   });
 
+  it('SCRUM492_AC6_a_booking_without_the_release_columns_reads_them_as_null', async () => {
+    // 089 always writes all three; this pins the null fallback.
+    const row = releasedRow();
+    delete row.released_by;
+    delete row.released_at;
+    delete row.release_reason;
+    const client = createRpcQueueClient([ok({ outcome: 'released', booking: row })]);
+
+    const { booking } = await call(client);
+
+    expect(booking).toMatchObject({ status: 'released', releasedBy: null, releasedAt: null, releaseReason: null });
+  });
+
   it.each(['EVENT_NOT_APPROVED', 'BOOKING_NOT_APPROVED'])(
     'SCRUM492_AC1_the_functions_%s_arrives_as_a_409_with_that_code',
     async (hint) => {

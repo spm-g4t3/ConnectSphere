@@ -98,3 +98,26 @@ describe("SCRUM584 AC7 login follows the UI standard", () => {
     expect(screen.getByRole("button", { name: "Log in" })).toHaveAttribute("type", "submit");
   });
 });
+
+describe("SCRUM92 AC5 a login with a missing field is refused before it is sent", () => {
+  it("SCRUM92_AC5_an_empty_password_shows_the_required_error_and_sends_no_login", async () => {
+    const login = vi.fn();
+    vi.mocked(useAuth).mockReturnValue({
+      user: null,
+      loading: false,
+      login,
+      logoutMessage: null,
+      clearLogoutMessage: vi.fn(),
+    });
+    window.history.pushState({}, "", "/login");
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.type(screen.getByLabelText("Email"), "someone@connectsphere.com");
+    await user.click(screen.getByRole("button", { name: "Log in" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Email and password are required");
+    expect(login).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Password")).toHaveValue("");
+  });
+});

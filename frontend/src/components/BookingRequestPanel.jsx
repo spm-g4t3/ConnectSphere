@@ -319,6 +319,7 @@ export default function BookingRequestPanel({
     e.preventDefault();
     if (sending.current || submitted) return;
     if (attendance === null) return;
+    /* v8 ignore next -- @preserve The submit button is disabled while a check runs. */
     if (checking) return;
     // An attendance typed but not yet checked is checked first; the
     // coordinator sends once the verdict for it is on screen.

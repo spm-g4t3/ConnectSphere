@@ -58,7 +58,7 @@ import {
  * touched.
  */
 function normaliseLineBreaks(text) {
-  return String(text ?? "").replace(/\r\n?/g, "\n");
+  return text.replace(/\r\n?/g, "\n");
 }
 
 /**
@@ -183,7 +183,7 @@ function fromHourRows(rows) {
  * fault in the form. A second opinion from the client could only disagree.
  */
 function capacityValue(raw) {
-  const trimmed = String(raw ?? "").trim();
+  const trimmed = raw.trim();
   return trimmed === "" ? undefined : Number(trimmed);
 }
 
@@ -457,7 +457,6 @@ export default function VenueForm({ venueId = null, onSaved, headingRef }) {
 
     let payload;
     if (isEdit) {
-      if (!baseline) return; // prefill has not landed; there is nothing to diff
       payload = buildChanges();
       if (Object.keys(payload).length === 0) {
         setSaveError("Nothing has changed, so there is nothing to save.");

@@ -9,7 +9,10 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { validateSuitabilityQuery } from '../../src/validation/venueSuitabilityValidation.js';
+import {
+  validateSuitabilityQuery,
+  validateEventVenuesQuery,
+} from '../../src/validation/venueSuitabilityValidation.js';
 import { ValidationError } from '../../src/errors.js';
 
 const EVENT_ID = '22222222-2222-4222-8222-222222222222';
@@ -120,5 +123,13 @@ describe('SCRUM525_AC3 validateSuitabilityQuery reads ?attendance=', () => {
     expect(faultsOf({ ...BASE, attendance: '2147483648' })).toEqual([
       { field: 'attendance', message: 'must be at most 2147483647' },
     ]);
+  });
+});
+
+describe('SCRUM188_AC6 validateEventVenuesQuery', () => {
+  it.each([null, undefined, 'text', 7, []])('SCRUM188_AC6_recheck_refuses_%j_as_the_input', (input) => {
+    expect(() => validateEventVenuesQuery(input)).toThrow(
+      new ValidationError('Invalid suitability check -- expected an object'),
+    );
   });
 });

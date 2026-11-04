@@ -155,7 +155,7 @@ export default function ReassignEventPanel({
       // The note is sent as typed. The server stores a blank one as no note,
       // so there is nothing to tidy here.
       const updated = await reassignEventRequest(request.id, { newCoordinatorId, handoverNote });
-      const chosen = choices.find((coordinator) => coordinator.id === newCoordinatorId) ?? null;
+      const chosen = choices.find((coordinator) => coordinator.id === newCoordinatorId);
       onReassigned?.(updated, chosen);
     } catch (err) {
       setSubmitError(

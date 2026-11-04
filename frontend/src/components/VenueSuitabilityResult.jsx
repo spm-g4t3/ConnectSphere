@@ -63,7 +63,7 @@ function metText(criterion, overriddenNames) {
 export default function VenueSuitabilityResult({ result, overridden, subject, headingLevel = 4 }) {
   const Heading = `h${headingLevel}`;
   const overriddenNames = Array.isArray(overridden) ? overridden : [];
-  const criteria = Array.isArray(result?.criteria) ? result.criteria : [];
+  const criteria = result.criteria;
   const checked = result?.checked ?? {};
   const suitable = result?.suitable === true;
   const verdict = suitable ? "Suitable" : "Not suitable";

@@ -594,3 +594,41 @@ describe("SCRUM266_AC4 Needs attention on the Organiser's list", () => {
     expect(within(row("Older payload")).queryByText("Needs attention")).not.toBeInTheDocument();
   });
 });
+
+describe("SCRUM486_AC1 the Organiser's coordinator and assignment history", () => {
+  it("SCRUM486_AC1_the_history_is_read_only_when_first_opened_and_kept_when_reopened", async () => {
+    const user = userEvent.setup();
+    renderList([eventRequest()]);
+    const summary = await screen.findByText("Your coordinator and assignment history");
+    expect(getAssignmentHistory).not.toHaveBeenCalled();
+
+    await user.click(summary);
+    const details = summary.closest("details");
+    expect(await within(details).findByRole("heading", { name: "Assignment history" })).toBeInTheDocument();
+    expect(within(details).getAllByText("Priya Nair", { exact: false }).length).toBeGreaterThan(0);
+
+    await user.click(summary);
+    await waitFor(() => expect(details).not.toHaveAttribute("open"));
+    await user.click(summary);
+    await waitFor(() => expect(details).toHaveAttribute("open"));
+
+    expect(within(details).getByRole("heading", { name: "Assignment history" })).toBeInTheDocument();
+    expect(getAssignmentHistory).toHaveBeenCalledTimes(1);
+    expect(getAssignmentHistory).toHaveBeenCalledWith(eventRequest().id);
+  });
+});
+
+describe("SCRUM10_AC1 creating a request from the dashboard", () => {
+  it("SCRUM10_AC1_arriving_with_the_create_shortcut_opens_the_new_request_form", async () => {
+    vi.mocked(getMyEventRequests).mockResolvedValue([eventRequest()]);
+    render(
+      <MemoryRouter initialEntries={[{ pathname: "/events", state: { openNewEventRequest: true } }]}>
+        <MyEventRequests />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("heading", { level: 1, name: "Create event request" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Back to my requests/ })).toBeInTheDocument();
+    expect(screen.getByLabelText("Event name")).toHaveValue("");
+  });
+});

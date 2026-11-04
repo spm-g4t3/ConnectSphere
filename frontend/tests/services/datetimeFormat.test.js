@@ -12,6 +12,8 @@ import {
   describeClosing,
   describeEventEnd,
   formatHoursEntry,
+  formatVenueRange,
+  nextVenueDate,
   toDatetimeLocalValue,
   toOffsetIsoString,
   deviceTimeZoneLabel,
@@ -153,6 +155,22 @@ describe("venue time", () => {
   );
 });
 
+describe("formatVenueRange", () => {
+  it("SCRUM188_AC4_formatVenueRange_gives_the_end_time_alone_on_the_same_day", () => {
+    expect(formatVenueRange("2026-11-11T02:00:00Z", "2026-11-11T04:00:00Z")).toBe("2026-11-11 10:00 – 12:00");
+  });
+
+  it("SCRUM188_AC4_formatVenueRange_gives_both_dates_across_a_singapore_midnight", () => {
+    expect(formatVenueRange("2026-11-11T22:00:00+08:00", "2026-11-12T01:00:00+08:00"))
+      .toBe("2026-11-11 22:00 – 2026-11-12 01:00");
+  });
+
+  it("SCRUM188_AC4_formatVenueRange_falls_back_when_either_end_is_unreadable", () => {
+    expect(formatVenueRange(undefined, "2026-11-11T04:00:00Z")).toBe("Not set");
+    expect(formatVenueRange("2026-11-11T02:00:00Z", "not a date", "Unknown")).toBe("Unknown");
+  });
+});
+
 describe("formatVenueTimestamp", () => {
   // Venue time on every device, like formatVenuePeriod (see the note above "venue time").
   it.each([
@@ -251,5 +269,37 @@ describe("opening hours past midnight", () => {
   it("SCRUM575_AC5_describeEventEnd_is_null_for_same_day_or_equal_times", () => {
     expect(describeEventEnd("2026-11-11", "10:00", "12:00")).toBeNull();
     expect(describeEventEnd("2026-11-11", "10:00", "10:00:00")).toBeNull();
+  });
+
+  it("SCRUM575_AC1_closesNextDay_is_false_for_a_missing_time", () => {
+    expect(closesNextDay(null, "02:00")).toBe(false);
+    expect(closesNextDay("18:00", undefined)).toBe(false);
+  });
+
+  it("SCRUM575_AC1_describeClosing_is_null_for_an_unreadable_day", () => {
+    expect(describeClosing(undefined, "18:00", "02:00")).toBeNull();
+  });
+
+  it("SCRUM575_AC4_formatHoursEntry_overnight_on_an_unknown_day_says_next_day", () => {
+    expect(formatHoursEntry({ day_of_week: 9, opens_at: "18:00", closes_at: "02:00" }))
+      .toBe("Day 9 18:00 – next day 02:00");
+  });
+
+  it("SCRUM575_AC5_nextVenueDate_rolls_over_month_and_year_ends", () => {
+    expect(nextVenueDate("2026-11-30")).toBe("2026-12-01");
+    expect(nextVenueDate("2026-12-31")).toBe("2027-01-01");
+  });
+
+  it.each([
+    ["null", null],
+    ["undefined", undefined],
+    ["the wrong shape", "11/11/2026"],
+    ["a date-shaped string that is no date", "2026-13-45"],
+  ])("SCRUM575_AC5_nextVenueDate_is_empty_for_%s", (_label, value) => {
+    expect(nextVenueDate(value)).toBe("");
+  });
+
+  it("SCRUM575_AC5_describeEventEnd_is_null_overnight_when_the_date_is_unreadable", () => {
+    expect(describeEventEnd("", "22:00", "01:00")).toBeNull();
   });
 });

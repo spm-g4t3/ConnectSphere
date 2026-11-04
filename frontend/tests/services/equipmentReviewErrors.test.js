@@ -15,6 +15,13 @@ describe("reviewErrorMessage", () => {
     expect(message).toBe("Note: is required. Projector needs a note");
   });
 
+  it("SCRUM300_AC2_errors_400_labels_quantity_and_an_unknown_field_as_input", () => {
+    const message = reviewErrorMessage(
+      fail(400, { details: [{ field: "quantity", message: "must be at least 1" }, { field: "colour", message: "is not allowed" }] }),
+    );
+    expect(message).toBe("Quantity: must be at least 1. Input: is not allowed");
+  });
+
   it("SCRUM290_AC1_errors_400_without_details_uses_a_fixed_sentence", () => {
     expect(reviewErrorMessage(fail(400, {}))).toMatch(/not accepted/);
   });

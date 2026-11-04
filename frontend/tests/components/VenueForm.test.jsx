@@ -10,6 +10,7 @@ import userEvent from "@testing-library/user-event";
 
 import VenueForm from "../../src/components/VenueForm.jsx";
 import { createVenue, getVenueDetails, updateVenue } from "../../src/services/venueService";
+import { UNKNOWN_CODE_TITLE } from "../../src/services/venueLookups";
 import { stubDialogElement } from "../helpers/dialog.js";
 
 vi.mock("../../src/services/venueService", () => ({
@@ -1135,6 +1136,238 @@ describe("SCRUM575 VenueForm confirming shorter hours", () => {
     expect(screen.getByText("Late Talk")).toBeInTheDocument();
     // The new booking has not been seen, so the confirm must be opened again.
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(onSaved).not.toHaveBeenCalled();
+  });
+});
+
+describe("SCRUM15 VenueForm attribute codes", () => {
+  async function renderEdit(overrides = {}) {
+    vi.mocked(getVenueDetails).mockResolvedValue(savedVenue(overrides));
+    render(<VenueForm venueId={VENUE_ID} />);
+    await screen.findByRole("heading", { name: "Edit venue" });
+  }
+
+  it("SCRUM15_AC1_create_sends_the_ticked_layouts_accessibility_and_facilities", async () => {
+    const user = userEvent.setup();
+    render(<VenueForm />);
+
+    await user.click(screen.getByRole("checkbox", { name: "Classroom" }));
+    await user.click(screen.getByRole("checkbox", { name: "Boardroom" }));
+    await user.click(screen.getByRole("checkbox", { name: "Step-free entrance" }));
+    await user.click(screen.getByRole("checkbox", { name: "Projector" }));
+    await user.click(screen.getByRole("checkbox", { name: "Wi-Fi" }));
+    // Unticking takes a code back out.
+    await user.click(screen.getByRole("checkbox", { name: "Boardroom" }));
+    expect(screen.getByRole("checkbox", { name: "Boardroom" })).not.toBeChecked();
+    await user.click(screen.getByRole("button", { name: "Create venue" }));
+
+    const payload = vi.mocked(createVenue).mock.calls[0][0];
+    expect(payload.layouts).toEqual(["classroom"]);
+    expect(payload.accessibility).toEqual(["step_free_entrance"]);
+    expect(payload.facilities).toEqual(["projector", "wifi"]);
+  });
+
+  it("SCRUM15_AC2_ticking_and_unticking_codes_sends_only_the_vocabularies_that_moved", async () => {
+    const user = userEvent.setup();
+    await renderEdit();
+
+    await user.click(screen.getByRole("checkbox", { name: "Hearing loop" }));
+    await user.click(screen.getByRole("checkbox", { name: "Wi-Fi" }));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    // Layouts did not move, so they are not mentioned and cannot be replaced.
+    expect(updateVenue).toHaveBeenCalledWith(VENUE_ID, {
+      accessibility: ["hearing_loop"],
+      facilities: [],
+    });
+  });
+
+  it("SCRUM15_AC2_an_unrecognised_saved_code_is_shown_and_can_be_removed", async () => {
+    const user = userEvent.setup();
+    await renderEdit({ layouts: ["theatre", "mezzanine"] });
+
+    const unknown = screen.getByRole("checkbox", { name: "mezzanine (unrecognised code)" });
+    expect(unknown).toBeChecked();
+    expect(unknown.closest("label")).toHaveAttribute("title", UNKNOWN_CODE_TITLE);
+    expect(screen.getByRole("checkbox", { name: "Theatre" }).closest("label")).not.toHaveAttribute("title");
+
+    await user.click(unknown);
+    // Still on screen, so the removal can be undone before saving.
+    expect(screen.getByRole("checkbox", { name: "mezzanine (unrecognised code)" })).not.toBeChecked();
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(updateVenue).toHaveBeenCalledWith(VENUE_ID, { layouts: ["theatre"] });
+  });
+});
+
+describe("SCRUM15 VenueForm edit sends only what changed", () => {
+  async function renderEdit(overrides = {}) {
+    vi.mocked(getVenueDetails).mockResolvedValue(savedVenue(overrides));
+    render(<VenueForm venueId={VENUE_ID} />);
+    await screen.findByRole("heading", { name: "Edit venue" });
+  }
+
+  it("SCRUM15_AC2_changing_only_the_location_sends_only_the_location", async () => {
+    const user = userEvent.setup();
+    await renderEdit();
+
+    const location = screen.getByLabelText("Location");
+    await user.clear(location);
+    await user.type(location, "Level 3");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(updateVenue).toHaveBeenCalledWith(VENUE_ID, { location: "Level 3" });
+  });
+
+  it("SCRUM15_AC2_changing_the_capacity_sends_it_as_a_number", async () => {
+    const user = userEvent.setup();
+    await renderEdit();
+
+    const capacity = screen.getByLabelText("Maximum capacity");
+    await user.clear(capacity);
+    await user.type(capacity, "150");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(updateVenue).toHaveBeenCalledWith(VENUE_ID, { maxCapacity: 150 });
+  });
+
+  it("SCRUM15_AC2_clearing_the_capacity_sends_null_so_the_server_can_say_it_is_required", async () => {
+    const user = userEvent.setup();
+    await renderEdit();
+
+    await user.clear(screen.getByLabelText("Maximum capacity"));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(updateVenue).toHaveBeenCalledWith(VENUE_ID, { maxCapacity: null });
+  });
+
+  it("SCRUM15_AC2_hours_saved_out_of_day_order_are_not_resent_on_a_name_only_edit", async () => {
+    const user = userEvent.setup();
+    await renderEdit({
+      hours: [
+        { day_of_week: 3, opens_at: "10:00:00", closes_at: "16:00:00" },
+        { day_of_week: 1, opens_at: "09:00:00", closes_at: "18:00:00" },
+      ],
+    });
+
+    const name = screen.getByLabelText("Name");
+    await user.clear(name);
+    await user.type(name, "Hall B");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(updateVenue).toHaveBeenCalledWith(VENUE_ID, { name: "Hall B" });
+  });
+
+  it("SCRUM15_AC2_a_venue_missing_name_location_and_capacity_prefills_empty_boxes", async () => {
+    await renderEdit({ name: null, location: undefined, maxCapacity: null });
+
+    expect(screen.getByLabelText("Name")).toHaveValue("");
+    expect(screen.getByLabelText("Location")).toHaveValue("");
+    expect(screen.getByLabelText("Maximum capacity")).toHaveValue(null);
+  });
+});
+
+describe("SCRUM15 VenueForm save failures", () => {
+  async function editNameAndSave() {
+    const user = userEvent.setup();
+    vi.mocked(getVenueDetails).mockResolvedValue(savedVenue());
+    render(<VenueForm venueId={VENUE_ID} />);
+    await screen.findByRole("heading", { name: "Edit venue" });
+    const name = screen.getByLabelText("Name");
+    await user.clear(name);
+    await user.type(name, "Hall B");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+  }
+
+  it("SCRUM15_AC1_a_second_submit_while_saving_sends_only_one_request", async () => {
+    let finish;
+    vi.mocked(createVenue).mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    render(<VenueForm />);
+    const form = screen.getByRole("button", { name: "Create venue" }).closest("form");
+
+    fireEvent.submit(form);
+    expect(screen.getByRole("button", { name: "Saving..." })).toBeDisabled();
+    fireEvent.submit(form);
+
+    expect(createVenue).toHaveBeenCalledTimes(1);
+    finish({ id: VENUE_ID });
+    await vi.waitFor(() => expect(screen.getByRole("button", { name: "Create venue" })).toBeEnabled());
+  });
+
+  it.each([
+    [403, "Only Venue Staff can add or change a venue."],
+    [404, "That venue no longer exists. Go back and refresh the catalogue."],
+    [500, "The server could not save this venue. Please try again."],
+  ])("SCRUM15_AC2_a_%s_refusal_shows_its_own_message", async (status, message) => {
+    vi.mocked(updateVenue).mockRejectedValue({
+      response: { status, data: { error: "venue 3f2504e0 raw database text" } },
+    });
+
+    await editNameAndSave();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(message);
+    expect(alert).not.toHaveTextContent("raw database text");
+  });
+
+  it("SCRUM15_AC1_a_400_without_details_shows_the_servers_error", async () => {
+    vi.mocked(createVenue).mockRejectedValue({
+      response: { status: 400, data: { error: "Request body must be a JSON object" } },
+    });
+    const user = userEvent.setup();
+    render(<VenueForm />);
+
+    await user.click(screen.getByRole("button", { name: "Create venue" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Request body must be a JSON object");
+  });
+
+  it("SCRUM15_AC1_a_failure_with_no_server_answer_shows_the_generic_message", async () => {
+    vi.mocked(createVenue).mockRejectedValue(new Error("Network Error"));
+    const user = userEvent.setup();
+    render(<VenueForm />);
+
+    await user.click(screen.getByRole("button", { name: "Create venue" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not save this venue. Please try again.");
+  });
+
+  it("SCRUM15_AC1_a_detail_with_no_field_shows_only_its_message", async () => {
+    vi.mocked(createVenue).mockRejectedValue({
+      response: {
+        status: 400,
+        data: { error: "Validation failed", details: [{ message: "At least one field is required" }] },
+      },
+    });
+    const user = userEvent.setup();
+    render(<VenueForm />);
+
+    await user.click(screen.getByRole("button", { name: "Create venue" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(within(alert).getByRole("listitem")).toHaveTextContent(/^At least one field is required$/);
+  });
+
+  it("SCRUM575_AC7_an_hours_conflict_with_no_list_saves_nothing_and_lists_nothing", async () => {
+    const onSaved = vi.fn();
+    vi.mocked(updateVenue).mockRejectedValue({
+      response: { status: 409, data: { code: "VENUE_HOURS_BOOKING_CONFLICT" } },
+    });
+    const user = userEvent.setup();
+    vi.mocked(getVenueDetails).mockResolvedValue(savedVenue());
+    render(<VenueForm venueId={VENUE_ID} onSaved={onSaved} />);
+    await screen.findByRole("heading", { name: "Edit venue" });
+
+    fireEvent.change(screen.getByLabelText("Monday closes at"), { target: { value: "17:00" } });
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await vi.waitFor(() => expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled());
+    expect(screen.queryByRole("heading", { name: /fall|falls outside the new opening hours/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Confirm new hours" })).not.toBeInTheDocument();
     expect(onSaved).not.toHaveBeenCalled();
   });
 });

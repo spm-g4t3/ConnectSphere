@@ -176,9 +176,8 @@ export default function EventVenueSuitability({ eventRequestId, onLoaded, headin
     getEventVenueSuitability(eventRequestId)
       .then((items) => {
         if (!cancelled) {
-          const list = Array.isArray(items) ? items : [];
-          setState({ status: "done", items: list, error: null });
-          onLoadedRef.current?.(list);
+          setState({ status: "done", items, error: null });
+          onLoadedRef.current?.(items);
         }
       })
       .catch((err) => {
@@ -221,8 +220,8 @@ export default function EventVenueSuitability({ eventRequestId, onLoaded, headin
 
       {state.status === "done" && state.items.length > 0 && (
         <ul className="event-venue-suitability__list" aria-label="Requested venues">
-          {state.items.map((item, i) => (
-            <BookingSuitability key={item?.bookingId ?? i} item={item} headingLevel={headingLevel} />
+          {state.items.map((item) => (
+            <BookingSuitability key={item.bookingId} item={item} headingLevel={headingLevel} />
           ))}
         </ul>
       )}

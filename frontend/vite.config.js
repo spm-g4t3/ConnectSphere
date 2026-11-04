@@ -3,32 +3,9 @@ import { defineConfig } from 'vitest/config'
 
 // SCRUM-17, SCRUM-186, SCRUM-178, SCRUM-137, SCRUM-491 and SCRUM-495 files are gated at 100%
 // lines/branches/functions/statements each.
-// There is deliberately no global threshold: shared files -- venueService.js,
-// VenueCatalogue.jsx, VenueSearch.jsx (other stories) and datetimeFormat.js
-// (pre-existing; its time-zone-dependent sign branch cannot be reached in UTC
-// CI) -- are reported but not gated.
+// There is deliberately no global threshold: a file is gated once it reaches
+// 100%, so an ungated file can still be reported without failing CI.
 const FULL = { lines: 100, branches: 100, functions: 100, statements: 100 }
-
-// The one justified exception, set to the measured figures so any NEW
-// uncovered line or branch still fails CI. Three double-click guards in
-// VenueBlocksPanel.jsx are unreachable -- `if (submitting) return` in send,
-// `if (!pendingPayload) return` in handleOverride and `if (removingId) return`
-// in handleRemove -- because their buttons are disabled while those states
-// hold, and React does not dispatch clicks to disabled buttons. They are kept
-// as cheap defence; the disabled buttons are the real protection.
-const PANEL = { lines: 100, branches: 97.56, functions: 100, statements: 97.81 }
-
-// SCRUM-255's one exception, measured the same way: if (sending.current) return
-// in MyBookingRequests.jsx's handleWithdraw is unreachable, because every
-// Withdraw button is disabled while one is being sent and React does not
-// dispatch clicks to disabled buttons. The ref is cheap defence behind them.
-const MY_BOOKING_REQUESTS = { lines: 100, branches: 98.07, functions: 100, statements: 98.07 }
-
-// SCRUM-525's one exception, measured the same way: if (checking) return in
-// BookingRequestPanel.jsx's handleSubmit is unreachable, because the send
-// button is disabled while a recheck runs and Enter in the attendance field
-// only starts the check. The guard is cheap defence behind the button.
-const BOOKING_REQUEST_PANEL = { lines: 100, branches: 99.4, functions: 100, statements: 99.3 }
 
 // SCRUM-583: the expiry and idle files are new or rewritten and owned outright.
 const SCRUM583_FILES = [
@@ -303,6 +280,61 @@ const SCRUM586_FILES = [
   'src/components/ui/Tabs.jsx',
 ]
 
+// Shared service files brought to 100% by the coverage push; gating them
+// stops a later change from silently dropping a request path.
+const COVERAGE_SERVICE_FILES = [
+  'src/services/eventRequestService.js',
+  'src/services/venueService.js',
+  'src/services/datetimeFormat.js',
+  'src/services/equipmentReviewService.js',
+  'src/services/venueLookups.js',
+  'src/services/safetyReviewService.js',
+  'src/services/eventRequestStatusDisplay.js',
+  'src/services/eventRegistrationService.js',
+  'src/services/changeRequestService.js',
+  'src/services/venueSuitabilityDisplay.js',
+  'src/services/equipmentReviewErrors.js',
+]
+
+// Components brought to 100% by the coverage push, gated for the same reason.
+const COVERAGE_COMPONENT_FILES = [
+  'src/App.jsx',
+  'src/components/ClarificationReplyForm.jsx',
+  'src/components/ClarificationHistory.jsx',
+  'src/components/MyEventRequests.jsx',
+  'src/components/ReviewQueue.jsx',
+  'src/components/EventOrganiserDashboard.jsx',
+  'src/components/VenueForm.jsx',
+  'src/components/VenueDetail.jsx',
+  'src/components/ReassignEventPanel.jsx',
+  'src/components/SignificantEventChangePanel.jsx',
+  'src/components/EquipmentReview.jsx',
+  'src/components/EventCancellationPanel.jsx',
+  'src/components/EventRequestForm.jsx',
+  'src/components/CoordinatorRequestDetail.jsx',
+  'src/components/AssignmentHistory.jsx',
+  'src/components/BookingSuitabilitySummary.jsx',
+  'src/components/ClarificationHistoryDialog.jsx',
+  'src/components/DecisionOutcome.jsx',
+  'src/components/EquipmentAvailabilityCheck.jsx',
+  'src/components/EquipmentCatalogue.jsx',
+  'src/components/EquipmentHistory.jsx',
+  'src/components/EventCompletionPanel.jsx',
+  'src/components/EventEquipmentSection.jsx',
+  'src/components/EventRegistrationSettings.jsx',
+  'src/components/EventVenueSuitability.jsx',
+  'src/components/LoginForm.jsx',
+  'src/components/MyAssignedEvents.jsx',
+  'src/components/RegistrationCounts.jsx',
+  'src/components/RegistrationEventsList.jsx',
+  'src/components/SafetyReviewHistory.jsx',
+  'src/components/VenueCatalogue.jsx',
+  'src/components/VenueSuitabilityPanel.jsx',
+  'src/components/VenueSuitabilityResult.jsx',
+  'src/components/WaitingListPlaces.jsx',
+  'src/components/WithdrawRegistration.jsx',
+]
+
 // https://vite.dev/config/
 //
 // defineConfig comes from vitest/config rather than vite so the `test` block
@@ -320,26 +352,18 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['src/**/*.{js,jsx}'],
+      // main.jsx only mounts <App /> with createRoot; App itself is tested.
+      exclude: ['src/main.jsx'],
       reporter: ['text', 'json-summary'],
       reportOnFailure: true,
       thresholds: Object.fromEntries([
-        ...SCRUM17_FILES.map((file) => [
-          file,
-          file === 'src/components/VenueBlocksPanel.jsx' ? PANEL : FULL,
-        ]),
+        ...SCRUM17_FILES.map((file) => [file, FULL]),
         ...SCRUM186_FILES.map((file) => [file, FULL]),
         ...SCRUM583_FILES.map((file) => [file, FULL]),
         ...SCRUM178_FILES.map((file) => [file, FULL]),
         ...SCRUM137_FILES.map((file) => [file, FULL]),
         ...SCRUM141_FILES.map((file) => [file, FULL]),
-        ...SCRUM254_FILES.map((file) => [
-          file,
-          file === 'src/components/MyBookingRequests.jsx'
-            ? MY_BOOKING_REQUESTS
-            : file === 'src/components/BookingRequestPanel.jsx'
-              ? BOOKING_REQUEST_PANEL
-              : FULL,
-        ]),
+        ...SCRUM254_FILES.map((file) => [file, FULL]),
         ...SCRUM485_FILES.map((file) => [file, FULL]),
         ...SCRUM491_FILES.map((file) => [file, FULL]),
         ...SCRUM486_FILES.map((file) => [file, FULL]),
@@ -364,6 +388,8 @@ export default defineConfig({
         ...SCRUM584_FILES.map((file) => [file, FULL]),
         ...SCRUM591_FILES.map((file) => [file, FULL]),
         ...SCRUM586_FILES.map((file) => [file, FULL]),
+        ...COVERAGE_SERVICE_FILES.map((file) => [file, FULL]),
+        ...COVERAGE_COMPONENT_FILES.map((file) => [file, FULL]),
       ]),
     },
   },
