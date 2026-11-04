@@ -56,6 +56,7 @@ const FIELD_LABELS = {
   quantity: "Quantity",
   technicalNotes: "Technical notes",
   changes: "Changes",
+  equipmentLine: "Equipment",
 };
 
 // Why there is nothing to press, for a status the coordinator cannot change

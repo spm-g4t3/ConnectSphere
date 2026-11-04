@@ -504,3 +504,44 @@ describe("SCRUM-188 onLoaded", () => {
     expect(onLoaded).not.toHaveBeenCalled();
   });
 });
+
+describe("SCRUM-188 an answer for an event the view has left", () => {
+  it("SCRUM188_AC6_a_late_answer_for_the_previous_event_is_dropped", async () => {
+    const onLoaded = vi.fn();
+    const first = deferred();
+    const second = deferred();
+    vi.mocked(getEventVenueSuitability)
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    const { rerender } = render(<EventVenueSuitability eventRequestId="e1" onLoaded={onLoaded} />);
+    rerender(<EventVenueSuitability eventRequestId="e2" onLoaded={onLoaded} />);
+
+    const current = [item({ venueName: "Hall B" })];
+    second.resolve(current);
+    await screen.findByRole("heading", { name: "Hall B" });
+    first.resolve([item({ venueName: "Hall A" })]);
+    await first.promise;
+
+    expect(screen.queryByRole("heading", { name: "Hall A" })).not.toBeInTheDocument();
+    expect(onLoaded).toHaveBeenCalledTimes(1);
+    expect(onLoaded).toHaveBeenLastCalledWith(current);
+  });
+
+  it("SCRUM188_AC6_a_late_failure_for_the_previous_event_is_dropped", async () => {
+    const first = deferred();
+    const second = deferred();
+    vi.mocked(getEventVenueSuitability)
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    const { rerender } = render(<EventVenueSuitability eventRequestId="e1" />);
+    rerender(<EventVenueSuitability eventRequestId="e2" />);
+
+    second.resolve([item({ venueName: "Hall B" })]);
+    await screen.findByRole("heading", { name: "Hall B" });
+    first.reject(httpError(500));
+    await first.promise.catch(() => {});
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Hall B" })).toBeInTheDocument();
+  });
+});
