@@ -880,4 +880,41 @@ describe("AC1 and AC11: reads that come back late or fail on the refresh", () =>
     expect(screen.queryByRole("option", { name: "Microphone" })).not.toBeInTheDocument();
     expect(screen.getByText("Equipment on a confirmed event can only be changed as a significant change.")).toBeInTheDocument();
   });
+
+  it("SCRUM21_AC11_a_late_failure_for_the_previous_event_does_not_hide_the_current_events_lines", async () => {
+    let failFirst;
+    getEventEquipment
+      .mockReturnValueOnce(new Promise((_resolve, reject) => { failFirst = reject; }))
+      .mockResolvedValueOnce(state({ lines: [line({ id: MIC_LINE, equipmentTypeId: MIC_TYPE, name: "Microphone", quantity: 4 })] }));
+    const { rerender } = renderSection({ status: "under_review" });
+
+    rerender(<EventEquipmentSection requestId="other-event" status="under_review" canEdit />);
+    expect(await screen.findByText("Quantity: 4")).toBeInTheDocument();
+
+    failFirst(httpError(500));
+    await flush();
+
+    expect(screen.queryByText("Could not load this event's equipment.")).not.toBeInTheDocument();
+    expect(screen.getByText("Quantity: 4")).toBeInTheDocument();
+  });
+
+  it("SCRUM21_AC2_a_late_catalogue_failure_from_before_the_event_left_approved_is_not_shown_on_return", async () => {
+    let failFirst;
+    getActiveEquipmentTypes
+      .mockReturnValueOnce(new Promise((_resolve, reject) => { failFirst = reject; }))
+      .mockResolvedValueOnce(CATALOGUE);
+    const { rerender } = renderSection();
+    await screen.findByText("Quantity: 2");
+
+    // Leaving approved abandons the first read; coming back starts a second one.
+    rerender(<EventEquipmentSection requestId={REQUEST_ID} status="confirmed" canEdit />);
+    rerender(<EventEquipmentSection requestId={REQUEST_ID} status="approved" canEdit />);
+    expect(await screen.findByRole("option", { name: "Microphone" })).toBeInTheDocument();
+
+    failFirst(httpError(500));
+    await flush();
+
+    expect(screen.queryByText("Could not load the equipment catalogue.")).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Microphone" })).toBeInTheDocument();
+  });
 });
