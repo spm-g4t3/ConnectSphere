@@ -1063,7 +1063,6 @@ button { cursor: pointer; }
    .dashboard--organiser__event-details dl { grid-template-columns: 1fr; gap: 3px; }
    .dashboard--organiser__event-details dd { margin-bottom: 7px; }
    .dashboard--coordinator .coordinator-request-detail .event-venue-finder__result-row { grid-template-columns: 1fr; }
-   .venue-suitability .venue-suitability__criteria li, .venue-suitability__checked-row { grid-template-columns: 1fr; }
    .dashboard--organiser .dashboard--organiser__deadline-row { grid-template-columns: 1fr; }
    .dashboard--organiser__deadline-meta { align-items: flex-start; text-align: left; }
    .my-event-requests { padding: 36px 18px; }
@@ -1145,6 +1144,10 @@ button { cursor: pointer; }
 /* SCRUM-188 AC7. An overridden criterion: amber, the "warning to act on"
    pair, so it reads differently from a plain unmet one. */
 .venue-suitability__criterion--overridden strong { color: #8a5a00; }
+/* Phone layout: after the base column rules above, which it must override at equal specificity. */
+@media (max-width: 720px) {
+  .venue-suitability .venue-suitability__criteria li, .venue-suitability__checked-row { grid-template-columns: 1fr; }
+}
 /* SCRUM-188 AC7. The suitability summary on a Venue Staff booking row. The
    row keeps the .dashboard li spread for its time, id and status, and wraps
    so the summary takes a full line beneath them. Not dashboard-scoped beyond
