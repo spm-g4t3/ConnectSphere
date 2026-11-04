@@ -803,9 +803,9 @@ function checkCaller(callerId) {
  * Approve a pending booking request (SCRUM-260, SCRUM-258 AC2, AC3, AC5).
  *
  * Under its locks, decide_booking_request re-checks that the event is still
- * approved, in the safety check or confirmed, that the request is for the
- * event's current period, and that its occupied period meets no occupying
- * booking, block or other event's active hold. Two approvals at one venue take
+ * approved, in the safety check or confirmed, and that the event's current
+ * period, occupied, meets no occupying booking, block or other event's active
+ * hold. A request raised before the event moved is approved at that period. Two approvals at one venue take
  * turns on the venue lock, so only one of two overlapping requests can pass.
  * Only this request changes; the event's other bookings are untouched.
  *
@@ -830,8 +830,8 @@ function checkCaller(callerId) {
  * @throws {NotFoundError}   no such booking request
  * @throws {ForbiddenError}  the caller is not Venue Staff
  * @throws {ConflictError}   by code: BOOKING_NOT_PENDING, EVENT_NOT_BOOKABLE,
- *                           BOOKING_PERIOD_STALE (the event has moved since the
- *                           request), VENUE_RETIRED, BOOKING_PERIOD_CONFLICT
+ *                           BOOKING_PERIOD_STALE (the event has no period),
+ *                           VENUE_RETIRED, BOOKING_PERIOD_CONFLICT
  *                           (conflicts shaped by toPeriodConflict),
  *                           BOOKING_CHANGED
  */

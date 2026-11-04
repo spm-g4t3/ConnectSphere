@@ -170,6 +170,8 @@ describe('SCRUM266 the call and its result', () => {
         reason: 'Block moved',
         resolvedBy: STAFF,
         resolvedAt: '2026-10-16T01:02:03+00:00',
+        previousStartsAt: null,
+        previousEndsAt: null,
       },
     });
     expect(result.statusDisplay.group).not.toBe('UNKNOWN');
@@ -186,6 +188,32 @@ describe('SCRUM266 the call and its result', () => {
 
     expect(result.status).toBe('approved');
     expect(calls.map((c) => c.fn)).toEqual(['reinstate_flagged_booking']);
+  });
+
+  it('SCRUM593_AC1_a_booking_moved_to_the_events_new_period_returns_the_new_times_and_the_old_ones', async () => {
+    const moved = {
+      data: {
+        outcome: 'reinstated',
+        booking: bookingRow({ starts_at: '2026-12-01T10:00:00+00:00', ends_at: '2026-12-01T12:00:00+00:00' }),
+        resolution: {
+          ...resolutionRow(),
+          previous_starts_at: '2026-12-01T06:00:00+00:00',
+          previous_ends_at: '2026-12-01T08:00:00+00:00',
+        },
+      },
+      error: null,
+    };
+
+    const result = await reinstate(clientAnswering(moved));
+
+    expect(result).toMatchObject({
+      startsAt: '2026-12-01T10:00:00+00:00',
+      endsAt: '2026-12-01T12:00:00+00:00',
+      resolution: {
+        previousStartsAt: '2026-12-01T06:00:00+00:00',
+        previousEndsAt: '2026-12-01T08:00:00+00:00',
+      },
+    });
   });
 });
 
@@ -419,6 +447,8 @@ describe('SCRUM266 cancelling a flagged booking', () => {
           reason: 'Venue no longer fits',
           resolvedBy: COORDINATOR,
           resolvedAt: '2026-10-16T01:02:03+00:00',
+          previousStartsAt: null,
+          previousEndsAt: null,
         },
       });
       expect(result.statusDisplay.group).not.toBe('UNKNOWN');

@@ -184,8 +184,8 @@ export function createBookingRequestRouter({
    *
    * Behind venueStaffOnly, and decide_booking_request (066) checks the role
    * again. No pre-check: whether the request is still pending, the event still
-   * live and on the same dates, and the venue still free for the padded period
-   * are answered under its locks. There is no body; the caller is always
+   * live, and the venue still free for the event's current padded period
+   * (which an approval moves the request to) are answered under its locks. There is no body; the caller is always
    * req.user.id.
    *
    * Statuses: 400 malformed id; 401; 403 wrong role or no role; 404 no such

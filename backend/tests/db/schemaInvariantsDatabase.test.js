@@ -1057,13 +1057,18 @@ describe('SCRUM-17 AC4: nothing writes a booking period', () => {
   }
 
   it('SCRUM17_AC4_no_update_of_bookings_sets_starts_at_or_ends_at', () => {
+    // SCRUM-593: a Venue Staff approval books the event's current period after
+    // the coordinator moved it. No other write, and no change, moves a booking.
+    const approvals = ['decide_booking_request', 'reinstate_flagged_booking'];
     const updates = bookingUpdates();
 
     expect(updates.length).toBeGreaterThan(5);
-    for (const { name, clause, columns: assigned } of updates) {
+    for (const { name, clause, columns: assigned } of updates.filter((u) => !approvals.includes(u.name))) {
       expect(assigned, `${name}: set ${clause}`).not.toContain('starts_at');
       expect(assigned, `${name}: set ${clause}`).not.toContain('ends_at');
     }
+    const moving = updates.filter((u) => u.columns.includes('starts_at') || u.columns.includes('ends_at'));
+    expect(moving.map((u) => u.name).sort()).toEqual(approvals);
   });
 
   it('SCRUM17_AC4_only_create_booking_request_inserts_bookings', () => {

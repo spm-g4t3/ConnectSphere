@@ -80,7 +80,8 @@ export function createFlaggedBookingRouter({
 
   /**
    * Reinstate a flagged booking with a reason. 200 and the booking, now
-   * approved, with `resolution`: who reinstated it, why and when.
+   * approved, with `resolution`: who reinstated it, why and when, and the
+   * period it moved from when the event's new period was booked instead.
    *
    * Statuses: 400 malformed id, a missing or blank reason, or one too long;
    * 401; 403 wrong role or no role; 404 no such booking; 409 by code

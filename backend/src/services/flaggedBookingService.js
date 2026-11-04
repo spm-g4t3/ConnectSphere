@@ -52,6 +52,8 @@ function checkCaller(callerId) {
   }
 }
 
+// previousStartsAt/previousEndsAt are set only when a reinstatement moved the
+// booking to its event's new period.
 function toResolution(row) {
   return {
     id: row.id,
@@ -59,6 +61,8 @@ function toResolution(row) {
     reason: row.reason,
     resolvedBy: row.resolved_by,
     resolvedAt: row.created_at,
+    previousStartsAt: row.previous_starts_at ?? null,
+    previousEndsAt: row.previous_ends_at ?? null,
   };
 }
 
@@ -186,9 +190,11 @@ export async function listEventFlaggedBookings(eventRequestId, callerId, { clien
 }
 
 /**
- * Reinstate a flagged booking: approved again, with its flag cleared, once it
- * still covers the event's period and nothing else occupies the venue. Only
- * this booking changes; the event's other bookings are untouched.
+ * Reinstate a flagged booking: approved again, with its flag cleared, once
+ * nothing else occupies the venue. A booking the event has moved off is
+ * checked, and approved, at the event's current period; one that still covers
+ * it keeps its own. Only this booking changes; the event's other bookings are
+ * untouched.
  *
  * @param {string} bookingId  the flagged booking's id
  * @param {string} callerId   from the JWT -- never the body
@@ -202,9 +208,9 @@ export async function listEventFlaggedBookings(eventRequestId, callerId, { clien
  * @throws {ForbiddenError}  the caller is not Venue Staff
  * @throws {ConflictError}   by code: BOOKING_NOT_FLAGGED,
  *                           SAFETY_FLAG_NOT_REINSTATABLE, EVENT_NOT_BOOKABLE,
- *                           BOOKING_PERIOD_STALE, VENUE_RETIRED,
- *                           BOOKING_PERIOD_CONFLICT (conflicts shaped by
- *                           toPeriodConflict), BOOKING_CHANGED
+ *                           BOOKING_PERIOD_STALE (the event has no period),
+ *                           VENUE_RETIRED, BOOKING_PERIOD_CONFLICT (conflicts
+ *                           shaped by toPeriodConflict), BOOKING_CHANGED
  */
 export async function reinstateFlaggedBooking(bookingId, callerId, input, { client } = {}) {
   checkCaller(callerId);

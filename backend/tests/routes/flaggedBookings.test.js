@@ -100,6 +100,8 @@ describe('SCRUM-266: Venue Staff reinstate a flagged booking', () => {
         reason: 'Block moved',
         resolvedBy: STAFF_ID,
         resolvedAt: '2026-10-16T02:00:00+00:00',
+        previousStartsAt: null,
+        previousEndsAt: null,
       },
     });
     expect(client.calls).toEqual([
@@ -288,6 +290,8 @@ describe('SCRUM-266: the coordinator or Venue Staff cancel a flagged booking', (
         reason: 'Venue no longer fits',
         resolvedBy: COORDINATOR_ID,
         resolvedAt: '2026-10-16T02:00:00+00:00',
+        previousStartsAt: null,
+        previousEndsAt: null,
       },
     });
     expect(client.calls).toEqual([
