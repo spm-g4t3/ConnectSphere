@@ -743,7 +743,8 @@ function toItemError(err, booking) {
 }
 
 function summariseDetails(err) {
-  const details = Array.isArray(err.details) ? err.details : [];
+  // ValidationError always carries an array of details (it defaults to []).
+  const { details } = err;
   if (details.length === 0) return err.message;
   return details.map(({ field, message }) => `${field}: ${message}`).join('; ');
 }

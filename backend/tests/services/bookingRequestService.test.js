@@ -381,6 +381,17 @@ describe('SCRUM258_AC6 the coordinator list carries the decision', () => {
   });
 });
 
+describe('SCRUM255 the coordinator list names the event of each request', () => {
+  it('SCRUM255_an_event_embed_without_name_or_status_reads_them_as_null', async () => {
+    // The embed always carries both columns; this pins the null fallback.
+    const client = listClient([listRow({ event_requests: { assigned_coordinator_id: USER } })]);
+
+    const [item] = await listBookingRequestsForCoordinator(USER, { client });
+
+    expect(item).toMatchObject({ id: BOOKING, eventName: null, eventStatus: null, venueName: 'Harbour Room' });
+  });
+});
+
 describe('SCRUM188 the booking request carries the requirement codes to the check (SCRUM-190)', () => {
   const pendingRow = { id: BOOKING, event_request_id: EVENT, venue_id: VENUE, status: 'pending' };
   const createdAnswer = { data: { outcome: 'created', booking: pendingRow }, error: null };
@@ -462,6 +473,33 @@ describe('SCRUM188 the booking request carries the requirement codes to the chec
     }).catch((e) => e);
     expect(err).toBe(refusal);
     expect(client.calls.filter((c) => c.fn)).toHaveLength(0);
+  });
+
+  it('SCRUM188_AC7_the_function_still_asking_for_confirmation_is_409_with_the_unmet_criteria', async () => {
+    // The coordinator confirmed every unmet criterion here, but the function's
+    // own judgement under its lock is the one that counts; nothing was written.
+    const result = {
+      suitable: false,
+      criteria: [
+        { criterion: 'Capacity', met: false, detail: '200 above 150' },
+        { criterion: 'Layout', met: true, detail: 'theatre' },
+      ],
+    };
+    const client = clientAnswering(
+      { data: eventRow(), error: null },
+      { data: { outcome: 'suitability_confirmation_required' }, error: null },
+    );
+
+    const err = await createBookingRequest(
+      { eventRequestId: EVENT, venueId: VENUE, confirmUnsuitable: true, acknowledgedCriteria: ['Capacity'] },
+      USER,
+      { client, checkSuitability: vi.fn(async () => result) },
+    ).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ConflictError);
+    expect(err.code).toBe('SUITABILITY_CONFIRMATION_REQUIRED');
+    expect(err.conflicts).toEqual([{ criterion: 'Capacity', met: false, detail: '200 above 150' }]);
+    expect(client.calls.at(-1).args.p_confirm_unsuitable).toBe(true);
   });
 });
 
@@ -804,6 +842,68 @@ describe('SCRUM258_AC1 the Venue Staff queue of pending requests', () => {
     expect(request.conflictingWith).toEqual([]);
   });
 
+  it('SCRUM258_AC1_a_row_without_its_optional_columns_reads_them_as_null', async () => {
+    // list_pending_booking_requests (078) always sends every key; this pins the fallbacks.
+    const sparse = {
+      id: BOOKING,
+      event_request_id: EVENT,
+      venue_id: VENUE,
+      starts_at: '2026-12-01T10:00:00+00:00',
+      ends_at: '2026-12-01T12:00:00+00:00',
+      created_at: '2026-10-01T00:00:00+00:00',
+    };
+    const [request] = await listPendingBookingRequests(USER, { client: clientAnswering({ data: [sparse], error: null }) });
+
+    expect(request).toMatchObject({
+      id: BOOKING,
+      status: 'pending',
+      eventName: null,
+      eventStatus: null,
+      venueName: null,
+      venueLocation: null,
+      occupiedStartsAt: null,
+      occupiedEndsAt: null,
+      expectedAttendance: null,
+      roomLayoutCode: null,
+      venueRequirements: null,
+      accessibilityRequirements: null,
+      setupNotes: null,
+      requestedBy: null,
+      overlapping: [],
+      conflictingWith: [],
+      replaces: null,
+    });
+  });
+
+  it('SCRUM258_AC3_an_overlap_or_clash_without_an_event_name_or_occupied_period_reads_null', async () => {
+    const overlap = { ...pendingRow().overlapping[0], event_name: undefined };
+    const clash = {
+      booking_id: OTHER_BOOKING,
+      event_request_id: OTHER_EVENT,
+      starts_at: '2026-12-01T11:00:00+00:00',
+      ends_at: '2026-12-01T13:00:00+00:00',
+    };
+    const [request] = await listPendingBookingRequests(USER, {
+      client: clientAnswering({
+        data: [pendingRow({ status: 'conflicting', overlapping: [overlap], conflicting_with: [clash] })],
+        error: null,
+      }),
+    });
+
+    expect(request.overlapping[0].eventName).toBeNull();
+    expect(request.conflictingWith).toEqual([
+      {
+        bookingId: OTHER_BOOKING,
+        eventRequestId: OTHER_EVENT,
+        eventName: null,
+        startsAt: '2026-12-01T11:00:00+00:00',
+        endsAt: '2026-12-01T13:00:00+00:00',
+        occupiedStartsAt: null,
+        occupiedEndsAt: null,
+      },
+    ]);
+  });
+
   it('SCRUM266_W7_a_request_replacing_a_flagged_booking_names_it_in_camelCase', async () => {
     const replaces = {
       booking_id: OTHER_BOOKING,
@@ -989,6 +1089,32 @@ describe('SCRUM258 approving and rejecting a booking request', () => {
         turnaroundMinutes: 45,
       },
     ]);
+  });
+
+  it('SCRUM258_AC2_a_conflict_outcome_without_a_list_has_no_occupants', async () => {
+    const client = clientAnswering({ data: { outcome: 'conflict' }, error: null });
+
+    const err = await approveBookingRequest(BOOKING, STAFF, { client }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ConflictError);
+    expect(err.code).toBe('BOOKING_PERIOD_CONFLICT');
+    expect(err.conflicts).toEqual([]);
+  });
+
+  it.each([
+    ['an_approval_answered_as_rejected', 'approve', { data: { outcome: 'rejected', booking: decidedRow({ status: 'rejected' }) }, error: null }, 'rejected'],
+    ['a_rejection_answered_as_approved', 'reject', { data: { outcome: 'approved', booking: decidedRow() }, error: null }, 'approved'],
+    ['an_approval_with_no_answer', 'approve', { data: null, error: null }, 'undefined'],
+  ])('SCRUM258_AC2_%s_is_an_error_not_a_success', async (_label, decision, answered, outcome) => {
+    const client = clientAnswering(answered);
+
+    const err = await (decision === 'approve'
+      ? approveBookingRequest(BOOKING, STAFF, { client })
+      : rejectBookingRequest(BOOKING, STAFF, { reason: 'No' }, { client })
+    ).catch((e) => e);
+
+    expect(err.constructor).toBe(Error);
+    expect(err.message).toBe(`Unexpected outcome from decide_booking_request: ${outcome}`);
   });
 
   it('SCRUM258_AC6_a_caller_who_is_not_venue_staff_is_forbidden', async () => {

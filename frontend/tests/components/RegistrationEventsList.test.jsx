@@ -1,8 +1,10 @@
-import { render, screen } from "@testing-library/react";
+import { StrictMode } from "react";
+import { act, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import RegistrationEventsList from "../../src/components/RegistrationEventsList.jsx";
 import { getMyEventRequests } from "../../src/services/eventRequestService";
+import { deferred } from "../helpers/async.js";
 
 vi.mock("../../src/services/eventRequestService", () => ({
   getMyEventRequests: vi.fn(),
@@ -50,5 +52,46 @@ describe("SCRUM494 RegistrationEventsList", () => {
     renderList();
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not load your events.");
+  });
+
+  // The app renders in StrictMode, which mounts the page twice: the first,
+  // discarded read must not overwrite the list from the second one.
+  function renderListInStrictMode() {
+    const discarded = deferred();
+    const current = deferred();
+    vi.mocked(getMyEventRequests).mockReset()
+      .mockReturnValueOnce(discarded.promise)
+      .mockReturnValueOnce(current.promise);
+    render(
+      <StrictMode>
+        <MemoryRouter>
+          <RegistrationEventsList />
+        </MemoryRouter>
+      </StrictMode>,
+    );
+    expect(getMyEventRequests).toHaveBeenCalledTimes(2);
+    return { discarded, current };
+  }
+
+  it("SCRUM494_AC2_a_read_from_a_discarded_mount_does_not_replace_the_list", async () => {
+    const { discarded, current } = renderListInStrictMode();
+    await act(async () => current.resolve([
+      { id: "b", eventName: "Confirmed Gala", status: "confirmed", proposedStart: "2030-02-01T10:00:00Z" },
+    ]));
+    await act(async () => discarded.resolve([
+      { id: "a", eventName: "Stale Fair", status: "approved", proposedStart: "2030-01-01T10:00:00Z" },
+    ]));
+
+    expect(screen.getByText("Confirmed Gala")).toBeInTheDocument();
+    expect(screen.queryByText("Stale Fair")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM494_AC2_a_failure_from_a_discarded_mount_shows_no_error", async () => {
+    const { discarded, current } = renderListInStrictMode();
+    await act(async () => current.resolve([]));
+    await act(async () => discarded.reject(new Error("boom")));
+
+    expect(screen.getByText(/None of your events can have registration set up yet/)).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });

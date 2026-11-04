@@ -188,7 +188,7 @@ function startDateHasPassed(value) {
  */
 function liveRequestsFrom(items) {
   const venues = new Map();
-  for (const item of Array.isArray(items) ? items : []) {
+  for (const item of items) {
     if (item?.venueId) venues.set(item.venueId, item.statusDisplay?.label ?? item.status ?? null);
   }
   return venues;
@@ -552,8 +552,8 @@ export default function CoordinatorRequestDetail({
   function handleSubmitDecision() {
     if (decisionChoice === "approve") return handleDecision("approved");
     if (decisionChoice === "reject") return handleDecision("rejected");
-    if (decisionChoice === "return") return handleReturnForAmendment();
-    return undefined;
+    // Only "return" is left: the submit button stays disabled until a choice is made.
+    return handleReturnForAmendment();
   }
 
   async function handleCloseClarification(event) {
@@ -597,7 +597,7 @@ export default function CoordinatorRequestDetail({
    */
   function handleReassigned(updated, chosen) {
     setHandedOverTo({
-      id: updated?.assignedCoordinatorId ?? chosen?.id ?? null,
+      id: updated?.assignedCoordinatorId ?? chosen?.id,
       fullName: chosen?.fullName ?? null,
     });
     closePanel("reassign", setReassigning);

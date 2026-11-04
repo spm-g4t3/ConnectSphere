@@ -161,6 +161,7 @@ export default function VenueBlocksPanel({ venue, currentUserId, headingRef }) {
   }
 
   async function send(payload, { overrode = false } = {}) {
+    /* v8 ignore next -- @preserve Both submit paths disable their button while submitting. */
     if (submitting) return; // closes the double-click window before it opens
 
     const action = formMode?.mode === "edit" ? "update" : "create";
@@ -232,6 +233,7 @@ export default function VenueBlocksPanel({ venue, currentUserId, headingRef }) {
   }
 
   function handleOverride(acknowledgedBookingIds) {
+    /* v8 ignore next -- @preserve The override button renders only with conflicts, which always come with a payload. */
     if (!pendingPayload) return;
     send(
       { ...pendingPayload, confirmOverride: true, acknowledgedBookingIds },
@@ -240,6 +242,7 @@ export default function VenueBlocksPanel({ venue, currentUserId, headingRef }) {
   }
 
   async function handleRemove(block) {
+    /* v8 ignore next -- @preserve ConfirmDialog disables Confirm while busy. */
     if (removingId) return; // closes the double-click window before it opens
 
     // confirmingRemoveId stays set until the finally, for the reason

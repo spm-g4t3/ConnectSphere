@@ -211,7 +211,8 @@ const LIST_COLUMNS = `
  * @param {object} row  from LIST_COLUMNS
  */
 function toBookingRequestListItem(row) {
-  const event = one(row.event_requests) ?? {};
+  // Non-null: the caller keeps only rows whose embedded event is the coordinator's.
+  const event = one(row.event_requests);
   const venue = one(row.venues) ?? {};
   return {
     id: row.id,

@@ -589,3 +589,94 @@ describe("SCRUM575 overnight opening hours in the change history", () => {
     expect(value).toHaveTextContent("Fri 09:00–18:00 → Fri 18:00 – Sat 02:00");
   });
 });
+
+describe("SCRUM15 every kind of value in the change history", () => {
+  const EDITOR = "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d";
+
+  function historyEntry(oldValues, newValues) {
+    return { id: "h15", changedAt: "2026-10-05T08:15:00+08:00", changedBy: EDITOR, oldValues, newValues };
+  }
+
+  function valueFor(label) {
+    return screen.getByText(label).closest("li").querySelector(".venue-history__value");
+  }
+
+  beforeEach(() => {
+    vi.mocked(getVenueBookings).mockResolvedValue([]);
+  });
+
+  it("SCRUM15_AC4_a_cleared_field_reads_not_set_and_an_emptied_list_reads_none", async () => {
+    vi.mocked(getVenueHistory).mockResolvedValue([
+      historyEntry(
+        { location: "Level 2", room_layouts: ["theatre", "classroom"] },
+        { location: null, room_layouts: [] },
+      ),
+    ]);
+
+    render(<VenueDetail venue={VENUE} />);
+
+    await screen.findByText("Room layouts");
+    expect(valueFor("Location")).toHaveTextContent("Level 2 → not set");
+    expect(valueFor("Room layouts")).toHaveTextContent("theatre, classroom → none");
+  });
+
+  it("SCRUM15_AC4_an_unknown_field_keeps_its_raw_name_and_shows_an_object_as_json", async () => {
+    vi.mocked(getVenueHistory).mockResolvedValue([
+      historyEntry({ seating_plan: { seated: 80 } }, { seating_plan: { seated: 100 } }),
+    ]);
+
+    render(<VenueDetail venue={VENUE} />);
+
+    await screen.findByText("seating_plan");
+    expect(valueFor("seating_plan")).toHaveTextContent('{"seated":80} → {"seated":100}');
+  });
+
+  it("SCRUM15_AC4_an_hours_entry_missing_its_times_is_shown_raw_beside_a_readable_one", async () => {
+    vi.mocked(getVenueHistory).mockResolvedValue([
+      historyEntry(
+        { operating_hours: [{ day_of_week: 1 }] },
+        { operating_hours: [{ day_of_week: 1, opens_at: "09:00:00", closes_at: "18:00:00" }] },
+      ),
+    ]);
+
+    render(<VenueDetail venue={VENUE} />);
+
+    await screen.findByText("Opening hours");
+    expect(valueFor("Opening hours")).toHaveTextContent('{"day_of_week":1} → Mon 09:00–18:00');
+  });
+
+  it("SCRUM15_AC4_an_entry_whose_values_are_not_objects_is_still_listed", async () => {
+    vi.mocked(getVenueHistory).mockResolvedValue([historyEntry(null, "retired")]);
+
+    render(<VenueDetail venue={VENUE} />);
+
+    const value = await screen.findByText("not set → retired");
+    expect(value.tagName).toBe("PRE");
+    expect(screen.queryByText("Venue created")).not.toBeInTheDocument();
+  });
+
+  it("SCRUM15_AC4_an_unexplained_history_failure_shows_the_generic_message", async () => {
+    vi.mocked(getVenueHistory).mockRejectedValue(new Error("Network Error"));
+
+    render(<VenueDetail venue={VENUE} />);
+
+    expect(
+      await screen.findByText("Could not load this venue's change history. Please try again."),
+    ).toBeInTheDocument();
+    // The bookings half still loads on its own.
+    expect(screen.getByText("No bookings have been made against this venue.")).toBeInTheDocument();
+  });
+});
+
+describe("SCRUM15 the bookings panel when the reason is unknown", () => {
+  it("SCRUM15_AC3_an_unexplained_bookings_failure_shows_the_generic_message", async () => {
+    vi.mocked(getVenueBookings).mockRejectedValue(new Error("Network Error"));
+
+    render(<VenueDetail venue={VENUE} />);
+
+    expect(
+      await screen.findByText("Could not load this venue's bookings. Please try again."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("No changes have been recorded for this venue.")).toBeInTheDocument();
+  });
+});

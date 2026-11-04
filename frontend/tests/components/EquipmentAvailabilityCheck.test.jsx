@@ -90,6 +90,16 @@ describe("the form", () => {
     expect(alert).not.toHaveTextContent("secret");
   });
 
+  it("SCRUM23_AC1_a_refused_types_load_offers_no_try_again", async () => {
+    service.listActiveEquipmentTypes.mockRejectedValue(apiError(403, { error: "restricted" }));
+    render(<EquipmentAvailabilityCheck />);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Only Technical Support Staff can check equipment availability.");
+    // Asking again would be refused the same way.
+    expect(within(alert).queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+  });
+
   it("SCRUM23_AC2_says_which_time_zone_the_times_are_in", async () => {
     await openScreen();
 

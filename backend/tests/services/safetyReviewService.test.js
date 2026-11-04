@@ -6,7 +6,7 @@ import {
   listSafetyReviews,
   respondToSafetyReview,
 } from '../../src/services/safetyReviewService.js';
-import { ForbiddenError, ValidationError } from '../../src/errors.js';
+import { AppError, ForbiddenError, NotFoundError, ValidationError } from '../../src/errors.js';
 
 const EVENT_ID = '11111111-1111-4111-8111-111111111111';
 const OFFICER_ID = '22222222-2222-4222-8222-222222222222';
@@ -63,6 +63,36 @@ describe('Safety review service', () => {
     const db = client({ data: null, error: { code: '42501', message: 'Only Safety Officers can view safety reviews' } });
 
     await expect(listSafetyReviews(OFFICER_ID, { client: db })).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it('SCRUM490_AC3_an_event_the_detail_function_cannot_find_is_not_found', async () => {
+    const message = `event request ${EVENT_ID} not found`;
+    const db = client({ data: null, error: { code: 'P0002', message } });
+
+    const error = await getSafetyReview(EVENT_ID, OFFICER_ID, { client: db }).catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(NotFoundError);
+    expect(error.message).toBe(message);
+  });
+
+  it('SCRUM490_AC1_an_unrecognised_database_error_is_left_untyped_so_it_becomes_a_500', async () => {
+    const db = client({ data: null, error: { code: 'XX000', message: 'queue is broken' } });
+
+    const error = await listSafetyReviews(OFFICER_ID, { client: db }).catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(AppError);
+    expect(error.message).toBe('queue is broken');
+  });
+
+  it.each([
+    ['SCRUM490_AC1_the_queue', listSafetyReviews],
+    ['SCRUM490_AC13_the_history', listSafetyReviewHistory],
+  ])('%s_reads_as_an_empty_list_when_the_function_returns_no_rows', async (_name, read) => {
+    // The functions return a json array; null is the fallback for an empty answer.
+    const db = client({ data: null, error: null });
+
+    await expect(read(OFFICER_ID, { client: db })).resolves.toEqual([]);
   });
 
   it('passes only the signed-in officer and the selected response to the transaction', async () => {
@@ -141,5 +171,80 @@ describe('Safety review service', () => {
       code: 'SAFETY_REVIEW_NOT_ALLOWED',
       message: expect.stringContaining('safety_approved'),
     });
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['not a uuid', 'officer-1'],
+  ])('SCRUM490_a_%s_safety_officer_id_is_refused_before_the_database', async (_label, officerId) => {
+    const db = client();
+
+    const err = await respondToSafetyReview(EVENT_ID, { outcome: 'approved' }, officerId, { client: db }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toBe('A signed-in Safety Officer is required');
+    expect(db.rpc).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['no response at all', null],
+    ['an outcome outside the three choices', { outcome: 'deferred' }],
+  ])('SCRUM490_%s_is_refused_before_the_database', async (_label, input) => {
+    const db = client();
+
+    const err = await respondToSafetyReview(EVENT_ID, input, OFFICER_ID, { client: db }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toBe('Choose approve, request changes or reject the safety arrangement');
+    expect(db.rpc).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM490_a_note_that_is_not_text_is_refused_before_the_database', async () => {
+    const db = client();
+
+    const err = await respondToSafetyReview(
+      EVENT_ID,
+      { outcome: 'rejected', note: 42 },
+      OFFICER_ID,
+      { client: db },
+    ).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toBe('The safety review note must be text');
+    expect(db.rpc).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['not a list', BOOKING_ID],
+    ['a list holding a non-uuid id', [BOOKING_ID, 'booking-2']],
+    ['a list naming one booking twice', [BOOKING_ID, BOOKING_ID]],
+  ])('SCRUM490_affected_bookings_given_as_%s_are_refused_before_the_database', async (_label, affectedBookingIds) => {
+    const db = client();
+
+    const err = await respondToSafetyReview(
+      EVENT_ID,
+      { outcome: 'changes_requested', note: 'Widen the exit route.', affectedBookingIds },
+      OFFICER_ID,
+      { client: db },
+    ).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toBe('Affected venue bookings must be a list of unique booking ids');
+    expect(db.rpc).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM490_equipment_affected_that_is_not_true_or_false_is_refused_before_the_database', async () => {
+    const db = client();
+
+    const err = await respondToSafetyReview(
+      EVENT_ID,
+      { outcome: 'changes_requested', note: 'Swap the speakers.', equipmentAffected: 'yes' },
+      OFFICER_ID,
+      { client: db },
+    ).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toBe('equipmentAffected must be true or false');
+    expect(db.rpc).not.toHaveBeenCalled();
   });
 });

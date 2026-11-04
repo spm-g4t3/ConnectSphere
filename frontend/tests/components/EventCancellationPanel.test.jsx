@@ -200,4 +200,91 @@ describe("EventCancellationPanel", () => {
     render(<EventCancellationPanel eventRequest={{ ...REQUEST, status: "draft" }} />);
     expect(screen.queryByRole("heading", { name: "Cancel event" })).not.toBeInTheDocument();
   });
+
+  async function previewWith(user) {
+    await user.type(screen.getByLabelText("Internal cancellation reason"), "Reason");
+    await user.click(screen.getByLabelText("The organiser’s request"));
+    await user.click(screen.getByRole("button", { name: "Preview cancellation" }));
+  }
+
+  it.each([
+    ["a 403 with the server's reason", { status: 403, data: { error: "You are not assigned to this event." } }, "You are not assigned to this event."],
+    ["a bare 403", { status: 403, data: {} }, "Only the coordinator currently assigned to this event can preview its cancellation."],
+    ["a 404 with the server's reason", { status: 404, data: { error: "Event request event-1 not found." } }, "Event request event-1 not found."],
+    ["a bare 404", { status: 404 }, "This event request or its cancellation preview is not available."],
+    ["a 400 with the server's reason", { status: 400, data: { error: "Reason is too long." } }, "Reason is too long."],
+    ["a bare 422", { status: 422, data: {} }, "The cancellation preview request failed (422). Check the reason and try again."],
+  ])("SCRUM370_AC1_a_refused_preview_on_%s_says_why_and_that_nothing_changed", async (_case, response, message) => {
+    const user = userEvent.setup();
+    vi.mocked(getEventCancellationImpact).mockRejectedValue({ response });
+    render(<EventCancellationPanel eventRequest={REQUEST} />);
+
+    await previewWith(user);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(`${message} No changes have been made.`);
+    expect(screen.queryByRole("button", { name: "Confirm event cancellation" })).not.toBeInTheDocument();
+  });
+
+  it("SCRUM370_AC3_a_preview_that_cannot_reach_the_server_says_to_check_the_connection", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getEventCancellationImpact).mockRejectedValue(new Error("Network Error"));
+    render(<EventCancellationPanel eventRequest={REQUEST} />);
+
+    await previewWith(user);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The cancellation preview request could not reach the server. Check your connection and try again. No changes have been made.",
+    );
+  });
+
+  it("SCRUM370_AC2_a_blank_reason_is_refused_before_any_preview_is_read", async () => {
+    const user = userEvent.setup();
+    render(<EventCancellationPanel eventRequest={REQUEST} />);
+
+    await user.type(screen.getByLabelText("Internal cancellation reason"), "   ");
+    await user.click(screen.getByLabelText("A ConnectSphere decision"));
+    await user.click(screen.getByRole("button", { name: "Preview cancellation" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "A non-blank reason and cancellation initiator are required.",
+    );
+    expect(getEventCancellationImpact).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM370_AC3_the_preview_names_an_item_and_its_lines_even_when_their_names_are_missing", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getEventCancellationImpact).mockResolvedValue({
+      ...IMPACT,
+      venueHolds: { details: [] },
+      equipmentRequests: {
+        count: 1,
+        details: [{ id: "equipment-1", lines: [{ id: "line-1", quantity: 3 }] }],
+      },
+    });
+    render(<EventCancellationPanel eventRequest={REQUEST} />);
+
+    await previewWith(user);
+
+    expect(await screen.findByText(/Tentative venue holds to release: 0/)).toBeInTheDocument();
+    expect(screen.getByText("Item — Equipment (quantity 3)")).toBeInTheDocument();
+  });
+
+  it("SCRUM370_AC1_a_conflict_without_a_status_in_it_keeps_the_general_conflict_text", async () => {
+    const user = userEvent.setup();
+    vi.mocked(cancelEventRequest).mockRejectedValue({
+      response: { status: 409, data: { error: "The event changed while you were cancelling it." } },
+    });
+    render(<EventCancellationPanel eventRequest={REQUEST} />);
+
+    await previewWith(user);
+    await screen.findByText("Auditorium");
+    await user.click(screen.getByLabelText(
+      "I have reviewed the impact and explicitly confirm cancelling this event.",
+    ));
+    await user.click(screen.getByRole("button", { name: "Confirm event cancellation" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This event has changed and can no longer be cancelled in its current status. Reopen it to see where it stands.",
+    );
+  });
 });

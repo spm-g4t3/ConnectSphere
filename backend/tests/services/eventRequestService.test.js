@@ -906,6 +906,17 @@ describe('SCRUM-327 AC6, AC7, AC9: an event is handed to another coordinator', (
     expect(fieldsIn(err)).toContain('newCoordinatorId');
     expect(client.calls).toHaveLength(0);
   });
+
+  it('SCRUM331_AC7_refuses_a_handover_with_no_changes_at_all_before_calling_the_function', async () => {
+    // A route that forwarded a missing body: the same 400 as a missing id, not a TypeError.
+    const client = createEventRequestClient([]);
+
+    const err = await errorFrom(reassignEventRequest(REQUEST_ID, undefined, COORDINATOR_ID, { client }));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.details).toEqual([{ field: 'newCoordinatorId', message: 'is required' }]);
+    expect(client.calls).toHaveLength(0);
+  });
 });
 
 
@@ -1796,6 +1807,144 @@ describe('SCRUM-162: assigned Coordinator requests clarification', () => {
         requestedFields: [],
       },
     ]);
+  });
+});
+
+describe("SCRUM-162: the clarification service's own guards", () => {
+  const LONG_TEXT = 'x'.repeat(2001);
+  const reply = (client, amendments, message = 'Here is the answer.') =>
+    respondToEventClarification(REQUEST_ID, message, ORGANISER_ID, amendments, { client });
+  const close = (client, message = 'Resolved by phone.', coordinatorId = COORDINATOR_ID) =>
+    closeEventClarification(REQUEST_ID, message, coordinatorId, { client });
+
+  it('SCRUM162_AC1_refuses_a_clarification_note_over_2000_characters_before_querying', async () => {
+    const client = createEventRequestClient([]);
+
+    const err = await errorFrom(requestEventClarification(REQUEST_ID, LONG_TEXT, COORDINATOR_ID, { client }));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toBe('clarification note must be 2000 characters or fewer');
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM162_AC4_refuses_a_reply_over_2000_characters_before_querying', async () => {
+    const client = createEventRequestClient([]);
+
+    const err = await errorFrom(reply(client, {}, LONG_TEXT));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toBe('clarification reply must be 2000 characters or fewer');
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it.each([
+    ['null', null],
+    ['an array', ['purpose']],
+    ['text', 'purpose'],
+  ])('SCRUM162_AC5_refuses_amendments_given_as_%s_before_querying', async (_label, amendments) => {
+    const client = createEventRequestClient([]);
+
+    const err = await errorFrom(reply(client, amendments));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toBe('clarification amendments must be an object');
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM162_AC5_refuses_an_amendment_to_a_field_that_is_not_an_event_detail', async () => {
+    const client = createEventRequestClient([]);
+
+    const err = await errorFrom(reply(client, { status: STATUS.APPROVED }));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toBe('clarification amendments include an unknown event field');
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it.each([['null', null], ['blank', '   ']])(
+    'SCRUM162_AC5_refuses_a_%s_event_name_amendment_because_the_name_is_required',
+    async (_label, eventName) => {
+      const client = createEventRequestClient([]);
+
+      const err = await errorFrom(reply(client, { eventName }));
+
+      expect(err).toBeInstanceOf(ValidationError);
+      expect(err.message).toBe('eventName cannot be blank');
+      expect(client.calls).toHaveLength(0);
+    },
+  );
+
+  it('SCRUM162_AC5_a_null_or_blank_amendment_to_an_optional_field_is_sent_as_a_clear', async () => {
+    const client = createEventRequestClient([
+      ok(storedRow({ status: STATUS.PENDING_CLARIFICATION })),
+      ok(storedRow({ status: STATUS.UNDER_REVIEW })),
+    ]);
+
+    await reply(client, { description: '   ', accessibilityRequirements: null });
+
+    expect(client.calls[1].fn).toBe('reply_to_event_clarification_with_amendments');
+    expect(client.calls[1].args.p_updates).toEqual({ description: null, accessibilityRequirements: null });
+  });
+
+  it('SCRUM162_AC6_refuses_a_closure_note_over_2000_characters_before_querying', async () => {
+    const client = createEventRequestClient([]);
+
+    const err = await errorFrom(close(client, LONG_TEXT));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toBe('clarification closure note must be 2000 characters or fewer');
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM444_AC2_only_the_assigned_coordinator_can_close_a_clarification', async () => {
+    const client = createEventRequestClient([
+      ok(assignedRow({ status: STATUS.PENDING_CLARIFICATION, assigned_coordinator_id: NEW_COORDINATOR_ID })),
+    ]);
+
+    const err = await errorFrom(close(client));
+
+    expect(err).toBeInstanceOf(ForbiddenError);
+    expect(err.message).toBe(
+      `Only the coordinator assigned to event request ${REQUEST_ID} can close its clarification request.`,
+    );
+    expect(client.calls.map((call) => call.operation)).toEqual(['select']);
+  });
+
+  it('SCRUM162_AC6_refuses_to_close_when_no_clarification_is_open', async () => {
+    const client = createEventRequestClient([ok(assignedRow({ status: STATUS.UNDER_REVIEW }))]);
+
+    const err = await errorFrom(close(client));
+
+    expect(err).toBeInstanceOf(ConflictError);
+    expect(err.message).toBe("An event request with status 'under_review' cannot close a clarification request.");
+    expect(client.calls.map((call) => call.operation)).toEqual(['select']);
+  });
+
+  it('SCRUM162_AC6_a_closure_the_function_refuses_reaches_the_caller_as_a_conflict', async () => {
+    // The read saw an open clarification; by the write it had been answered.
+    const message = `event request ${REQUEST_ID} has status under_review, not pending_clarification`;
+    const client = createEventRequestClient([
+      ok(assignedRow({ status: STATUS.PENDING_CLARIFICATION })),
+      dbError('55000', message),
+    ]);
+
+    const err = await errorFrom(close(client));
+
+    expect(err).toBeInstanceOf(ConflictError);
+    expect(err.message).toBe(message);
+    expect(client.calls.map((call) => call.operation)).toEqual(['select', 'rpc']);
+  });
+
+  it('SCRUM162_AC9_a_failed_history_read_is_an_error_not_an_empty_history', async () => {
+    const client = createEventRequestClient([
+      ok(assignedRow()),
+      dbError('42501', 'permission denied for table event_request_clarification_history'),
+    ]);
+
+    const err = await errorFrom(getEventClarificationHistory(REQUEST_ID, ORGANISER_ID, ROLE.EVENT_ORGANISER, { client }));
+
+    expect(err).toBeInstanceOf(ForbiddenError);
+    expect(client.calls.map((call) => call.table)).toEqual(['event_requests', 'event_request_clarification_history']);
   });
 });
 
@@ -3260,6 +3409,16 @@ describe('SCRUM-321 AC5: a status change is one call that records who, what and 
     expect(client.calls).toHaveLength(0);
   });
 
+  it('SCRUM321_AC5_refuses_a_reason_that_is_not_text_before_any_call', async () => {
+    const client = createEventRequestClient([]);
+
+    const err = await errorFrom(change(client, { reason: 42 }));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toBe('reason must be text');
+    expect(client.calls).toHaveLength(0);
+  });
+
   it.each([undefined, null, '', '   ', 42])(
     'SCRUM321_AC5_refuses_%j_as_the_user_before_any_call',
     async (changedBy) => {
@@ -3739,6 +3898,16 @@ describe('SCRUM-322 AC6: the Organiser and the assigned coordinator see the full
     expect(history[1].changedByName).toBeNull();
   });
 
+  it('SCRUM322_AC6_a_names_read_with_no_data_still_returns_every_change_unnamed', async () => {
+    // PostgREST answers an empty .in() with [], not null; this pins the fallback anyway.
+    const client = readingHistory(heldEvent(), historyRows(), null);
+
+    const history = await getEventRequestStatusHistory(REQUEST_ID, ORGANISER_ID, { client });
+
+    expect(history).toHaveLength(3);
+    expect(history.map((entry) => entry.changedByName)).toEqual([null, null, null]);
+  });
+
   it('SCRUM322_AC6_returns_an_empty_list_when_nothing_has_changed_yet', async () => {
     // A draft, or an event submitted before 021: it exists and the caller may
     // read it, so "nothing yet" is the true answer, and no names are looked up.
@@ -3931,6 +4100,27 @@ describe('SCRUM-325 AC4: nothing leaves a final status', () => {
           p_user_id: COORDINATOR_ID,
         },
       })]);
+    });
+
+    it('SCRUM444_AC2_only_the_assigned_coordinator_can_preview_a_significant_change', async () => {
+      const client = createEventRequestClient([ok({ ...current, assigned_coordinator_id: NEW_COORDINATOR_ID })]);
+
+      const err = await errorFrom(getSignificantEventChangeImpact(REQUEST_ID, changes, COORDINATOR_ID, { client }));
+
+      expect(err).toBeInstanceOf(ForbiddenError);
+      expect(err.message).toBe('Only the coordinator assigned to this event can preview its significant change.');
+      expect(rpcCallsOf(client)).toHaveLength(0);
+    });
+
+    it('SCRUM395_AC3_a_preview_the_database_refuses_reaches_the_caller_as_a_typed_error', async () => {
+      const message = `event request ${REQUEST_ID} has status completed, which does not allow a significant change`;
+      const client = createEventRequestClient([ok(current), dbError('55000', message)]);
+
+      const err = await errorFrom(getSignificantEventChangeImpact(REQUEST_ID, changes, COORDINATOR_ID, { client }));
+
+      expect(err).toBeInstanceOf(ConflictError);
+      expect(err.message).toBe(message);
+      expect(rpcCallsOf(client).map((call) => call.fn)).toEqual(['preview_significant_event_change']);
     });
 
     it('SCRUM395_AC4_applies_the_change_through_the_atomic_database_function', async () => {
@@ -4885,5 +5075,259 @@ describe('SCRUM-363: change-request approval through the significant-change path
       .catch((e) => e);
     expect(err).toBeInstanceOf(Err);
     expect(err.message).toBe('expectedAttendance must be a positive whole number');
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-379 AC7 (SCRUM-383): the Needs attention list's empty answers
+// ---------------------------------------------------------------------------
+import { listNeedsAttention, getEventChangeHistory } from '../../src/services/eventRequestService.js';
+import { NEEDS_ATTENTION_CODE, MARK_COMPLETED_REASON, NOT_CONFIRMED_REASON } from '../../src/domain/coordinatorAttentionList.js';
+
+describe('SCRUM-379 AC7: the Needs attention list when a read returns no data', () => {
+  // A month after storedRow's event ended.
+  const AFTER_THE_EVENT = new Date('2026-07-01T00:00:00Z');
+
+  it('SCRUM379_AC7_an_events_read_with_no_data_is_an_empty_list_with_no_further_reads', async () => {
+    const client = createEventRequestClient([ok(null)]);
+
+    await expect(listNeedsAttention(COORDINATOR_ID, { client, now: AFTER_THE_EVENT })).resolves.toEqual([]);
+    expect(client.calls.map((call) => call.table)).toEqual(['event_requests']);
+  });
+
+  it('SCRUM379_AC7_a_confirmed_event_whose_readiness_comes_back_empty_is_listed_only_to_be_completed', async () => {
+    const client = createEventRequestClient([
+      ok([storedRow({ status: STATUS.CONFIRMED, assigned_coordinator_id: COORDINATOR_ID })]),
+      ok(null),
+      ok([{ id: ORGANISER_ID, full_name: 'Olivia Organiser' }]),
+    ]);
+
+    const items = await listNeedsAttention(COORDINATOR_ID, { client, now: AFTER_THE_EVENT });
+
+    expect(rpcCallsOf(client)).toEqual([expect.objectContaining({
+      fn: 'event_readiness',
+      args: { p_event_request_id: REQUEST_ID, p_no_equipment_confirmed: true },
+    })]);
+    expect(items.map(({ code, reason, organiserName }) => ({ code, reason, organiserName }))).toEqual([
+      { code: NEEDS_ATTENTION_CODE.MARK_COMPLETED, reason: MARK_COMPLETED_REASON, organiserName: 'Olivia Organiser' },
+    ]);
+  });
+
+  it('SCRUM379_AC7_a_names_read_with_no_data_lists_the_event_with_no_organiser_name', async () => {
+    // PostgREST answers .in() with [], not null; this pins the fallback anyway.
+    const client = createEventRequestClient([
+      ok([storedRow({ status: STATUS.APPROVED, assigned_coordinator_id: COORDINATOR_ID })]),
+      ok(null),
+    ]);
+
+    const items = await listNeedsAttention(COORDINATOR_ID, { client, now: AFTER_THE_EVENT });
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ reason: NOT_CONFIRMED_REASON, eventRequestId: REQUEST_ID, organiserName: null });
+  });
+});
+
+
+describe('SCRUM-387 AC7: the change history refuses a malformed id', () => {
+  it('SCRUM387_AC7_a_malformed_id_is_refused_before_any_read', async () => {
+    const client = createEventRequestClient([]);
+
+    const err = await errorFrom(getEventChangeHistory('not-an-id', ORGANISER_ID, ROLE.EVENT_ORGANISER, { client }));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toBe('Invalid event request id');
+    expect(err.details).toEqual([{ field: 'id', message: 'must be a valid id' }]);
+    expect(client.calls).toHaveLength(0);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// eventChangeRequestService: the branches the route tests do not reach
+// ---------------------------------------------------------------------------
+describe('SCRUM-11: the change request service answers odd input and failed reads in words', () => {
+  const singleChange = { eventRequestId: REQUEST_ID, changeField: 'expected_attendance', requestedChange: '250' };
+
+  it('SCRUM35_AC3_a_change_request_for_a_record_that_does_not_exist_is_a_validation_error', async () => {
+    const message = 'insert or update on table "event_change_requests" violates foreign key constraint';
+    const client = createEventRequestClient([dbError('23503', message)]);
+
+    const err = await errorFrom(eventChangeRequestService.createChangeRequest(singleChange, ORGANISER_ID, { client }));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toBe(`Referenced record does not exist: ${message}`);
+    expect(rpcCallsOf(client).map((call) => call.fn)).toEqual(['create_change_request_group']);
+  });
+
+  it('SCRUM33_AC3_a_malformed_id_the_database_rejects_is_a_validation_error', async () => {
+    // A backstop: validation refuses a malformed id first, so only a direct caller gets here.
+    const message = 'invalid input syntax for type uuid: "x"';
+    const client = createEventRequestClient([dbError('22P02', message)]);
+
+    const err = await errorFrom(eventChangeRequestService.createChangeRequest(singleChange, ORGANISER_ID, { client }));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toBe(`Invalid id format: ${message}`);
+  });
+
+  it.each([['null', null], ['text', 'venue']])(
+    'SCRUM33_AC2_a_%s_body_is_refused_as_naming_no_field_before_the_database',
+    async (_label, payload) => {
+      const client = createEventRequestClient([]);
+
+      const err = await errorFrom(
+        eventChangeRequestService.createChangeRequestFromClient(REQUEST_ID, payload, ORGANISER_ID, { client }),
+      );
+
+      expect(err).toBeInstanceOf(ValidationError);
+      expect(fieldsIn(err)).toContain('changeField');
+      expect(client.calls).toHaveLength(0);
+    },
+  );
+
+  it('SCRUM34_AC4_a_change_field_with_no_label_is_shown_by_its_stored_name', async () => {
+    // Every value 006's check allows has a label; this pins the fallback for one added later.
+    const client = createEventRequestClient([
+      ok({ id: REQUEST_ID, organiser_id: ORGANISER_ID }),
+      ok([{ id: CHANGE_REQUEST_ID, event_request_id: REQUEST_ID, change_field: 'catering', requested_change: 'Vegetarian' }]),
+    ]);
+
+    const [row] = await eventChangeRequestService.getChangeRequestsForEvent(REQUEST_ID, ORGANISER_ID, { client });
+
+    expect(row.fieldLabel).toBe('catering');
+    expect(row.details).toBe('Vegetarian');
+  });
+
+  it.each([
+    ['the event read', [dbError('42P01', 'relation "event_requests" does not exist')], 1],
+    ['the change request read', [ok({ id: REQUEST_ID, organiser_id: ORGANISER_ID }), dbError('42P01', 'relation "event_change_requests" does not exist')], 2],
+  ])('SCRUM34_AC4_a_failure_in_%s_is_an_error_not_a_missing_event_or_an_empty_list', async (_label, results, reads) => {
+    const client = createEventRequestClient(results);
+
+    const err = await errorFrom(eventChangeRequestService.getChangeRequestsForEvent(REQUEST_ID, ORGANISER_ID, { client }));
+
+    // 42P01 is no known SQLSTATE, so it stays untyped and the route answers 500.
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(AppError);
+    expect(client.calls).toHaveLength(reads);
+  });
+
+  it('SCRUM402_AC1_a_coordinator_list_read_with_no_data_is_an_empty_list', async () => {
+    // PostgREST answers a list with [], not null; this pins the fallback anyway.
+    const client = createEventRequestClient([ok(null)]);
+
+    await expect(eventChangeRequestService.getChangeRequestsForCoordinator(REQUEST_ID, { client })).resolves.toEqual([]);
+    expect(client.calls[0].table).toBe('event_change_requests');
+    expect(client.calls[0].filters).toEqual([['event_request_id', REQUEST_ID]]);
+  });
+
+  it.each([['null', null], ['text', 'approved']])(
+    'SCRUM37_AC5_a_%s_decision_is_refused_as_naming_no_decision_before_the_database',
+    async (_label, decisionInput) => {
+      const client = createEventRequestClient([]);
+
+      const err = await errorFrom(
+        eventChangeRequestService.processChangeRequest(CHANGE_REQUEST_ID, decisionInput, COORDINATOR_ID, { client }),
+      );
+
+      expect(err).toBeInstanceOf(ValidationError);
+      expect(fieldsIn(err)).toEqual(['decision']);
+      expect(client.calls).toHaveLength(0);
+    },
+  );
+});
+
+
+// ---------------------------------------------------------------------------
+// SCRUM-35 AC3: one change request is opened by its own id for later review
+// ---------------------------------------------------------------------------
+describe('SCRUM-35 AC3: a change request is read back on its own, for its organiser', () => {
+  const getById = (client, changeRequestId = CHANGE_REQUEST_ID, organiserId = ORGANISER_ID) =>
+    eventChangeRequestService.getChangeRequestById(changeRequestId, organiserId, { client });
+
+  const changeRow = (organiserId = ORGANISER_ID) => ({
+    id: CHANGE_REQUEST_ID,
+    event_request_id: REQUEST_ID,
+    requested_by: organiserId,
+    change_field: 'expected_attendance',
+    requested_change: '250',
+    status: 'outstanding',
+    created_at: '2026-01-15T09:00:00.000Z',
+    updated_at: '2026-01-15T09:00:00.000Z',
+    event_requests: { organiser_id: organiserId },
+  });
+
+  it('SCRUM35_AC3_a_missing_organiser_id_is_refused_before_the_database', async () => {
+    const client = createEventRequestClient([]);
+
+    const err = await errorFrom(getById(client, CHANGE_REQUEST_ID, null));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toBe('organiserId is required');
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM35_AC3_a_malformed_change_request_id_is_refused_before_the_database', async () => {
+    const client = createEventRequestClient([]);
+
+    const err = await errorFrom(getById(client, 'not-a-real-id'));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toBe('changeRequestId must be a valid id');
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('SCRUM35_AC3_a_database_refusal_is_translated_into_a_typed_error', async () => {
+    const message = 'permission denied for table event_change_requests';
+    const client = createEventRequestClient([dbError('42501', message)]);
+
+    const err = await errorFrom(getById(client));
+
+    expect(err).toBeInstanceOf(ForbiddenError);
+    expect(err.message).toBe(message);
+  });
+
+  it('SCRUM35_AC3_an_id_that_names_no_change_request_is_not_found', async () => {
+    const client = createEventRequestClient([ok(null)]);
+
+    const err = await errorFrom(getById(client));
+
+    expect(err).toBeInstanceOf(NotFoundError);
+    expect(err.message).toBe(`Change request ${CHANGE_REQUEST_ID} not found`);
+  });
+
+  it("SCRUM35_AC3_a_change_request_on_someone_else's_event_is_refused", async () => {
+    const client = createEventRequestClient([ok(changeRow(OTHER_ORGANISER_ID))]);
+
+    const err = await errorFrom(getById(client));
+
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err.message).toBe('Only the event organiser may view this change request');
+  });
+
+  it('SCRUM35_AC3_the_organiser_gets_the_request_in_the_list_item_shape_from_one_owner_checked_read', async () => {
+    const client = createEventRequestClient([ok(changeRow())]);
+
+    const view = await getById(client);
+
+    expect(view).toMatchObject({
+      id: CHANGE_REQUEST_ID,
+      eventRequestId: REQUEST_ID,
+      requestGroupId: CHANGE_REQUEST_ID,
+      changeField: 'expected_attendance',
+      fieldLabel: 'Expected attendance',
+      details: '250',
+      requestedChange: '250',
+      status: 'outstanding',
+      decision: null,
+    });
+    expect(client.calls).toHaveLength(1);
+    expect(client.calls[0]).toMatchObject({
+      table: 'event_change_requests',
+      operation: 'select',
+      select: '*, event_requests ( organiser_id )',
+      filters: [['id', CHANGE_REQUEST_ID]],
+    });
   });
 });

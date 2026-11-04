@@ -154,6 +154,34 @@ describe("SCRUM-191 what was checked", () => {
     expect(checkedValue("Accessibility features")).toHaveTextContent("None requested");
     expect(checkedValue("Facilities")).toHaveTextContent("None requested");
   });
+
+  // SCRUM-188 AC7: a booking stored before SCRUM-190 recorded no `checked`, and
+  // the API sends it as null; its criteria still show.
+  it("SCRUM188_AC7_a_result_stored_without_what_was_checked_reads_as_not_set", () => {
+    render(<VenueSuitabilityResult result={{ ...SUITABLE, checked: null }} />);
+
+    expect(criteriaItems()).toHaveLength(6);
+    expect(checkedValue("When")).toHaveTextContent("Not set");
+    expect(checkedValue("Expected attendance")).toHaveTextContent("Not specified");
+    expect(checkedValue("Layout")).toHaveTextContent("None requested");
+    expect(checkedValue("Accessibility features")).toHaveTextContent("None requested");
+    expect(checkedValue("Facilities")).toHaveTextContent("None requested");
+  });
+
+  // The stored result is jsonb with no schema, so an entry can lack its name.
+  it("SCRUM188_AC7_criteria_stored_without_a_name_still_show_their_verdicts", () => {
+    render(
+      <VenueSuitabilityResult
+        result={{ ...UNSUITABLE, criteria: [{ met: true, detail: "Open" }, { met: false, detail: "Too small" }] }}
+      />,
+    );
+
+    const items = criteriaItems();
+    expect(items).toHaveLength(2);
+    expect(within(items[0]).getByText("Met")).toBeInTheDocument();
+    expect(within(items[1]).getByText("Not met")).toBeInTheDocument();
+    expect(within(items[1]).getByText("Too small")).toBeInTheDocument();
+  });
 });
 
 describe("SCRUM-188 AC7 overridden criteria", () => {

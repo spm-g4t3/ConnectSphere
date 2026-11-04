@@ -1,7 +1,7 @@
 // The waiting list across the attendee, organiser and coordinator screens, with
 // the services mocked; the backend's rules are tested in the backend.
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
 
 import BrowseEventDetails from "../../src/components/BrowseEventDetails.jsx";
@@ -209,6 +209,36 @@ describe("SCRUM460 waiting lists in My Registrations", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("You have been given a place at this event");
     expect(onChanged).toHaveBeenCalled();
   });
+
+  it("SCRUM460_AC2_leaving_a_place_that_no_longer_exists_says_it_could_not_be_found", async () => {
+    vi.mocked(getWaitlist).mockResolvedValue([place]);
+    vi.mocked(leaveWaitlist).mockRejectedValue({ response: { status: 404, data: { error: "Not found" } } });
+    const onChanged = vi.fn();
+    render(<WaitingListPlaces onChanged={onChanged} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Leave waiting list" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm leaving" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This waiting-list place could not be found. It may already have been removed.",
+    );
+    expect(screen.queryByText(/You have left the waiting list/)).not.toBeInTheDocument();
+    expect(onChanged).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM460_AC2_leaving_an_unnamed_event_confirms_it_as_this_event", async () => {
+    const unnamed = { registrationId: "r2", eventRequestId: "e2", eventName: null, waitlistPosition: 1 };
+    vi.mocked(getWaitlist).mockResolvedValueOnce([unnamed]).mockResolvedValueOnce([]);
+    vi.mocked(leaveWaitlist).mockResolvedValue({ id: "r2", status: "withdrawn" });
+    render(<WaitingListPlaces />);
+
+    expect(await screen.findByText("Unnamed event")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Leave waiting list" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm leaving" }));
+
+    await waitFor(() => expect(leaveWaitlist).toHaveBeenCalledWith("r2"));
+    expect(await screen.findByRole("status")).toHaveTextContent("You have left the waiting list for this event.");
+  });
 });
 
 describe("SCRUM460 waiting-list count for staff", () => {
@@ -248,6 +278,25 @@ describe("SCRUM460 waiting-list count for staff", () => {
     vi.mocked(getRegistrationCounts).mockRejectedValueOnce({ response: { status: 500 } });
     render(<RegistrationCounts eventId="e1" />);
     expect(await screen.findByRole("alert")).toHaveTextContent("Registration numbers could not be loaded.");
+  });
+
+  it("SCRUM460_AC6_a_count_that_arrives_after_switching_event_is_not_shown_for_the_new_one", async () => {
+    const first = deferred();
+    vi.mocked(getRegistrationCounts)
+      .mockReturnValueOnce(first.promise)
+      .mockResolvedValueOnce({ eventRequestId: "e2", capacity: 30, waitlistEnabled: true, registeredCount: 7, waitlistCount: 2 });
+    const { rerender } = render(<RegistrationCounts eventId="e1" />);
+    rerender(<RegistrationCounts eventId="e2" />);
+    const panel = await screen.findByRole("region", { name: "Registrations" });
+    expect(within(panel).getByText("7 / 30")).toBeInTheDocument();
+
+    await act(async () => first.resolve(
+      { eventRequestId: "e1", capacity: 50, waitlistEnabled: true, registeredCount: 50, waitlistCount: 4 },
+    ));
+
+    expect(within(panel).getByText("7 / 30")).toBeInTheDocument();
+    expect(within(panel).queryByText("50 / 50")).not.toBeInTheDocument();
+    expect(getRegistrationCounts).toHaveBeenNthCalledWith(2, "e2");
   });
 
   it("SCRUM460_AC6_the_organiser_sees_the_count_and_switches_the_list_on", async () => {

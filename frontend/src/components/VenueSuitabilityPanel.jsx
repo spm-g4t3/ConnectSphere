@@ -52,8 +52,7 @@ const UNAVAILABLE_MESSAGE =
 
 /** Is the Availability criterion reported as not met? */
 function availabilityUnmet(result) {
-  const criteria = Array.isArray(result?.criteria) ? result.criteria : [];
-  return criteria.some((c) => c?.criterion === "Availability" && c?.met === false);
+  return result.criteria.some((c) => c?.criterion === "Availability" && c?.met === false);
 }
 
 export default function VenueSuitabilityPanel({
@@ -82,6 +81,7 @@ export default function VenueSuitabilityPanel({
   // check. scrollIntoView is guarded: jsdom does not implement it.
   useEffect(() => {
     const heading = headingRef.current;
+    /* v8 ignore next -- @preserve The heading this ref points at is always rendered. */
     if (!heading) return;
     heading.focus();
     if (typeof heading.scrollIntoView === "function") {

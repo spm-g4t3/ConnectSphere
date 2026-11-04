@@ -118,6 +118,23 @@ describe('SCRUM-492: POST /api/booking-requests/:id/release', () => {
     expect(client.calls).toHaveLength(0);
   });
 
+  it('SCRUM492_AC1_a_request_with_no_body_is_400_for_the_missing_reason_and_queries_nothing', async () => {
+    // express.json leaves req.body undefined without a JSON body; it is still answered as a missing reason.
+    const client = createRpcQueueClient([]);
+
+    const res = await request(
+      express()
+        .use(express.json())
+        .use('/api/booking-requests', createBookingRequestRouter({
+          client, requireAuth: signedInWithRole(ROLE.EVENT_COORDINATOR),
+        })),
+    ).post(`/api/booking-requests/${BOOKING_ID}/release`);
+
+    expect(res.status).toBe(400);
+    expect(res.body.details).toEqual([expect.objectContaining({ field: 'reason' })]);
+    expect(client.calls).toHaveLength(0);
+  });
+
   it.each([
     ['EVENT_NOT_APPROVED', dbError('PT409', 'words', { hint: 'EVENT_NOT_APPROVED' }), 409],
     ['BOOKING_NOT_APPROVED', dbError('PT409', 'words', { hint: 'BOOKING_NOT_APPROVED' }), 409],

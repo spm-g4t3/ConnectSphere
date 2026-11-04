@@ -51,6 +51,13 @@ describe('AC4: reduce and release need a reason', () => {
     expect(details.map((d) => d.field).sort()).toEqual(['quantity', 'reason']);
   });
 
+  it.each([null, undefined, 'x', 5, []])('SCRUM300_AC4_reduce_refuses_a_body_that_is_%j', (body) => {
+    expect(checkReduceInput(body)).toEqual({
+      value: null,
+      details: [{ field: 'reservation', message: 'must be an object' }],
+    });
+  });
+
   it.each([undefined, null, '', '   ', 5, {}])('SCRUM300_AC4_release_refuses_the_reason_%j', (reason) => {
     const { value, details } = checkReleaseInput({ reason });
     expect(value).toBeNull();

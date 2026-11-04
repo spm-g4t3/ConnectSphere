@@ -4,7 +4,7 @@ import {
   getRegistrationSettings,
   updateRegistrationSettings,
 } from '../../src/services/eventRegistrationService.js';
-import { ForbiddenError, ValidationError } from '../../src/errors.js';
+import { ForbiddenError, NotFoundError, ValidationError } from '../../src/errors.js';
 
 const EVENT_ID = '22222222-2222-4222-8222-222222222222';
 const ORGANISER_ID = '11111111-1111-4111-8111-111111111111';
@@ -24,15 +24,15 @@ function saveClient(rpcResult, rpcError = null) {
   };
 }
 
-function settingsClient({ event, count = 0 }) {
+function settingsClient({ event, count = 0, eventError = null, countError = null }) {
   const eventQuery = {
     select: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
-    maybeSingle: vi.fn().mockResolvedValue({ data: event, error: null }),
+    maybeSingle: vi.fn().mockResolvedValue({ data: event, error: eventError }),
   };
   const countQuery = {
     eq: vi.fn().mockReturnThis(),
-    then: (resolve, reject) => Promise.resolve({ count, error: null }).then(resolve, reject),
+    then: (resolve, reject) => Promise.resolve({ count, error: countError }).then(resolve, reject),
   };
   const countSelect = vi.fn(() => countQuery);
   return {
@@ -204,4 +204,125 @@ describe('SCRUM-494 registration settings and attendee listings', () => {
       expect(client.rpc).not.toHaveBeenCalled();
     },
   );
+
+  it('SCRUM494_AC2_rejects_an_event_id_that_is_not_a_uuid_before_the_database_call', async () => {
+    const client = saveClient({ outcome: 'saved' });
+    const error = await updateRegistrationSettings('not-a-uuid', validSettings, ORGANISER_ID, { client })
+      .catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(ValidationError);
+    expect(error.message).toBe('eventRequestId must be a valid UUID');
+    expect(error.details).toEqual([{ field: 'eventRequestId', message: 'Must be a valid UUID.' }]);
+    expect(client.rpc).not.toHaveBeenCalled();
+  });
+
+  it.each([null, 'enabled', [validSettings]])(
+    'SCRUM494_AC2_rejects_settings_that_are_not_an_object (%j)',
+    async (input) => {
+      const client = saveClient({ outcome: 'saved' });
+      await expect(updateRegistrationSettings(EVENT_ID, input, ORGANISER_ID, { client }))
+        .rejects.toMatchObject({ name: 'ValidationError', message: 'Registration settings must be an object.' });
+      expect(client.rpc).not.toHaveBeenCalled();
+    },
+  );
+
+  it('SCRUM494_AC2_rejects_an_on_off_switch_that_is_not_true_or_false', async () => {
+    const client = saveClient({ outcome: 'saved' });
+    const error = await updateRegistrationSettings(
+      EVENT_ID,
+      { ...validSettings, enabled: 'yes' },
+      ORGANISER_ID,
+      { client },
+    ).catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(ValidationError);
+    expect(error.details).toEqual([{ field: 'registrationEnabled', message: 'Must be true or false.' }]);
+    expect(client.rpc).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM494_AC3_accepts_capacity_sent_as_a_string_of_digits', async () => {
+    const client = saveClient({ outcome: 'saved', settings: {}, registeredCount: 0 });
+
+    await updateRegistrationSettings(EVENT_ID, { ...validSettings, capacity: '25' }, ORGANISER_ID, { client });
+
+    expect(client.rpc).toHaveBeenCalledWith('setup_event_registration', expect.objectContaining({
+      p_capacity: 25,
+    }));
+  });
+
+  it.each([0, '-3'])('SCRUM494_AC3_rejects_capacity_below_one (%j)', async (capacity) => {
+    const client = saveClient({ outcome: 'saved' });
+    const error = await updateRegistrationSettings(
+      EVENT_ID,
+      { ...validSettings, capacity },
+      ORGANISER_ID,
+      { client },
+    ).catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(ValidationError);
+    expect(error.details).toEqual([
+      { field: 'registrationCapacity', message: 'Must be a whole number above zero.' },
+    ]);
+    expect(client.rpc).not.toHaveBeenCalled();
+  });
+
+  it('SCRUM494_AC2_reports_a_missing_event_from_the_database_as_not_found', async () => {
+    const client = saveClient({ outcome: 'not_found' });
+    await expect(updateRegistrationSettings(EVENT_ID, validSettings, ORGANISER_ID, { client }))
+      .rejects.toMatchObject({ name: 'NotFoundError', message: 'Event not found.' });
+  });
+
+  it('SCRUM494_AC2_fails_loudly_on_an_outcome_the_service_does_not_know', async () => {
+    const client = saveClient({ outcome: 'surprise' });
+    await expect(updateRegistrationSettings(EVENT_ID, validSettings, ORGANISER_ID, { client }))
+      .rejects.toThrow('Unexpected setup_event_registration outcome: surprise');
+  });
+
+  describe('getRegistrationSettings', () => {
+    const ownedEvent = { id: EVENT_ID, organiser_id: ORGANISER_ID, status: 'approved' };
+
+    it('SCRUM494_AC3_rejects_an_event_id_that_is_not_a_uuid', async () => {
+      const client = settingsClient({ event: ownedEvent });
+      await expect(getRegistrationSettings('not-a-uuid', ORGANISER_ID, { client }))
+        .rejects.toMatchObject({ name: 'ValidationError', message: 'eventRequestId must be a valid UUID' });
+      expect(client.from).not.toHaveBeenCalled();
+    });
+
+    it('SCRUM494_AC3_passes_on_a_failed_event_read', async () => {
+      const eventError = { code: 'XX000', message: 'read failed' };
+      const client = settingsClient({ event: null, eventError });
+      await expect(getRegistrationSettings(EVENT_ID, ORGANISER_ID, { client })).rejects.toBe(eventError);
+      expect(client.from).toHaveBeenCalledWith('event_requests');
+      expect(client.countSelect).not.toHaveBeenCalled();
+    });
+
+    it('SCRUM494_AC3_reports_a_missing_event_as_not_found', async () => {
+      const client = settingsClient({ event: null });
+      const error = await getRegistrationSettings(EVENT_ID, ORGANISER_ID, { client }).catch((caught) => caught);
+      expect(error).toBeInstanceOf(NotFoundError);
+      expect(error.message).toBe('Event not found.');
+    });
+
+    it('SCRUM494_AC3_shows_settings_only_to_the_organiser_who_created_the_event', async () => {
+      const client = settingsClient({ event: { ...ownedEvent, organiser_id: '33333333-3333-4333-8333-333333333333' } });
+      const error = await getRegistrationSettings(EVENT_ID, ORGANISER_ID, { client }).catch((caught) => caught);
+      expect(error).toBeInstanceOf(ForbiddenError);
+      expect(error.message).toBe('Only the Event Organiser who created this event can view its registration settings.');
+      expect(client.countSelect).not.toHaveBeenCalled();
+    });
+
+    it('SCRUM494_AC3_passes_on_a_failed_registration_count', async () => {
+      const countError = { code: 'XX000', message: 'count failed' };
+      const client = settingsClient({ event: ownedEvent, countError });
+      await expect(getRegistrationSettings(EVENT_ID, ORGANISER_ID, { client })).rejects.toBe(countError);
+    });
+
+    it('SCRUM494_AC3_reads_a_missing_count_as_zero', async () => {
+      // A head count query always returns a number; null is a defensive fallback.
+      const client = settingsClient({ event: ownedEvent, count: null });
+      await expect(getRegistrationSettings(EVENT_ID, ORGANISER_ID, { client })).resolves.toMatchObject({
+        settings: { registeredCount: 0, waitlistCount: 0, waitlistEnabled: false },
+      });
+    });
+  });
 });

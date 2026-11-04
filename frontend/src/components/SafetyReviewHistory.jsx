@@ -137,8 +137,8 @@ export default function SafetyReviewHistory() {
                   <p>{eventRange(event.startsAt, event.endsAt, "Date and time not recorded")}</p>
                   <p>
                     Outcome:{" "}
-                    <StatusBadge tone={OUTCOME_TONES[event.outcome] ?? "neutral"}>
-                      {OUTCOME_LABELS[event.outcome] ?? event.outcome}
+                    <StatusBadge tone={OUTCOME_TONES[event.outcome]}>
+                      {OUTCOME_LABELS[event.outcome]}
                     </StatusBadge>
                   </p>
                   {event.note && <p>Note: {event.note}</p>}

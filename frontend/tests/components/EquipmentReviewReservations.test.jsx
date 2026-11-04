@@ -921,3 +921,58 @@ describe("the review summary at the bottom", () => {
     expect(screen.queryByRole("heading", { name: "Finish review" })).not.toBeInTheDocument();
   });
 });
+
+describe("edge cases in the reservation forms and tabs", () => {
+  it("SCRUM300_AC4_a_blank_quantity_is_refused_before_any_call", async () => {
+    await open(state());
+    await click("Change quantity: Projector");
+    await userEvent.clear(screen.getByLabelText(/New quantity \(currently 2\)/));
+    await userEvent.type(screen.getByLabelText("Why is it being reduced?"), "Fewer needed");
+    await userEvent.click(screen.getByRole("button", { name: "Reduce" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Quantity must be a whole number greater than zero.");
+    expect(reduceEquipmentReservation).not.toHaveBeenCalled();
+    expect(reserveEquipment).not.toHaveBeenCalled();
+  });
+
+  it("SCRUM300_AC4_reducing_a_flagged_reservation_sends_the_new_quantity_and_the_reason", async () => {
+    reduceEquipmentReservation.mockResolvedValue(state({ lines: [line({ reservations: [reservation({ quantity: 1 })] })] }));
+    await open(state({ lines: [flaggedLine()] }));
+    await click("Reduce quantity: Projector");
+    expect(screen.getByRole("heading", { name: "Reduce the Projector reservation" })).toBeInTheDocument();
+    expect(screen.getByLabelText(/New quantity \(currently 2\)/)).toHaveValue(1);
+    await userEvent.type(screen.getByLabelText("Why is it being reduced?"), "Smaller room now");
+    await userEvent.click(screen.getByRole("button", { name: "Reduce" }));
+
+    expect(reduceEquipmentReservation).toHaveBeenCalledWith(EVENT_ID, RES_A, 1, "Smaller room now");
+    expect(await screen.findByRole("status")).toHaveTextContent("Reduced the Projector reservation to 1.");
+  });
+
+  it("SCRUM300_AC7_release_all_on_a_flagged_reservation_asks_why_then_releases", async () => {
+    releaseEquipmentReservation.mockResolvedValue(state({ lines: [line({ reservations: [] })] }));
+    await open(state({ lines: [flaggedLine()] }));
+    await click("Release all: Projector");
+    expect(screen.getByRole("heading", { name: "Release the Projector reservation" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Move to new time: Projector" })).not.toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("Why is it being released?"), "Event moved, not needed");
+    await userEvent.click(screen.getByRole("button", { name: "Release" }));
+
+    expect(releaseEquipmentReservation).toHaveBeenCalledWith(EVENT_ID, RES_A, "Event moved, not needed");
+    expect(await screen.findByRole("status")).toHaveTextContent("Released the Projector reservation.");
+  });
+
+  it("SCRUM300_AC7_a_flagged_reservation_with_no_reason_given_still_says_flagged", async () => {
+    await open(state({ lines: [line({ reservations: [reservation({ flagged: true, flagReason: null })] })] }));
+    expect(screen.getByText("Flagged").closest("p")).toHaveTextContent(/^Flagged$/);
+    expect(screen.getByRole("heading", { name: "Needs your decision" })).toBeInTheDocument();
+  });
+
+  it("SCRUM300_UX_a_request_with_no_items_says_so_on_the_done_and_all_tabs", async () => {
+    await open(state({ lines: [] }));
+    expect(screen.getByRole("tab", { name: /^Done/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText(/^Nothing is finished yet\./)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("tab", { name: /^All/ }));
+    expect(screen.getByText("This request has no equipment items.")).toBeInTheDocument();
+  });
+});
+
