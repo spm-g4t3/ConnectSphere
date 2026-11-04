@@ -231,7 +231,8 @@ export async function listEventFlaggedBookings(eventRequestId, callerId, { clien
  * (expectedStartsAt, expectedEndsAt); if the booking would now be reinstated
  * at another, nothing is written and this throws BOOKING_PERIOD_CHANGED. A
  * reinstatement that moves the booking records the suitability at the new
- * period (suitabilityForApproval), unsuitable or not, marked not overridden.
+ * period (suitabilityForApproval), unsuitable or not, as
+ * approval_suitability_result; the request-time result and override stay.
  *
  * @param {string} bookingId  the flagged booking's id
  * @param {string} callerId   from the JWT -- never the body

@@ -20,6 +20,7 @@ import {
   capitalise,
   flagReasons,
   movesToEventPeriod,
+  newTimesSuitabilityConcern,
   replacementRequests,
   venueText,
 } from "../services/flaggedBookingDisplay";
@@ -46,7 +47,7 @@ export default function FlaggedBookingCard({
   const moves = item.reinstatable && movesToEventPeriod(item);
   // Re-run by the server at the event's new times; null when it could not run.
   const newTimesSuitability = moves ? item.suitabilityAtNewTimes ?? null : null;
-  const unsuitableAtNewTimes = newTimesSuitability?.suitable === false;
+  const newTimesConcern = newTimesSuitabilityConcern(newTimesSuitability);
 
   return (
     <li className="pending-bookings__card">
@@ -129,10 +130,17 @@ export default function FlaggedBookingCard({
             </p>
           )}
           {/* Suitability is advisory, so this warns but never withholds approval. */}
-          {unsuitableAtNewTimes && (
+          {newTimesConcern === "advisory" && (
             <p className="pending-bookings__event-status">
               This venue doesn&apos;t meet the event&apos;s needs at the new times. Suitability is advisory, so the
               booking can still be approved.
+            </p>
+          )}
+          {/* A clash is a refusal, not advice: the server answers BOOKING_PERIOD_CONFLICT. */}
+          {newTimesConcern === "unavailable" && (
+            <p className="pending-bookings__event-status">
+              This venue isn&apos;t free at the event&apos;s new times, so approving at the new times will be refused
+              while it is taken.
             </p>
           )}
           {item.reinstatable ? (

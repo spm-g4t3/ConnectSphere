@@ -969,5 +969,52 @@ describe("a request whose event has moved (SCRUM-593)", () => {
       "This venue doesn't meet the event's needs at the new times. Suitability is advisory, so the request can still be approved.",
     );
   });
+
+  // A clash is refused by the server, so the advisory wording would invite a failing click.
+  const TAKEN = {
+    suitable: false,
+    criteria: [
+      { criterion: "Availability", met: false, detail: "Blocked for maintenance" },
+      { criterion: "Capacity", met: false, detail: "Capacity 80 < expected attendance 120" },
+    ],
+    checked: CHECKED,
+  };
+
+  it("SCRUM593_AC11_a_request_whose_venue_is_taken_at_the_new_times_says_approving_will_be_refused", async () => {
+    vi.mocked(getPendingBookingRequests).mockResolvedValue([
+      item("1", { eventStartsAt: NEW_STARTS, eventEndsAt: NEW_ENDS, suitabilityAtNewTimes: TAKEN }),
+    ]);
+    const { user } = renderQueue();
+    await screen.findByText("Event 1");
+    const region = await openCard(user, "1");
+
+    expect(within(region).queryByText(/can still be approved/)).not.toBeInTheDocument();
+    const approve = within(region).getByRole("button", { name: "Approve" });
+    // The server is the authority on clashes; the note warns without disabling.
+    expect(approve).toBeEnabled();
+    expect(approve).toHaveAccessibleDescription(
+      "This venue isn't free at the event's new times, so approving will be refused while it is taken.",
+    );
+  });
+
+  it("SCRUM593_AC11_a_request_whose_new_times_clash_with_a_booking_shows_only_the_clash_note", async () => {
+    vi.mocked(getPendingBookingRequests).mockResolvedValue([
+      item("1", {
+        eventStartsAt: NEW_STARTS,
+        eventEndsAt: NEW_ENDS,
+        conflictingWith: [clash("b1", "Tech Talk")],
+        suitabilityAtNewTimes: TAKEN,
+      }),
+    ]);
+    const { user } = renderQueue();
+    await screen.findByText("Event 1");
+    const region = await openCard(user, "1");
+
+    expect(within(region).queryByText(/isn't free at the event's new times/)).not.toBeInTheDocument();
+    expect(within(region).queryByText(/can still be approved/)).not.toBeInTheDocument();
+    expect(within(region).getByRole("button", { name: "Approve" })).toHaveAccessibleDescription(
+      /can't be approved while that booking stands/,
+    );
+  });
 });
 

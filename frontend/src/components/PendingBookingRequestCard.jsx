@@ -17,7 +17,12 @@ import { BOOKABLE_EVENT_STATUSES, statusLabel } from "../services/bookingRequest
 import { readBookingStatusDisplay } from "../services/bookingRequestStatusDisplay";
 import { BOOKING_GROUP_TONES, toneFor } from "../services/venueStatusTones";
 import { formatDateTime } from "../services/displayFormat";
-import { capitalise, eventMovedFromRequest, replacesFlaggedBookingText } from "../services/flaggedBookingDisplay";
+import {
+  capitalise,
+  eventMovedFromRequest,
+  newTimesSuitabilityConcern,
+  replacesFlaggedBookingText,
+} from "../services/flaggedBookingDisplay";
 import { VENUE_TIME_NOTE, formatVenuePeriod, formatVenueRange } from "../services/datetimeFormat";
 import { formatOccupiedPeriod, occupiedPeriodParts } from "../services/occupiedPeriodDisplay";
 import { labelFor } from "../services/venueSuitabilityDisplay";
@@ -114,8 +119,8 @@ export default function PendingBookingRequestCard({
   const approvalPeriod = moved ? { ...item, startsAt: item.eventStartsAt, endsAt: item.eventEndsAt } : item;
   // Re-run by the server at the approval period; null when nothing moves.
   const newTimesSuitability = moved ? item.suitabilityAtNewTimes ?? null : null;
-  const unsuitableAtNewTimes = newTimesSuitability?.suitable === false;
-  const advisoryNoteId = `${regionId}-advisory`;
+  const newTimesConcern = newTimesSuitabilityConcern(newTimesSuitability);
+  const newTimesNoteId = `${regionId}-new-times`;
 
   // Hints only, so Venue Staff are not offered a refusal the server is certain
   // to give (EVENT_NOT_BOOKABLE, BOOKING_PERIOD_CONFLICT); it re-checks both
@@ -128,6 +133,12 @@ export default function PendingBookingRequestCard({
   // times clash with a booking; either status is blocked the same way.
   const blockedByBooking = conflictingWith.length > 0;
   const approveBlockedBy = eventNotBookable ? eventNoteId : blockedByBooking ? conflictingNoteId : undefined;
+  const showsConflictingNote = item.status === CONFLICTING || blockedByBooking;
+  // The conflicting note already says the venue is taken; one clash note is enough.
+  const newTimesNote =
+    newTimesConcern === "advisory" || (newTimesConcern === "unavailable" && !showsConflictingNote)
+      ? newTimesConcern
+      : null;
   const reasonId = `${regionId}-reason`;
   const reasonErrorId = `${regionId}-reason-error`;
 
@@ -183,7 +194,7 @@ export default function PendingBookingRequestCard({
           {item.replaces && (
             <p className="pending-bookings__event-status">{replacesFlaggedBookingText(item.replaces)}</p>
           )}
-          {(item.status === CONFLICTING || blockedByBooking) && (
+          {showsConflictingNote && (
             <p id={conflictingNoteId} className="pending-bookings__conflicting">
               {conflictingNote(conflictingWith, moved)}
             </p>
@@ -268,16 +279,24 @@ export default function PendingBookingRequestCard({
               </p>
             )}
             {/* Suitability is advisory, so this warns but never disables Approve. */}
-            {unsuitableAtNewTimes && (
-              <p id={advisoryNoteId} className="pending-bookings__event-status">
+            {newTimesNote === "advisory" && (
+              <p id={newTimesNoteId} className="pending-bookings__event-status">
                 This venue doesn&apos;t meet the event&apos;s needs at the new times. Suitability is advisory, so
                 the request can still be approved.
+              </p>
+            )}
+            {/* A clash with a block or hold is refused by the server; Approve stays
+                enabled because the server re-checks under lock. */}
+            {newTimesNote === "unavailable" && (
+              <p id={newTimesNoteId} className="pending-bookings__event-status">
+                This venue isn&apos;t free at the event&apos;s new times, so approving will be refused while it is
+                taken.
               </p>
             )}
             <Button
               onClick={() => onApprove(item)}
               disabled={busy || Boolean(approveBlockedBy)}
-              aria-describedby={approveBlockedBy ?? (unsuitableAtNewTimes ? advisoryNoteId : undefined)}
+              aria-describedby={approveBlockedBy ?? (newTimesNote ? newTimesNoteId : undefined)}
             >
               {deciding === "approve" ? "Approving..." : "Approve"}
             </Button>

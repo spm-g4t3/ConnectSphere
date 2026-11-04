@@ -592,8 +592,8 @@ describe('SCRUM-188: suitability judged on real occupancy (PGlite)', () => {
 
   describe('SCRUM-593: Venue Staff see and record the suitability at the event\'s new times', () => {
     /** A venue open 09:00-18:00 every day, with 30 minutes' setup and 45 minutes' turnaround. */
-    async function dayVenue() {
-      const id = await seedVenue(db, { name: `Day Room ${++counter}`, capacity: 200, setup: 30, turnaround: 45 });
+    async function dayVenue(capacity = 200) {
+      const id = await seedVenue(db, { name: `Day Room ${++counter}`, capacity, setup: 30, turnaround: 45 });
       await db.query(
         `insert into venue_operating_hours (venue_id, day_of_week, opens_at, closes_at)
          select $1, d, '09:00', '18:00' from generate_series(0, 6) d`,
@@ -606,7 +606,10 @@ describe('SCRUM-188: suitability judged on real occupancy (PGlite)', () => {
       db.query('update event_requests set proposed_start = $2, proposed_end = $3 where id = $1', [eventId, start, end]);
     const unmetOf = (result) => result.criteria.filter((c) => c.met === false).map((c) => c.criterion);
     const storedSuitability = (id) =>
-      one('select status, suitability_result, suitability_overridden from bookings where id = $1', [id]);
+      one(
+        'select status, suitability_result, suitability_overridden, approval_suitability_result from bookings where id = $1',
+        [id],
+      );
 
     /** An approved booking 14:00-16:00 at the venue, flagged as an event change flags it. */
     async function flaggedBooking(venueId, eventId) {
@@ -635,12 +638,50 @@ describe('SCRUM-188: suitability judged on real occupancy (PGlite)', () => {
         { client: pgliteClient() },
       );
 
-      // Advisory: approved anyway, with the new result recorded and nobody's confirmation claimed.
+      // Advisory: approved anyway, with the new result recorded beside the request's.
       expect(approved.status).toBe('approved');
       const stored = await storedSuitability(id);
-      expect(stored.suitability_result.suitable).toBe(false);
-      expect(unmetOf(stored.suitability_result)).toEqual(['Operating hours']);
+      expect(stored.approval_suitability_result.suitable).toBe(false);
+      expect(unmetOf(stored.approval_suitability_result)).toEqual(['Operating hours']);
+      expect(stored.suitability_result).toEqual(STORED_SUITABLE);
       expect(stored.suitability_overridden).toBe(false);
+    });
+
+    it('SCRUM593_AC6_a_move_to_unsuitable_times_keeps_the_coordinators_override_and_their_recheck_warns', async () => {
+      // Capacity 100 < 150: the coordinator confirmed that shortfall when requesting.
+      const venueId = await dayVenue(100);
+      const eventId = await makeEvent(at('14:00'), at('16:00'));
+      const { id } = await requestThroughService(eventId, venueId, {
+        confirmUnsuitable: true,
+        acknowledgedCriteria: ['Capacity'],
+      });
+      const atRequest = await storedSuitability(id);
+      await moveEvent(eventId, at('20:00'), at('21:00'));
+
+      await approveBookingRequest(
+        id,
+        staff,
+        { expectedStartsAt: at('20:00'), expectedEndsAt: at('21:00') },
+        { client: pgliteClient() },
+      );
+
+      // The request-time record and override stay; only the new column holds the approval's check.
+      const stored = await storedSuitability(id);
+      expect(stored).toMatchObject({
+        status: 'approved',
+        suitability_result: atRequest.suitability_result,
+        suitability_overridden: true,
+      });
+      expect(unmetOf(stored.approval_suitability_result)).toEqual(['Capacity', 'Operating hours']);
+      // The coordinator is still told what changed since they confirmed, not just what they overrode.
+      const [item] = await recheck(eventId);
+      expect(item).toMatchObject({
+        bookingId: id,
+        suitabilityOverridden: true,
+        atRequest: { suitable: false, unmet: ['Capacity'] },
+        newlyUnmet: ['Operating hours'],
+        error: null,
+      });
     });
 
     it('SCRUM593_AC1_a_flagged_booking_moved_to_when_the_venue_is_closed_is_unsuitable_at_the_new_times_and_still_reinstated', async () => {
@@ -661,8 +702,11 @@ describe('SCRUM-188: suitability judged on real occupancy (PGlite)', () => {
       );
 
       expect(reinstated.status).toBe('approved');
-      expect(unmetOf(reinstated.suitability)).toEqual(['Operating hours']);
-      expect((await storedSuitability(id)).suitability_overridden).toBe(false);
+      // The request-time record stays what the coordinator was shown when requesting.
+      expect(reinstated.suitability).toEqual(STORED_SUITABLE);
+      const stored = await storedSuitability(id);
+      expect(unmetOf(stored.approval_suitability_result)).toEqual(['Operating hours']);
+      expect(stored.suitability_overridden).toBe(false);
     });
 
     it('SCRUM593_AC1_the_booking_being_reinstated_does_not_make_its_venue_look_taken', async () => {

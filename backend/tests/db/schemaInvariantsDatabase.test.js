@@ -1071,6 +1071,17 @@ describe('SCRUM-17 AC4: nothing writes a booking period', () => {
     expect(moving.map((u) => u.name).sort()).toEqual(approvals);
   });
 
+  it('SCRUM593_AC6_no_update_of_bookings_rewrites_the_request_time_suitability', () => {
+    // The coordinator's recheck and override are judged against what was
+    // stored at request; an approval's re-check has its own column.
+    for (const { name, clause, columns: assigned } of bookingUpdates()) {
+      expect(assigned, `${name}: set ${clause}`).not.toContain('suitability_result');
+      expect(assigned, `${name}: set ${clause}`).not.toContain('suitability_overridden');
+    }
+    const recording = bookingUpdates().filter((u) => u.columns.includes('approval_suitability_result'));
+    expect(recording.map((u) => u.name).sort()).toEqual(['decide_booking_request', 'reinstate_flagged_booking']);
+  });
+
   it('SCRUM17_AC4_only_create_booking_request_inserts_bookings', () => {
     // The one insert is the booking request itself: a new row with the event's own period.
     const inserters = Object.keys(sources).filter((name) => /\binsert into (?:public\.)?bookings\b/.test(body(name)));

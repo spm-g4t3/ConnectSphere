@@ -673,19 +673,21 @@ describe('SCRUM-258 AC2-AC6: deciding a booking request', () => {
       checked: { startsAt: at('18:00'), endsAt: at('20:00') },
     };
 
-    it('SCRUM593_AC6_a_move_records_the_suitability_at_the_new_period_as_not_overridden', async () => {
+    it('SCRUM593_AC6_a_move_records_the_suitability_at_the_new_period_beside_the_request_time_record', async () => {
       const { id } = await movedRequest(await makeVenue());
       // The coordinator confirmed an unsuitable venue at the old period.
+      const stored = { suitable: false, criteria: [{ criterion: 'Capacity', met: false }] };
       await db.query(
         `update bookings set suitability_result = $2::jsonb, suitability_overridden = true where id = $1`,
-        [id, JSON.stringify({ suitable: false, criteria: [{ criterion: 'Capacity', met: false }] })],
+        [id, JSON.stringify(stored)],
       );
 
       const result = await decide(id, 'approve', { suitability: CLOSED });
 
       expect(result.outcome).toBe('approved');
-      expect(await bookingRow(id)).toMatchObject({ suitability_result: CLOSED, suitability_overridden: false });
-      expect(result.booking).toMatchObject({ suitability_result: CLOSED, suitability_overridden: false });
+      const recorded = { suitability_result: stored, suitability_overridden: true, approval_suitability_result: CLOSED };
+      expect(await bookingRow(id)).toMatchObject(recorded);
+      expect(result.booking).toMatchObject(recorded);
     });
 
     it('SCRUM593_AC6_an_approval_that_does_not_move_keeps_the_stored_suitability', async () => {
@@ -698,7 +700,12 @@ describe('SCRUM-258 AC2-AC6: deciding a booking request', () => {
 
       await decide(id, 'approve', { suitability: CLOSED });
 
-      expect(await bookingRow(id)).toMatchObject({ status: 'approved', suitability_result: stored, suitability_overridden: true });
+      expect(await bookingRow(id)).toMatchObject({
+        status: 'approved',
+        suitability_result: stored,
+        suitability_overridden: true,
+        approval_suitability_result: null,
+      });
     });
   });
 });

@@ -230,3 +230,22 @@ export function expectedPeriod(item, moves) {
     ? { expectedStartsAt: item.eventStartsAt, expectedEndsAt: item.eventEndsAt }
     : { expectedStartsAt: item.startsAt, expectedEndsAt: item.endsAt };
 }
+
+// The criterion name the server's suitability check uses for a clash
+// (AVAILABILITY_CRITERION in the backend's venueMatching.js).
+const AVAILABILITY_CRITERION = "Availability";
+
+/**
+ * What a suitability re-check at the event's new times means for approving:
+ * "unavailable" when Availability is unmet, since the server refuses a clash
+ * (BOOKING_PERIOD_CONFLICT) rather than advising on it; "advisory" when only
+ * other criteria are unmet; null when it is suitable or was not re-checked.
+ *
+ * @param {{suitable?: boolean, criteria?: Array<{criterion: string, met: boolean}>}|null|undefined} suitability
+ * @returns {"unavailable"|"advisory"|null}
+ */
+export function newTimesSuitabilityConcern(suitability) {
+  if (suitability?.suitable !== false) return null;
+  const unavailable = suitability.criteria.some((c) => c.criterion === AVAILABILITY_CRITERION && !c.met);
+  return unavailable ? "unavailable" : "advisory";
+}

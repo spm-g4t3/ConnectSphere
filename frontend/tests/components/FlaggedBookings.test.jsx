@@ -990,6 +990,33 @@ describe("a booking whose event has moved (SCRUM-593)", () => {
     }
   });
 
+  it("SCRUM593_AC10_a_moved_booking_whose_venue_is_taken_at_the_new_times_says_approving_will_be_refused", async () => {
+    vi.mocked(getFlaggedBookings).mockResolvedValue([
+      item("1", {
+        ...MOVED,
+        suitabilityAtNewTimes: {
+          suitable: false,
+          criteria: [
+            { criterion: "Availability", met: false, detail: "Booked by Tech Talk" },
+            { criterion: "Capacity", met: false, detail: "Too small" },
+          ],
+        },
+      }),
+    ]);
+    const { user } = renderList();
+    await screen.findByText("Event 1");
+    const region = await openCard(user, "1");
+
+    expect(within(region).queryByText(/can still be approved/)).not.toBeInTheDocument();
+    expect(
+      within(region).getByText(
+        "This venue isn't free at the event's new times, so approving at the new times will be refused while it is taken.",
+      ),
+    ).toBeInTheDocument();
+    // The server is the authority on clashes; the note warns without withholding the form.
+    expect(within(region).getByRole("button", { name: "Approve at new times" })).toBeEnabled();
+  });
+
   it("SCRUM593_AC10_a_moved_booking_without_a_recheck_says_suitability_was_for_its_original_times", async () => {
     vi.mocked(getFlaggedBookings).mockResolvedValue([item("1", { ...MOVED, suitabilityAtNewTimes: null })]);
     const { user } = renderList();

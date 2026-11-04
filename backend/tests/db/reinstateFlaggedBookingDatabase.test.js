@@ -881,19 +881,21 @@ describe('SCRUM-266 AC2 and AC5: reinstating a flagged booking', () => {
       checked: { startsAt: at('18:00'), endsAt: at('20:00') },
     };
 
-    it('SCRUM593_AC1_a_move_records_the_suitability_at_the_new_period_as_not_overridden', async () => {
+    it('SCRUM593_AC1_a_move_records_the_suitability_at_the_new_period_beside_the_request_time_record', async () => {
       const { id } = await flaggedByMove(await makeVenue());
       // The coordinator confirmed an unsuitable venue at the old period.
+      const stored = { suitable: false, criteria: [{ criterion: 'Capacity', met: false }] };
       await db.query(
         `update bookings set suitability_result = $2::jsonb, suitability_overridden = true where id = $1`,
-        [id, JSON.stringify({ suitable: false, criteria: [{ criterion: 'Capacity', met: false }] })],
+        [id, JSON.stringify(stored)],
       );
 
       const result = await reinstate(id, { suitability: CLOSED });
 
       expect(result.outcome).toBe('reinstated');
-      expect(await bookingRow(id)).toMatchObject({ status: 'approved', suitability_result: CLOSED, suitability_overridden: false });
-      expect(result.booking).toMatchObject({ suitability_result: CLOSED, suitability_overridden: false });
+      const recorded = { suitability_result: stored, suitability_overridden: true, approval_suitability_result: CLOSED };
+      expect(await bookingRow(id)).toMatchObject({ status: 'approved', ...recorded });
+      expect(result.booking).toMatchObject(recorded);
     });
 
     it('SCRUM593_AC2_another_events_booking_over_the_padded_new_period_is_a_conflict', async () => {
@@ -946,7 +948,12 @@ describe('SCRUM-266 AC2 and AC5: reinstating a flagged booking', () => {
 
       await reinstate(id, { suitability: { suitable: true, criteria: [] } });
 
-      expect(await bookingRow(id)).toMatchObject({ status: 'approved', suitability_result: stored, suitability_overridden: true });
+      expect(await bookingRow(id)).toMatchObject({
+        status: 'approved',
+        suitability_result: stored,
+        suitability_overridden: true,
+        approval_suitability_result: null,
+      });
     });
 
     it('SCRUM593_AC4_a_block_flagged_booking_whose_event_moved_off_the_block_is_approved_at_the_new_period', async () => {

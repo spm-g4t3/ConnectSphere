@@ -959,7 +959,8 @@ function checkCaller(callerId) {
  * expectedEndsAt); if the event has moved since, nothing is written and this
  * throws BOOKING_PERIOD_CHANGED. An approval that moves the request records
  * the suitability at the new period (suitabilityForApproval), unsuitable or
- * not, marked not overridden.
+ * not, as approval_suitability_result; the request-time result and override
+ * stay.
  *
  * @param {string} bookingId  the request's id
  * @param {string} callerId   from the JWT -- never the body

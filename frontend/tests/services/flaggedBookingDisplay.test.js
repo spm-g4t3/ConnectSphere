@@ -17,6 +17,7 @@ import {
   movesToEventPeriod,
   eventMovedFromRequest,
   replacesFlaggedBookingText,
+  newTimesSuitabilityConcern,
 } from "../../src/services/flaggedBookingDisplay.js";
 import { formatVenuePeriod } from "../../src/services/datetimeFormat.js";
 
@@ -267,5 +268,25 @@ describe("replacesFlaggedBookingText", () => {
       `The booking this request was meant to replace, at Hall Z, ${formatVenuePeriod(replaces.startsAt, replaces.endsAt)}, ` +
         "was reinstated. Approving this request books a second venue for the event and does not cancel that booking.",
     );
+  });
+});
+
+describe("newTimesSuitabilityConcern", () => {
+  const unmet = (criterion) => ({ criterion, met: false, detail: "x" });
+  const met = (criterion) => ({ criterion, met: true, detail: "x" });
+
+  it.each([
+    ["availability is unmet", [unmet("Availability")], "unavailable"],
+    ["availability and another criterion are unmet", [unmet("Capacity"), unmet("Availability")], "unavailable"],
+    ["only other criteria are unmet", [met("Availability"), unmet("Capacity")], "advisory"],
+  ])("SCRUM593_AC11_an_unsuitable_verdict_where_%s_is_%s", (_label, criteria, expected) => {
+    expect(newTimesSuitabilityConcern({ suitable: false, criteria })).toBe(expected);
+  });
+
+  it.each([
+    ["a suitable verdict", { suitable: true, criteria: [met("Availability")] }],
+    ["no re-check", null],
+  ])("SCRUM593_AC11_%s_raises_no_concern", (_label, suitability) => {
+    expect(newTimesSuitabilityConcern(suitability)).toBeNull();
   });
 });
