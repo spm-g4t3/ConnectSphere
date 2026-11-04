@@ -18,20 +18,27 @@ const PROSE = "database prose with a uuid 3f2a9c1e-0000-0000-0000-000000000000";
 const conflict = (code, extra = {}) => http(409, { error: PROSE, code, ...extra });
 
 const PERIOD_CONFLICT_START =
-  "The venue is no longer free for this booking's period, setup and turnaround included, so it can't be reinstated.";
+  "The venue is no longer free for this booking's period, or for the event's new times if it has moved, setup and turnaround included, so it can't be reinstated.";
 
 describe("resolutionErrorMessage", () => {
   it.each([
     ["BOOKING_NOT_FLAGGED", /no longer flagged for review; it may already have been resolved\. The list has been refreshed\./],
     ["SAFETY_FLAG_NOT_REINSTATABLE", /flagged by the safety review, so it can't be reinstated\. It can be cancelled\./],
     ["EVENT_NOT_BOOKABLE", /no longer approved, in the safety check, or confirmed \(it may have been cancelled\).*can't be reinstated\. It can be cancelled\./],
-    ["BOOKING_PERIOD_STALE", /dates have changed.*no longer covers the whole event.*request the venue for the new dates\./],
     ["VENUE_RETIRED", /^This venue has been retired, so the booking can't be reinstated\. It can be cancelled\.$/],
     ["BOOKING_CHANGED", /changed while you were resolving it\. The list has been refreshed; please try again\./],
   ])("SCRUM266_AC2_explains_the_409_%s", (code, pattern) => {
     const message = resolutionErrorMessage(conflict(code));
     expect(message).toMatch(pattern);
     expect(message).not.toContain(PROSE);
+  });
+
+  // A moved booking is now reinstated at the event's new period, so stale
+  // only means the event has no period; the old "request it again" advice is wrong.
+  it("SCRUM593_AC12_a_stale_period_says_the_event_has_no_date_and_time", () => {
+    const message = resolutionErrorMessage(conflict("BOOKING_PERIOD_STALE"));
+    expect(message).toBe("The event has no date and time set, so this booking can't be reinstated. It can be cancelled.");
+    expect(message).not.toMatch(/new dates/);
   });
 
   it("SCRUM266_AC2_a_period_conflict_with_no_conflicts_says_the_venue_is_not_free_and_names_nothing", () => {

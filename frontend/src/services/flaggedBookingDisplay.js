@@ -1,7 +1,8 @@
 // flaggedBookingDisplay.js
 //
-// Shared wording for the review reasons stored on flagged bookings, and for
-// the replacement requests linked to them.
+// Shared wording for the review reasons stored on flagged bookings, for the
+// replacement requests linked to them, and for a booking or request that an
+// approval moves to its event's new period.
 //
 // A services module, not part of a component, because the react-refresh lint
 // rule lets component files export components only.
@@ -170,4 +171,34 @@ export function replacesFlaggedBookingText(replaces) {
   const venue = replaces.venueName || "Unknown venue";
   const period = formatVenuePeriod(replaces.startsAt, replaces.endsAt);
   return `Replaces the flagged booking at ${venue}, ${period}. Approving this request cancels that booking.`;
+}
+
+/**
+ * Whether reinstating a flagged booking moves it to its event's current
+ * period: the event has both times and the booking no longer covers them, the
+ * test reinstate_flagged_booking (057) applies. Instants are compared, not
+ * strings, since one instant can be written with different offsets.
+ *
+ * @param {{startsAt?: string, endsAt?: string, eventStartsAt?: string|null, eventEndsAt?: string|null}} item
+ * @returns {boolean}
+ */
+export function movesToEventPeriod(item) {
+  const eventStart = Date.parse(item.eventStartsAt);
+  const eventEnd = Date.parse(item.eventEndsAt);
+  if (Number.isNaN(eventStart) || Number.isNaN(eventEnd)) return false;
+  return !(Date.parse(item.startsAt) <= eventStart && Date.parse(item.endsAt) >= eventEnd);
+}
+
+/**
+ * Whether an open request's event has moved since it was raised, so approving
+ * it books the event's new period instead of the request's own (057).
+ *
+ * @param {{startsAt?: string, endsAt?: string, eventStartsAt?: string|null, eventEndsAt?: string|null}} item
+ * @returns {boolean}
+ */
+export function eventMovedFromRequest(item) {
+  const eventStart = Date.parse(item.eventStartsAt);
+  const eventEnd = Date.parse(item.eventEndsAt);
+  if (Number.isNaN(eventStart) || Number.isNaN(eventEnd)) return false;
+  return Date.parse(item.startsAt) !== eventStart || Date.parse(item.endsAt) !== eventEnd;
 }

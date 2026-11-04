@@ -620,6 +620,10 @@ function toPendingBookingRequest(row) {
     statusDisplay: getBookingStatusDisplay(status),
     startsAt: row.starts_at,
     endsAt: row.ends_at,
+    // The period an approval books; it differs from startsAt/endsAt once the
+    // event has moved, and the occupied period and clashes are judged on it.
+    eventStartsAt: row.event_starts_at ?? null,
+    eventEndsAt: row.event_ends_at ?? null,
     occupiedStartsAt: row.occupied_starts_at ?? null,
     occupiedEndsAt: row.occupied_ends_at ?? null,
     expectedAttendance: row.expected_attendance ?? null,

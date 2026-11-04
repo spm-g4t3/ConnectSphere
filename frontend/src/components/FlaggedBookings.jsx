@@ -26,6 +26,7 @@ import {
 } from "../services/flaggedBookingErrors";
 import { statusMessageOf } from "../services/apiErrors";
 import { asList } from "../services/displayFormat";
+import { formatVenuePeriod } from "../services/datetimeFormat";
 
 const LIST_ERROR_MESSAGES = {
   403: "Only Venue Staff can see flagged bookings.",
@@ -44,12 +45,16 @@ function listLoadError(err) {
   };
 }
 
-function resolvedNotice(item, action) {
+// A reinstatement that moved the booking says so, with the period it now
+// holds, since Venue Staff approved times other than the ones listed.
+function resolvedNotice(item, action, result) {
   const venue = item.venueName || "the venue";
   const event = item.eventName || "the event";
-  return action === "reinstate"
-    ? `Reinstated the booking of ${venue} for ${event}; it is approved again.`
-    : `Cancelled the booking of ${venue} for ${event}.`;
+  if (action === "cancel") return `Cancelled the booking of ${venue} for ${event}.`;
+  if (result?.resolution?.previousStartsAt) {
+    return `Approved the booking of ${venue} for ${event} at the event's new times, ${formatVenuePeriod(result.startsAt, result.endsAt)}.`;
+  }
+  return `Reinstated the booking of ${venue} for ${event}; it is approved again.`;
 }
 
 export default function FlaggedBookings({ asPage = false }) {
@@ -132,8 +137,8 @@ export default function FlaggedBookings({ asPage = false }) {
     setListError(null);
     setNotice(null);
     try {
-      await send();
-      setNotice(resolvedNotice(item, action));
+      const result = await send();
+      setNotice(resolvedNotice(item, action, result));
       setExpandedId(null);
       refocus.current = { id: item.id, index: bookings.findIndex((b) => b.id === item.id) };
       await refreshBookings();

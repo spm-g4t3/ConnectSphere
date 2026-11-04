@@ -18,6 +18,7 @@ import {
   bookingStatusText,
   capitalise,
   flagReasons,
+  movesToEventPeriod,
   replacementRequests,
   venueText,
 } from "../services/flaggedBookingDisplay";
@@ -40,6 +41,8 @@ export default function FlaggedBookingCard({
   const eventName = item.eventName || "Unnamed event";
   const venueName = item.venueName || "Unknown venue";
   const regionId = `flagged-booking-${item.id}`;
+  // A safety flag is never reinstated, so only a reinstatable booking moves.
+  const moves = item.reinstatable && movesToEventPeriod(item);
 
   return (
     <li className="pending-bookings__card">
@@ -69,7 +72,14 @@ export default function FlaggedBookingCard({
             <dt>Venue</dt>
             <dd>{venueText(item)}</dd>
             <dt>Booking period</dt>
-            <dd>{formatVenuePeriod(item.startsAt, item.endsAt)}</dd>
+            <dd>
+              {formatVenuePeriod(item.startsAt, item.endsAt)}
+              {moves && (
+                <span className="pending-bookings__breakdown">
+                  Moves to {formatVenuePeriod(item.eventStartsAt, item.eventEndsAt)}
+                </span>
+              )}
+            </dd>
             <dt>Event&apos;s current period</dt>
             <dd>{formatVenuePeriod(item.eventStartsAt, item.eventEndsAt)}</dd>
             <dt>Flagged</dt>
@@ -103,11 +113,11 @@ export default function FlaggedBookingCard({
           {item.reinstatable ? (
             <FlaggedBookingReasonForm
               id={`${regionId}-reinstate`}
-              label="Reason for reinstating (required)"
-              verb="reinstating"
+              label={moves ? "Reason for approving (required)" : "Reason for reinstating (required)"}
+              verb={moves ? "approving" : "reinstating"}
               busy={busy}
-              buttonLabel="Reinstate"
-              sendingLabel={resolving === "reinstate" ? "Reinstating..." : null}
+              buttonLabel={moves ? "Approve at new times" : "Reinstate"}
+              sendingLabel={resolving === "reinstate" ? (moves ? "Approving..." : "Reinstating...") : null}
               onSubmit={(reason) => onReinstate(item, reason)}
             />
           ) : (

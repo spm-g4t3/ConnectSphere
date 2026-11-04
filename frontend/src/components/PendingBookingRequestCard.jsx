@@ -17,7 +17,7 @@ import { BOOKABLE_EVENT_STATUSES, statusLabel } from "../services/bookingRequest
 import { readBookingStatusDisplay } from "../services/bookingRequestStatusDisplay";
 import { BOOKING_GROUP_TONES, toneFor } from "../services/venueStatusTones";
 import { formatDateTime } from "../services/displayFormat";
-import { capitalise, replacesFlaggedBookingText } from "../services/flaggedBookingDisplay";
+import { capitalise, eventMovedFromRequest, replacesFlaggedBookingText } from "../services/flaggedBookingDisplay";
 import { VENUE_TIME_NOTE, formatVenuePeriod, formatVenueRange } from "../services/datetimeFormat";
 import { formatOccupiedPeriod, occupiedPeriodParts } from "../services/occupiedPeriodDisplay";
 import { labelFor } from "../services/venueSuitabilityDisplay";
@@ -151,6 +151,13 @@ export default function PendingBookingRequestCard({
             <p id={eventNoteId} className="pending-bookings__event-status">
               This request can't be approved because the event is {statusLabel(item.eventStatus)}. It can
               be rejected.
+            </p>
+          )}
+          {/* Said before Approve: the collapsed row shows the request's own times, not the ones approved. */}
+          {eventMovedFromRequest(item) && (
+            <p className="pending-bookings__event-status">
+              Event moved to {formatVenuePeriod(item.eventStartsAt, item.eventEndsAt)}; approving books the new
+              times.
             </p>
           )}
           {/* Said before Approve, as approving also cancels the flagged booking. */}

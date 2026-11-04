@@ -16,7 +16,7 @@ const CODE_MESSAGES = {
   EVENT_NOT_BOOKABLE:
     "This event is no longer approved, in the safety check, or confirmed (it may have been cancelled), so its booking can't be reinstated. It can be cancelled.",
   BOOKING_PERIOD_STALE:
-    "The event's dates have changed, so this booking no longer covers the whole event and can't be reinstated. It can be cancelled, so the coordinator can request the venue for the new dates.",
+    "The event has no date and time set, so this booking can't be reinstated. It can be cancelled.",
   VENUE_RETIRED: "This venue has been retired, so the booking can't be reinstated. It can be cancelled.",
   BOOKING_CHANGED:
     "This booking changed while you were resolving it. The list has been refreshed; please try again.",
@@ -56,7 +56,7 @@ export function resolutionErrorMessage(err) {
   const code = codeOf(err);
   if (code === CONFLICT_CODE) {
     const inTheWay = inTheWayText(resolutionConflicts(err), conflictText);
-    return `The venue is no longer free for this booking's period, setup and turnaround included, so it can't be reinstated.${inTheWay}`;
+    return `The venue is no longer free for this booking's period, or for the event's new times if it has moved, setup and turnaround included, so it can't be reinstated.${inTheWay}`;
   }
   if (code && Object.hasOwn(CODE_MESSAGES, code)) return CODE_MESSAGES[code];
 

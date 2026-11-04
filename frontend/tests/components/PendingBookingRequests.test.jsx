@@ -477,7 +477,7 @@ describe("approving (AC2, AC3, AC5)", () => {
 
   it.each([
     ["EVENT_NOT_BOOKABLE", /no longer approved, in the safety check, or confirmed \(it may have been cancelled\), so its venue request can't be approved/],
-    ["BOOKING_PERIOD_STALE", /dates have changed since this request was made/],
+    ["BOOKING_PERIOD_STALE", /The event has no date and time set/],
   ])("SCRUM258_AC5_a_%s_refusal_is_explained_in_the_card", async (code, pattern) => {
     vi.mocked(getPendingBookingRequests).mockResolvedValue([item("1")]);
     vi.mocked(approveBookingRequest).mockRejectedValue(conflict(code));
@@ -798,5 +798,37 @@ describe("a request that replaces a flagged booking (W7)", () => {
 
     const region = await openCard(user, "1");
     expect(within(region).queryByText(/Replaces the flagged booking/)).not.toBeInTheDocument();
+  });
+});
+
+describe("a request whose event has moved (SCRUM-593)", () => {
+  const NEW_STARTS = "2026-12-03T10:00:00+08:00";
+  const NEW_ENDS = "2026-12-03T16:00:00+08:00";
+
+  it("SCRUM593_AC11_a_moved_request_says_approving_books_the_events_new_times", async () => {
+    vi.mocked(getPendingBookingRequests).mockResolvedValue([
+      item("1", { eventStartsAt: NEW_STARTS, eventEndsAt: NEW_ENDS }),
+    ]);
+    const { user } = renderQueue();
+    await screen.findByText("Event 1");
+    const region = await openCard(user, "1");
+
+    expect(
+      within(region).getByText(
+        `Event moved to ${formatVenuePeriod(NEW_STARTS, NEW_ENDS)}; approving books the new times.`,
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it.each([
+    ["match the request's", { eventStartsAt: "2026-12-01T09:00:00+08:00", eventEndsAt: "2026-12-01T17:00:00+08:00" }],
+    ["are absent", {}],
+  ])("SCRUM593_AC11_a_request_whose_event_times_%s_says_nothing_extra", async (_label, event) => {
+    vi.mocked(getPendingBookingRequests).mockResolvedValue([item("1", event)]);
+    const { user } = renderQueue();
+    await screen.findByText("Event 1");
+    const region = await openCard(user, "1");
+
+    expect(within(region).queryByText(/Event moved to/)).not.toBeInTheDocument();
   });
 });

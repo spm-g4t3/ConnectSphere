@@ -1,7 +1,8 @@
 -- Migration 057: Venue Staff approve a flagged booking or an open request at
 -- the event's current period, so a rescheduled event keeps its venue when the
--- venue is free then. Both functions are restated whole from their latest
--- definitions with the same signatures; only the period steps change.
+-- venue is free then. The functions are restated whole from their latest
+-- definitions with the same signatures; only the period steps change, and
+-- Venue Staff's queue shows and checks the period an approval would book.
 
 -- The period a reinstated booking had before it moved to the event's; null
 -- when it kept its own.
@@ -517,3 +518,140 @@ begin
 end;
 $$;
 revoke execute on function decide_booking_request(uuid, uuid, text, text, text) from public, anon, authenticated;
+
+create or replace function list_pending_booking_requests(p_caller uuid)
+returns jsonb
+language plpgsql
+stable
+as $$
+declare
+  v_role text;
+begin
+  -- Only Venue Staff, as place_venue_hold (040) checks it. A null caller is
+  -- refused too.
+  select p.role::text
+    into v_role
+    from profiles p
+   where p.id = p_caller;
+
+  if p_caller is null or v_role is distinct from 'venue_staff' then
+    raise exception 'only Venue Staff can view pending booking requests'
+      using errcode = 'insufficient_privilege';
+  end if;
+
+  return coalesce((
+    -- An approval books the event's current period (decide_booking_request,
+    -- step 8), so the occupied period and both clash lists are judged there;
+    -- an event with no period falls back to the request's own.
+    with periods as (
+      select b.*,
+             er.event_name,
+             er.status::text                      as event_status,
+             er.proposed_start                    as event_starts_at,
+             er.proposed_end                      as event_ends_at,
+             v.name                               as venue_name,
+             v.location                           as venue_location,
+             v.setup_minutes,
+             v.turnaround_minutes,
+             case when er.proposed_start is not null and er.proposed_end is not null
+                  then er.proposed_start else b.starts_at end as approval_starts_at,
+             case when er.proposed_start is not null and er.proposed_end is not null
+                  then er.proposed_end else b.ends_at end     as approval_ends_at
+        from bookings b
+        join event_requests er on er.id = b.event_request_id
+        join venues v          on v.id  = b.venue_id
+       where b.status in ('pending', 'conflicting')
+    ),
+    pending as (
+      select pr.*,
+             venue_occupied_period(pr.approval_starts_at, pr.approval_ends_at,
+                                   pr.setup_minutes, pr.turnaround_minutes) as occupied
+        from periods pr
+    )
+    select jsonb_agg(
+             jsonb_build_object(
+               'id',                         p.id,
+               'status',                     p.status,
+               'event_request_id',           p.event_request_id,
+               'event_name',                 p.event_name,
+               'event_status',               p.event_status,
+               'venue_id',                   p.venue_id,
+               'venue_name',                 p.venue_name,
+               'venue_location',             p.venue_location,
+               'starts_at',                  p.starts_at,
+               'ends_at',                    p.ends_at,
+               'event_starts_at',            p.event_starts_at,
+               'event_ends_at',              p.event_ends_at,
+               'occupied_starts_at',         lower(p.occupied),
+               'occupied_ends_at',           upper(p.occupied),
+               'expected_attendance',        p.expected_attendance,
+               'room_layout_code',           p.room_layout_code,
+               'venue_requirements',         p.venue_requirements,
+               'accessibility_requirements', p.accessibility_requirements,
+               'setup_notes',                p.setup_notes,
+               'suitability_result',         p.suitability_result,
+               'suitability_overridden',     p.suitability_overridden,
+               'requested_by',               p.requested_by,
+               'created_at',                 p.created_at,
+               -- Other events only, which also leaves this request out: 051
+               -- refuses a second live request for the same event and venue,
+               -- so a same-event clash is not a choice Venue Staff make.
+               'overlapping', coalesce((
+                 select jsonb_agg(
+                          jsonb_build_object(
+                            'id',                 o.id,
+                            'event_request_id',   o.event_request_id,
+                            'event_name',         o.event_name,
+                            'starts_at',          o.starts_at,
+                            'ends_at',            o.ends_at,
+                            'occupied_starts_at', o.occupied_starts_at,
+                            'occupied_ends_at',   o.occupied_ends_at,
+                            'created_at',         o.created_at
+                          )
+                          order by o.created_at, o.id
+                        )
+                   from pending_request_overlaps(p.venue_id, p.approval_starts_at, p.approval_ends_at,
+                                                 p.event_request_id) o
+               ), '[]'::jsonb),
+               -- Bookings only: a block or hold never marks a request
+               -- conflicting. Flagged-for-review bookings are kept, because
+               -- they still occupy the venue until the Coordinator decides.
+               'conflicting_with', case when p.status::text = 'conflicting' then coalesce((
+                 select jsonb_agg(
+                          jsonb_build_object(
+                            'booking_id',         c.id,
+                            'event_request_id',   c.event_request_id,
+                            'event_name',         c.event_name,
+                            'starts_at',          c.starts_at,
+                            'ends_at',            c.ends_at,
+                            'occupied_starts_at', c.occupied_starts_at,
+                            'occupied_ends_at',   c.occupied_ends_at
+                          )
+                          order by c.starts_at, c.id
+                        )
+                   from venue_occupancy_conflicts(p.venue_id, p.approval_starts_at, p.approval_ends_at, true,
+                                                  p.event_request_id) c
+                  where c.kind = 'booking'
+               ), '[]'::jsonb) else '[]'::jsonb end,
+               -- Null once the booking it names is no longer flagged: then
+               -- approving this request leaves that booking alone (section 6).
+               'replaces', (
+                 select jsonb_build_object(
+                          'booking_id', fb.id,
+                          'venue_name', fv.name,
+                          'starts_at',  fb.starts_at,
+                          'ends_at',    fb.ends_at
+                        )
+                   from bookings fb
+                   join venues fv on fv.id = fb.venue_id
+                  where fb.id = p.replaces_booking_id
+                    and fb.status = 'flagged_for_review'
+               )
+             )
+             order by p.created_at, p.id
+           )
+      from pending p
+  ), '[]'::jsonb);
+end;
+$$;
+revoke execute on function list_pending_booking_requests(uuid) from public, anon, authenticated;

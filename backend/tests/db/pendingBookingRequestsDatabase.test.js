@@ -81,9 +81,12 @@ describe('SCRUM-258 AC1: the pending booking requests Venue Staff decide on', ()
     ).id;
   }
 
-  /** A pending request at venueId for a new event, submitted at createdAt. */
+  /**
+   * A pending request at venueId for a new event at the same period, as a
+   * request is raised, submitted at createdAt.
+   */
   async function pending(venueId, start, end, createdAt) {
-    const eventId = await makeEvent();
+    const eventId = await makeEvent({ start, end });
     const id = await insertBooking(eventId, venueId, { start, end, createdAt });
     return { id, eventId };
   }
@@ -214,5 +217,72 @@ describe('SCRUM-258 AC1: the pending booking requests Venue Staff decide on', ()
     expect(other.id).toBe(b.id);
     expect(ms(other.occupied_starts_at)).toBe(ms(at('10:30')));
     expect(ms(other.occupied_ends_at)).toBe(ms(at('13:45')));
+  });
+
+  // SCRUM-593 AC9: approving books the event's current period, so the queue
+  // shows that period and judges clashes there, not at the request's own.
+  /** A request raised at 10:00-12:00 whose event has since moved to 15:00-17:00. */
+  async function movedRequest(venueId, status = 'pending') {
+    const eventId = await makeEvent({ start: at('15:00'), end: at('17:00') });
+    const id = await insertBooking(eventId, venueId, {
+      start: at('10:00'),
+      end: at('12:00'),
+      status,
+      createdAt: at('07:00'),
+    });
+    return { id, eventId };
+  }
+
+  it('SCRUM593_AC9_a_moved_request_lists_its_own_period_and_the_events_current_one', async () => {
+    const venue = await makeVenue();
+    const moved = await movedRequest(venue);
+
+    const entry = await entryFor(moved.id);
+
+    expect(ms(entry.starts_at)).toBe(ms(at('10:00')));
+    expect(ms(entry.ends_at)).toBe(ms(at('12:00')));
+    expect(ms(entry.event_starts_at)).toBe(ms(at('15:00')));
+    expect(ms(entry.event_ends_at)).toBe(ms(at('17:00')));
+    // What an approval would occupy: the new period, padded 30 and 45 minutes.
+    expect(ms(entry.occupied_starts_at)).toBe(ms(at('14:30')));
+    expect(ms(entry.occupied_ends_at)).toBe(ms(at('17:45')));
+  });
+
+  it('SCRUM593_AC9_overlapping_requests_are_judged_at_the_events_new_period', async () => {
+    const venue = await makeVenue();
+    const moved = await movedRequest(venue);
+    await pending(venue, at('10:00'), at('12:00'), at('07:01'));
+    const atNew = await pending(venue, at('15:00'), at('17:00'), at('07:02'));
+
+    expect(await overlapIds(moved.id)).toEqual([atNew.id]);
+  });
+
+  it('SCRUM593_AC9_bookings_in_the_way_are_judged_at_the_events_new_period', async () => {
+    const venue = await makeVenue();
+    const moved = await movedRequest(venue, 'conflicting');
+    await insertBooking(await makeEvent({ start: at('10:00'), end: at('12:00') }), venue, {
+      start: at('10:00'),
+      end: at('12:00'),
+      status: 'approved',
+    });
+    const atNewEvent = await makeEvent({ start: at('16:00'), end: at('18:00') });
+    const atNew = await insertBooking(atNewEvent, venue, { start: at('16:00'), end: at('18:00'), status: 'approved' });
+
+    expect((await entryFor(moved.id)).conflicting_with.map((c) => c.booking_id)).toEqual([atNew]);
+  });
+
+  it('SCRUM593_AC9_an_event_with_no_period_is_judged_at_the_requests_own', async () => {
+    const venue = await makeVenue();
+    const request = await pending(venue, at('10:00'), at('12:00'), at('07:00'));
+    await db.query('update event_requests set proposed_start = null, proposed_end = null where id = $1', [
+      request.eventId,
+    ]);
+    const other = await pending(venue, at('11:00'), at('13:00'), at('07:01'));
+
+    const entry = await entryFor(request.id);
+
+    expect(entry.event_starts_at).toBeNull();
+    expect(ms(entry.occupied_starts_at)).toBe(ms(at('09:30')));
+    expect(await overlapIds(request.id)).toEqual([other.id]);
   });
 });

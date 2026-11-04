@@ -112,8 +112,9 @@ export async function releaseVenueBooking(id, reason) {
  * Every open booking request Venue Staff decide on (GET /booking-requests/pending,
  * SCRUM-258 AC1): pending and conflicting, oldest first, across all venues.
  *
- * Each item carries the event, the period and the occupied period (setup and
- * turnaround included), the expected attendance, layout, requirements, setup
+ * Each item carries the event, the request's period, the event's current
+ * period (`eventStartsAt`/`eventEndsAt`, which an approval books) and the
+ * occupied period of that booking (setup and turnaround included), the expected attendance, layout, requirements, setup
  * notes, the suitability result with any overrides, a `statusDisplay`, and
  * `overlapping`: other events' open requests at the same venue whose occupied
  * periods overlap it, in submission order. Not re-sorted by callers: the
@@ -133,8 +134,8 @@ export async function getPendingBookingRequests() {
  * The server re-checks everything under its locks (AC2), so a request that
  * looked approvable on screen can still be refused. Failures: 400 (malformed
  * id), 401, 403, 404, and 409 with a `code`: BOOKING_NOT_PENDING,
- * EVENT_NOT_BOOKABLE, BOOKING_PERIOD_STALE (the event's dates moved since the
- * request), VENUE_RETIRED, BOOKING_CHANGED, or BOOKING_PERIOD_CONFLICT with
+ * EVENT_NOT_BOOKABLE, BOOKING_PERIOD_STALE (the event has no period),
+ * VENUE_RETIRED, BOOKING_CHANGED, or BOOKING_PERIOD_CONFLICT with
  * `conflicts` shaped as createBookingRequest's.
  *
  * @param {string} id  the request's id

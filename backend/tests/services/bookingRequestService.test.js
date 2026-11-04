@@ -730,6 +730,29 @@ describe('SCRUM258_AC1 the Venue Staff queue of pending requests', () => {
     ]);
   });
 
+  it('SCRUM593_AC9_a_moved_request_carries_its_own_period_and_the_events_current_one', async () => {
+    const [request] = await listPendingBookingRequests(USER, {
+      client: clientAnswering({
+        data: [pendingRow({ event_starts_at: '2026-12-02T10:00:00+00:00', event_ends_at: '2026-12-02T12:00:00+00:00' })],
+        error: null,
+      }),
+    });
+
+    expect(request).toMatchObject({
+      startsAt: '2026-12-01T10:00:00+00:00',
+      endsAt: '2026-12-01T12:00:00+00:00',
+      eventStartsAt: '2026-12-02T10:00:00+00:00',
+      eventEndsAt: '2026-12-02T12:00:00+00:00',
+    });
+  });
+
+  it('SCRUM593_AC9_an_event_with_no_period_reads_as_null_event_times', async () => {
+    const [request] = await listPendingBookingRequests(USER, { client: clientAnswering({ data: [pendingRow()], error: null }) });
+
+    expect(request.eventStartsAt).toBeNull();
+    expect(request.eventEndsAt).toBeNull();
+  });
+
   it('SCRUM258_AC3_a_conflicting_request_in_the_queue_keeps_its_status_and_display', async () => {
     const [request] = await listPendingBookingRequests(USER, {
       client: clientAnswering({ data: [pendingRow({ status: 'conflicting' })], error: null }),
